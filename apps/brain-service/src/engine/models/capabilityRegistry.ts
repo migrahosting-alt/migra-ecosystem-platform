@@ -22,6 +22,7 @@ import type { ZodType } from 'zod';
 import { migraSearch } from '../search/migraSearch.js';
 import type { EmailConnection } from '../email/types.js';
 import { emailReadinessFor } from '../email/emailReadiness.js';
+import { executeEmailSearch } from '../email/emailExecution.js';
 import { migraEmail } from '../email/migraEmail.js';
 import {
   WorkspaceSearchRequestSchema,
@@ -152,6 +153,18 @@ export type CapabilityRemedy =
 export interface ToolHandlerContext {
   correlationId?: string;
   signal?: AbortSignal;
+  /**
+   * WHOSE data this call acts on.
+   *
+   * 🚨 REQUIRED BY ANY CAPABILITY THAT TOUCHES PER-PRINCIPAL STATE, and
+   * deliberately optional in the type so existing workspace capabilities — which
+   * act on a checkout, not on a person — are unaffected.
+   *
+   * A capability that needs it MUST refuse when it is absent. Executing a
+   * mailbox read with no principal does not fail safe by accident: it either
+   * finds nothing, or finds whichever connection the code happened to reach.
+   */
+  principal?: { owner: string; workspace: string };
 }
 type Handler = (input: unknown, ctx?: ToolHandlerContext) => Promise<unknown>;
 
@@ -505,8 +518,21 @@ const TOOLS: RunnableCapability[] = [
      * it was not given must refuse rather than assume.
      */
     readiness: (ctx) => emailReadinessFor(ctx?.mail ?? null),
-    handler: async () => {
-      throw new Error('migra.email has no provider configured');
+    /*
+     * Executes against the CALLER'S mailbox, resolved from `ctx.principal`.
+     * Refuses when no principal was supplied: a mailbox read with none does not
+     * fail safe by accident — it either finds nothing, which renders as a claim
+     * about a mailbox nobody opened, or it finds whichever connection the code
+     * happened to reach.
+     */
+    handler: async (input, ctx) => {
+      const query = input as { limit?: number } & Record<string, unknown>;
+      const result = await executeEmailSearch(
+        { ...query, limit: query.limit ?? 20 } as never,
+        ctx,
+      );
+      if (!result.ok) return { ok: false, failure: result.failure };
+      return { ok: true, messages: result.messages };
     },
   },
 ];
@@ -654,8 +680,16 @@ export class CapabilityRegistry {
     return { descriptor: this.describe(cap), inputSchema: cap.inputSchema, handler: cap.handler, preview: cap.preview };
   }
 
-  isAvailable(id: string): boolean {
+  /**
+   * 🚨 TAKES THE SAME PER-REQUEST CONTEXT THE LISTING DOES.
+   *
+   * Without it, a capability whose readiness depends on the caller is denied
+   * for everyone — which is not a safe default, it is a capability that can
+   * never run. Email was exactly that until a test executed it end to end and
+   * found the gate refusing before the handler was ever reached.
+   */
+  isAvailable(id: string, ctx?: ReadinessContext): boolean {
     const cap = this.byId.get(id);
-    return cap ? this.available(cap) : false;
+    return cap ? this.available(cap, ctx) : false;
   }
 }

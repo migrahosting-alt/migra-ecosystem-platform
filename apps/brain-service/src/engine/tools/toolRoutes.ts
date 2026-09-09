@@ -39,6 +39,13 @@ import { makeStageLogger, jsonLineSink } from '../observability/correlation.js';
 
 export interface ToolRoutesDeps {
   registry?: CapabilityRegistry;
+  /**
+   * WHOSE data an execution acts on, derived from the request's identity.
+   *
+   * 🚨 Never read from the body. A caller-supplied principal on a capability
+   * that reads a mailbox is a cross-tenant read with extra steps.
+   */
+  principalFor?(request: FastifyRequest): { owner: string; workspace: string } | null;
   approvals?: ToolApprovalStore;
   audit?: ToolAudit;
   /**
@@ -122,6 +129,12 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
     // without pretending it happened in the original HTTP request.
     const inbound = String((request.headers['x-correlation-id'] as string | undefined) ?? '').trim();
     const stage = inbound ? makeStageLogger(inbound, jsonLineSink((line) => request.log.info(line))) : undefined;
+    let execReadiness: ReadinessContext | undefined;
+    try {
+      execReadiness = await deps.readinessFor?.(request);
+    } catch {
+      execReadiness = undefined;
+    }
     const outcome = await executeToolCore({ registry, approvals, audit }, {
       tool: body.tool,
       input: body.input,
@@ -129,6 +142,18 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
       approvalId: body.approvalId,
       requestId,
       stage,
+      /*
+       * From the request's identity, never its body. Absent when the deployment
+       * does not derive one — capabilities that need a principal refuse rather
+       * than fall back to a shared default.
+       */
+      ...(deps.principalFor?.(request) ? { principal: deps.principalFor(request)! } : {}),
+      /*
+       * The availability gate runs before the handler and needs the same
+       * per-caller facts the listing does — otherwise a capability whose
+       * readiness depends on the caller is denied for everyone.
+       */
+      ...(execReadiness ? { readiness: execReadiness } : {}),
     });
     if (outcome.ok) {
       const { httpStatus: _s, ok: _o, ...payload } = outcome;

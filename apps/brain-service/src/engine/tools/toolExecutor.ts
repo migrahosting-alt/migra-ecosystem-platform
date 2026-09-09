@@ -7,7 +7,7 @@
  * and audit as a direct client call — no bypass boundary.
  */
 
-import { CapabilityRegistry } from '../models/capabilityRegistry.js';
+import { CapabilityRegistry, type ReadinessContext } from '../models/capabilityRegistry.js';
 import { ApprovalCapacityError, ToolApprovalStore, hashInput } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { NOOP_STAGE_LOGGER, type StageLogger } from '../observability/correlation.js';
@@ -24,6 +24,22 @@ export interface ToolExecInput {
   /** Optional per-call correlation logger — emits approval/apply stage lines
    * (metadata only). Absent for uncorrelated direct calls. */
   stage?: StageLogger;
+  /**
+   * WHOSE data this call acts on. Forwarded verbatim to the handler.
+   *
+   * 🚨 Never defaulted here. A default principal is a shared one, and a shared
+   * principal on a capability that reads a mailbox is a cross-tenant read.
+   * Capabilities that need it refuse without it.
+   */
+  principal?: { owner: string; workspace: string };
+  /**
+   * Per-request facts the availability gate needs.
+   *
+   * 🚨 The gate runs BEFORE the handler, so a capability whose readiness
+   * depends on the caller is denied for everyone without this — a capability
+   * that can never run, which reads as "not available" and never as a bug.
+   */
+  readiness?: ReadinessContext;
 }
 
 /** Discriminated execution outcome. `httpStatus` lets the HTTP route map 1:1;
@@ -68,7 +84,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     audit.record({ requestId, tool: toolId, action: 'unknown_tool', readOnly: false, outcome: 'refused' });
     return { ok: false, httpStatus: 404, code: 'UNKNOWN_TOOL', tool: toolId, requestId, error: `Unknown capability: ${toolId}` };
   }
-  if (!registry.isAvailable(toolId)) {
+  if (!registry.isAvailable(toolId, req.readiness)) {
     audit.record({ requestId, tool: toolId, action: 'denied', readOnly: runnable.descriptor.readOnly, outcome: 'refused' });
     recordAudit('tool.denied', 'refused');
     // A machine-readable reason here too, so a client branches on one vocabulary rather
@@ -95,7 +111,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // Read-only → execute immediately.
   if (runnable.descriptor.readOnly) {
     try {
-      const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal });
+      const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal, ...(req.principal ? { principal: req.principal } : {}) });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: true, outcome: 'ok' });
       recordAudit('tool.completed', 'ok', { readOnly: true });
       return { ok: true, httpStatus: 200, status: 'ok', tool: toolId, requestId, result };
@@ -109,7 +125,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   // mandatory for every tool that declares it (edit.apply).
   if (runnable.descriptor.approvalRequired === false) {
     try {
-      const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal });
+      const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal, ...(req.principal ? { principal: req.principal } : {}) });
       audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
       recordAudit('tool.completed', 'ok', { readOnly: false });
       return { ok: true, httpStatus: 200, status: 'executed', tool: toolId, requestId, result };
@@ -159,7 +175,7 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
   }
   try {
     const applyStarted = Date.now();
-    const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal });
+    const result = await runnable.handler(input, { correlationId: stage.correlationId, signal: req.signal, ...(req.principal ? { principal: req.principal } : {}) });
     audit.record({ requestId, tool: toolId, action: 'executed', readOnly: false, outcome: 'ok' });
     recordAudit('tool.completed', 'ok', { approved: true });
     // Correlation: approved APPLY executed.

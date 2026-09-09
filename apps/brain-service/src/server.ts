@@ -32,6 +32,7 @@ import { registerProjectRoutes } from './engine/projects/projectRoutes.js';
 import { registerMailConnectionRoutes } from './engine/email/mailConnectionRoutes.js';
 import { durableMailConnections, durableMailPending } from './engine/email/durableMailStores.js';
 import { connectionStatus } from './engine/email/connectionService.js';
+import { bindEmailExecution } from './engine/email/emailExecution.js';
 import type { MailConnectionStore } from './engine/email/connectionStore.js';
 import { hasMailConnections, hasMailPending } from './engine/persistence/types.js';
 import { oauthConfigFrom, configProblemMessage } from './engine/email/oauthConfig.js';
@@ -949,6 +950,18 @@ async function main(): Promise<void> {
       clientSecret: () => process.env.MIGRAPILOT_GOOGLE_CLIENT_SECRET,
     };
     mailConnections = durableMailConnections(mailStore);
+    /*
+     * Deployment facts only — the OAuth client, the sealing key, the store.
+     * The CONNECTION is resolved per call from the executing principal and is
+     * never cached here; a binding that held a resolved provider would be the
+     * shared-state defect this design exists to avoid.
+     */
+    bindEmailExecution({
+      connections: mailConnections,
+      key: mailKey.key,
+      refresh: (refreshToken) => refreshAccessToken(refreshToken, googleDeps),
+      now: () => Date.now(),
+    });
     registerMailConnectionRoutes(app, {
       provider: 'gmail',
       scopeFrom: memoryScopeFrom,
@@ -967,6 +980,8 @@ async function main(): Promise<void> {
   }
 
   const toolDeps = registerToolExecutionRoutes(app, {
+    // Identity, never payload. Same derivation every other scoped route uses.
+    principalFor: (request) => memoryScopeFrom(request),
     /*
      * Resolved per request, from the caller's own scope. A failure here leaves
      * the context unresolved, and the email capability reports unavailable
