@@ -80,6 +80,16 @@ const CLOSED_TO_VISITORS: BrainOperation[] = [
   { kind: 'setConversationGrounding', conversationId: 'c1', files: ['a.md'] },
   { kind: 'answer', prompt: 'hi' },
   { kind: 'claimAnonymousConversation', conversationId: 'c1', anonymousSessionId: 'a'.repeat(22), anonymousOwner: `anon:${'a'.repeat(22)}` },
+  /*
+   * A mailbox belongs to an ACCOUNT, and a signed-out visitor does not have
+   * one. Letting a visitor begin a connection would bind a real Gmail account
+   * to an anonymous scope that is discarded when the session ends — leaving a
+   * live grant at Google that nothing can ever reach again to revoke.
+   */
+  { kind: 'mailConnection' },
+  { kind: 'beginMailConnection' },
+  { kind: 'completeMailConnection', state: 's', code: 'c' },
+  { kind: 'disconnectMail' },
 ]
 
 /** What "try it before you sign in" actually needs, and nothing more. */

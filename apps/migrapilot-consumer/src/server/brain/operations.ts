@@ -61,6 +61,20 @@ export type BrainOperation =
    * caller may do from its own registry, on every use.
    */
   | { kind: 'listProjects' }
+  /*
+   * CONNECTED MAILBOXES — the client never names an account.
+   *
+   * 🚨 There is no field here for an owner, a workspace, an access token or an
+   * email address. The Brain resolves whose mailbox a request means from the
+   * principal the gateway attaches, and resolves the account identity from the
+   * provider itself. `providerAccountId` appears only on disconnect, where it
+   * NARROWS within the caller's own scope after being re-validated against the
+   * list the server enumerated — it never identifies a connection on its own.
+   */
+  | { kind: 'mailConnection' }
+  | { kind: 'beginMailConnection'; returnTo?: string }
+  | { kind: 'completeMailConnection'; state?: string; code?: string; error?: string }
+  | { kind: 'disconnectMail'; providerAccountId?: string }
   | { kind: 'listCapabilities' }
   | { kind: 'conversationProject'; conversationId: string }
   | { kind: 'connectProject'; conversationId: string; projectId: string }
@@ -490,6 +504,45 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
 
     case 'listProjects':
       return { method: 'GET', path: '/api/ai/projects' }
+
+    case 'mailConnection':
+      return { method: 'GET', path: '/api/ai/account/mail' }
+
+    case 'beginMailConnection':
+      /*
+       * POST because it mints single-use state and writes a row — not
+       * something a link preview, a prefetch or a crawler should trigger.
+       */
+      return {
+        method: 'POST',
+        path: '/api/ai/account/mail/begin',
+        body: op.returnTo === undefined ? {} : { returnTo: text(op.returnTo, 'returnTo', 512) },
+      }
+
+    case 'completeMailConnection':
+      /*
+       * Google's parameters, forwarded verbatim. They are NOT validated here:
+       * the Brain owns every check, and a consumer that pre-judged them would
+       * become a second, weaker copy of that logic.
+       */
+      return {
+        method: 'POST',
+        path: '/api/ai/account/mail/callback',
+        body: {
+          ...(op.state === undefined ? {} : { state: text(op.state, 'state', 512) }),
+          ...(op.code === undefined ? {} : { code: text(op.code, 'code', 2048) }),
+          ...(op.error === undefined ? {} : { error: text(op.error, 'error', 128) }),
+        },
+      }
+
+    case 'disconnectMail':
+      return {
+        method: 'DELETE',
+        path: '/api/ai/account/mail',
+        body: op.providerAccountId === undefined
+          ? {}
+          : { providerAccountId: text(op.providerAccountId, 'providerAccountId', 256) },
+      }
 
     case 'listCapabilities':
       /*
