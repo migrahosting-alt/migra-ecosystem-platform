@@ -25,7 +25,7 @@ import { hashState } from '../src/engine/email/pendingAuthorization.js';
 import { SqliteMailPendingStore } from '../src/engine/email/sqliteMailPending.js';
 import { SqliteMailConnectionStore } from '../src/engine/email/sqliteMailConnection.js';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
-import { GOOGLE_SCOPES, oauthConfigFrom, ENV } from '../src/engine/email/oauthConfig.js';
+import { GOOGLE_SCOPES, IDENTITY_SCOPES, oauthConfigFrom, ENV } from '../src/engine/email/oauthConfig.js';
 import { MAIL_TOKEN_KEY_ENV, open, sealKeyFrom, type SealKey } from '../src/engine/email/tokenSealing.js';
 import { STATE_TTL_MS, type TokenGrant } from '../src/engine/email/oauthFlow.js';
 
@@ -111,7 +111,17 @@ test('beginning a connection produces a URL carrying a fresh state', async () =>
   assert.notEqual(stateFrom(first.authorizationUrl), stateFrom(second.authorizationUrl));
   const url = new URL(first.authorizationUrl);
   assert.equal(url.searchParams.get('redirect_uri'), 'https://chat.example.com/api/account/mail/callback');
-  assert.equal(url.searchParams.get('scope'), GOOGLE_SCOPES.read);
+  /*
+   * Mailbox authority is READ and nothing else; the identity scopes are
+   * separate and required, because completing a connection has to ask Google
+   * whose mailbox the token opens. Asserted as a SET rather than a string so
+   * the two concerns cannot be confused with each other.
+   */
+  const scopes = url.searchParams.get('scope')!.split(' ');
+  assert.ok(scopes.includes(GOOGLE_SCOPES.read));
+  for (const identity of IDENTITY_SCOPES) assert.ok(scopes.includes(identity));
+  assert.ok(!scopes.includes(GOOGLE_SCOPES.send), 'send permission was requested');
+  assert.ok(!scopes.includes(GOOGLE_SCOPES.draft), 'draft permission was requested');
   h.close();
 });
 

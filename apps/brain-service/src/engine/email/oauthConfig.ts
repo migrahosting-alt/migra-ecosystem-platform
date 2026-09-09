@@ -45,6 +45,26 @@ export const GOOGLE_SCOPES = {
 export type GrantKind = keyof typeof GOOGLE_SCOPES;
 
 /**
+ * 🚨 IDENTITY, NOT MAILBOX AUTHORITY — and required on every connection.
+ *
+ * Completing a connection asks Google whose mailbox the token opens, because a
+ * connection is keyed on the account's stable `sub`. That lookup hits the OIDC
+ * userinfo endpoint, which needs these scopes — and they were never requested.
+ *
+ * It worked anyway for months, by accident: the QA account had already granted
+ * `openid`/`email` to this client through "Sign in with Google", and
+ * `include_granted_scopes=true` carried them into every new grant. The day the
+ * grant was REVOKED, the next consent returned `gmail.readonly` alone, the
+ * identity lookup 401'd, and connecting failed with a 500 — with nothing in the
+ * request to suggest a missing scope.
+ *
+ * Kept OUT of `GOOGLE_SCOPES` deliberately: that map is mailbox authority, and
+ * `read`/`draft`/`send` decisions are derived from it. An identity scope in
+ * there would be read as a mailbox permission by everything downstream.
+ */
+export const IDENTITY_SCOPES: readonly string[] = ['openid', 'email'];
+
+/**
  * Environment variable names. Stated once, so the boundary doc, the console
  * and the code cannot drift into three different opinions.
  *

@@ -19,7 +19,7 @@ import type { ConnectionServiceDeps, ProviderIdentity } from '../src/engine/emai
 import { SqliteMailConnectionStore } from '../src/engine/email/sqliteMailConnection.js';
 import { SqliteMailPendingStore } from '../src/engine/email/sqliteMailPending.js';
 import { SqliteDurableStore } from '../src/engine/persistence/sqliteStore.js';
-import { ENV, GOOGLE_SCOPES, oauthConfigFrom } from '../src/engine/email/oauthConfig.js';
+import { ENV, GOOGLE_SCOPES, IDENTITY_SCOPES, oauthConfigFrom } from '../src/engine/email/oauthConfig.js';
 import { MAIL_TOKEN_KEY_ENV, sealKeyFrom, type SealKey } from '../src/engine/email/tokenSealing.js';
 import type { TokenGrant } from '../src/engine/email/oauthFlow.js';
 
@@ -113,9 +113,17 @@ test('begin returns a consent URL, and asks for READ only', async () => {
   const res = await h.app.inject({ method: 'POST', url: '/api/ai/account/mail/begin', headers: ALICE_HEADERS, payload: {} });
   assert.equal(res.statusCode, 200);
   const url = new URL(res.json<{ authorizationUrl: string }>().authorizationUrl);
-  assert.equal(url.searchParams.get('scope'), GOOGLE_SCOPES.read);
+  const scopes = url.searchParams.get('scope')!.split(' ');
+  assert.ok(scopes.includes(GOOGLE_SCOPES.read));
+  /*
+   * The identity scopes are requested too, and they are NOT mailbox authority:
+   * without them the completion step cannot name the account, and a consent
+   * that visibly succeeds produces no connection.
+   */
+  for (const identity of IDENTITY_SCOPES) assert.ok(scopes.includes(identity), `missing identity scope ${identity}`);
   // 🚨 Send is not requested until governed send is wired and qualified.
-  assert.ok(!url.searchParams.get('scope')!.includes('send'), 'send permission was requested up front');
+  assert.ok(!scopes.includes(GOOGLE_SCOPES.send), 'send permission was requested up front');
+  assert.ok(!scopes.includes(GOOGLE_SCOPES.draft), 'draft permission was requested up front');
   await h.close();
 });
 

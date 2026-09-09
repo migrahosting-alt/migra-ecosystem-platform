@@ -181,8 +181,20 @@ export async function completeConnection(input: {
   });
   if (refusal) return { ok: false, storeRefusal: refusal };
 
-  // The provider says whose mailbox this is. The browser is not consulted.
-  const identity = await deps.identify(grant.accessToken);
+  /*
+   * The provider says whose mailbox this is. The browser is not consulted.
+   *
+   * 🚨 A FAILURE HERE IS A REFUSAL, NOT A CRASH. This threw, and the throw
+   * reached Fastify as an unhandled 500 on a consent the user had just
+   * completed — no connection, no explanation, and nothing in the response
+   * pointing at the real cause (the grant no longer carried an identity scope).
+   */
+  let identity: Awaited<ReturnType<typeof deps.identify>>;
+  try {
+    identity = await deps.identify(grant.accessToken);
+  } catch {
+    return { ok: false, refusal: { kind: 'identify_failed' } };
+  }
 
   const provider = takenProvider ?? 'gmail';
   const at = deps.now();

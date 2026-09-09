@@ -33,7 +33,7 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
-import { GOOGLE_SCOPES, type GrantKind, type OAuthConfig } from './oauthConfig.js';
+import { GOOGLE_SCOPES, IDENTITY_SCOPES, type GrantKind, type OAuthConfig } from './oauthConfig.js';
 
 const AUTHORIZE_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -59,7 +59,16 @@ export type CallbackRefusal =
   | { kind: 'principal_mismatch' }
   | { kind: 'user_declined' }
   | { kind: 'provider_error' }
-  | { kind: 'exchange_failed' };
+  | { kind: 'exchange_failed' }
+  /**
+   * The code exchanged, but Google would not say whose mailbox it opens.
+   *
+   * Distinct from `exchange_failed`: the grant is real and may even be usable,
+   * and the operator's remedy is a missing identity scope rather than anything
+   * the user did. It escaped as an UNHANDLED 500 until a revoked grant stopped
+   * carrying `openid`/`email` for free.
+   */
+  | { kind: 'identify_failed' };
 
 export interface TokenGrant {
   accessToken: string;
@@ -90,7 +99,15 @@ export function authorizationUrl(input: {
   url.searchParams.set('client_id', input.config.clientId);
   url.searchParams.set('redirect_uri', input.config.redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', [...new Set(input.grants.map((g) => GOOGLE_SCOPES[g]))].sort().join(' '));
+  /*
+   * Mailbox authority PLUS the identity scopes the completion step depends on.
+   * Asking for identity here is what stops a consent that succeeds from
+   * producing a connection we cannot name — see IDENTITY_SCOPES.
+   */
+  url.searchParams.set(
+    'scope',
+    [...new Set([...input.grants.map((g) => GOOGLE_SCOPES[g]), ...IDENTITY_SCOPES])].sort().join(' '),
+  );
   url.searchParams.set('state', input.state);
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'consent');
@@ -262,6 +279,14 @@ export function callbackRefusalMessage(refusal: CallbackRefusal): string {
       return 'That connection request is not valid. Start connecting your email again.';
     case 'provider_error':
     case 'exchange_failed':
+      return 'Your email account could not be connected. Try again shortly.';
+    case 'identify_failed':
+      /*
+       * The same sentence as a failed exchange, on purpose. To the user both
+       * are "it did not connect, try again"; the difference is an OPERATOR's
+       * fact — a missing identity scope — and it belongs in telemetry, not in
+       * a message that would send someone hunting through Google's settings.
+       */
       return 'Your email account could not be connected. Try again shortly.';
   }
 }
