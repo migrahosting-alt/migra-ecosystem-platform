@@ -66,7 +66,7 @@ function svc(client?: PilotRuntimeClient) {
   );
   return { service, store, fake };
 }
-const REQ = { agentId: '_test.pilot', input: { task: 'do it' }, requestId: 'req_1' };
+const REQ = { agentId: '_test.pilot', input: { task: 'do it' }, requestId: 'req_1', identity: null };
 // Run-oriented: no approvalId on the seam (pilot-api holds it).
 const WAITING: PilotRunOutcome = { status: 'waiting', pilotRunId: 'pr_1', action: { actionId: 'pact_1', tool: 'edit.apply', summary: 'edit f.ts' } };
 

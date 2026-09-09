@@ -69,6 +69,8 @@ export interface PendingActionSummary {
   summary: string;
 }
 
+import type { ExecutionIdentity } from '../identity/executionIdentity.js';
+
 export interface RunRecord {
   runId: string;
   requestId: string;
@@ -86,6 +88,19 @@ export interface RunRecord {
   /** Cancellation intent, tracked separately from the terminal state so a client
    * can distinguish "requested" from "confirmed". */
   cancellation?: 'requested' | 'confirmed';
+  /**
+   * WHO this run acts as, established once at creation from the server-side
+   * session and never afterwards.
+   *
+   * 🚨 IDENTITY ONLY — no account id, no token, no provider state, no readiness
+   * snapshot. What the principal may currently do is resolved per tool call by
+   * the capability executor, so a run cannot keep reading a mailbox that was
+   * disconnected while it was running.
+   *
+   * Null when the deployment derives no identity. That fails CLOSED: every
+   * capability needing a principal stays unavailable for the run.
+   */
+  identity: ExecutionIdentity | null;
 }
 
 export class InvalidRunTransition extends Error {
@@ -108,7 +123,13 @@ export class AgentRunStore {
     private readonly ttlMs = DEFAULT_TTL,
   ) {}
 
-  create(params: { spec: RunSpec; runtime: 'local' | 'pilot'; requestId: string; idempotencyKey?: string }): RunRecord {
+  create(params: {
+    spec: RunSpec;
+    runtime: 'local' | 'pilot';
+    requestId: string;
+    idempotencyKey?: string;
+    identity: ExecutionIdentity | null;
+  }): RunRecord {
     // Idempotency: a retried create with the same key reconciles to the same run.
     if (params.idempotencyKey) {
       const existingId = this.byIdempotency.get(params.idempotencyKey);
@@ -122,6 +143,9 @@ export class AgentRunStore {
       spec: Object.freeze({ ...params.spec, limits: Object.freeze({ ...params.spec.limits }) }) as RunSpec,
       runtime: params.runtime,
       state: 'CREATED',
+      // Fixed at creation. A run whose principal could change mid-flight is the
+      // same defect as taking identity from the model, reached more slowly.
+      identity: params.identity,
       history: [{ at: t, state: 'CREATED' }],
       steps: [],
       createdAt: t,

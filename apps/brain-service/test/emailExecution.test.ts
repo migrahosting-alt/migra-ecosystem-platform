@@ -92,6 +92,7 @@ function bind(records: MailConnectionRecord[]) {
     key,
     refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
     now: () => NOW,
+    filePipeline: {},
   });
   return { lookups };
 }
@@ -264,6 +265,15 @@ test('🚨 the principal survives the trip from the executor to the handler', as
     registry: new CapabilityRegistry(),
     approvals: new ToolApprovalStore(),
     audit: new ToolAudit(),
+    /*
+     * The deployment's ONE readiness resolver, keyed on the principal. The
+     * executor calls it; nobody hands readiness in. A resolver that ignored its
+     * argument would be the global lookup this design exists to prevent, so it
+     * answers only for Alice below.
+     */
+    readinessFor: async (principal: { owner: string; workspace: string }) => (
+      principal.owner === ALICE.owner ? { mail: connected } : {}
+    ),
   };
 
   const connected = {
@@ -277,8 +287,6 @@ test('🚨 the principal survives the trip from the executor to the handler', as
     input: { keywords: 'invoice', limit: 5 },
     requestId: 'req-with',
     principal: ALICE,
-    // Exactly what the route resolves for this caller before executing.
-    readiness: { mail: connected },
   });
 
   const asJson = JSON.stringify(withPrincipal);
@@ -294,14 +302,26 @@ test('🚨 the principal survives the trip from the executor to the handler', as
     tool: 'migra.email',
     input: { keywords: 'invoice', limit: 5 },
     requestId: 'req-without',
-    // Same availability context; only the PRINCIPAL is missing, so the gate
-    // opens and the handler is the thing that refuses.
-    readiness: { mail: connected },
+    // No principal at all. Readiness is derived FROM the principal now, so
+    // there is nothing to derive it from.
   });
-  assert.match(
+  /*
+   * 🚨 FAIL CLOSED AT THE GATE, not a fallback to a global lookup.
+   *
+   * This used to reach the handler and refuse there, because the caller passed
+   * readiness alongside the principal and only the principal was missing. With
+   * readiness derived from the principal, an unidentified call cannot produce
+   * per-caller facts at all — so the capability is unavailable and nothing
+   * downstream is asked to guess whose mailbox was meant.
+   */
+  assert.equal(withoutPrincipal.ok, false);
+  if (!withoutPrincipal.ok) {
+    assert.equal(withoutPrincipal.code, 'CAPABILITY_DENIED');
+  }
+  assert.doesNotMatch(
     JSON.stringify(withoutPrincipal),
-    /did not identify whose email/i,
-    'a call with no principal was allowed to proceed',
+    /alice-1@example\.com/,
+    'an unidentified call was told about someone else\'s mailbox',
   );
 });
 
@@ -377,6 +397,7 @@ test('🚨 a read after DISCONNECT finds nothing to resolve', async () => {
     key,
     refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
     now: () => NOW,
+    filePipeline: {},
   });
 
   const before = await executeEmailReadMessage('msg-1', ctxFor(ALICE));
@@ -406,6 +427,7 @@ function observed(records: MailConnectionRecord[]) {
     key,
     refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
     now: () => NOW,
+    filePipeline: {},
     telemetry: (event) => events.push(event as unknown as Record<string, unknown>),
   });
   return { events };
@@ -500,6 +522,7 @@ test('🚨 a GUARDED sink cannot break the operation it measures — and a raw o
       key,
       refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
       now: () => NOW,
+      filePipeline: {},
       telemetry: telemetry as never,
     });
   };

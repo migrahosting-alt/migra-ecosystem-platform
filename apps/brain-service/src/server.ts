@@ -963,6 +963,17 @@ async function main(): Promise<void> {
       refresh: (refreshToken) => refreshAccessToken(refreshToken, googleDeps),
       now: () => Date.now(),
       /*
+       * 🚨 CONFIGURATION, NOT A POLICY. The effective file policy is derived
+       * per caller by the canonical resolver in
+       * @migrapilot/shared-types/file-policy — the same function the consumer's
+       * upload path calls. Passing a resolved policy here would freeze it at
+       * boot and give this process a second copy of rules that live elsewhere.
+       *
+       * The variable is the same one the consumer reads, so an operator who
+       * raises the ceiling raises it for uploads and Gmail attachments alike.
+       */
+      filePipeline: { maxFileMb: process.env.MIGRAPILOT_MAX_FILE_MB },
+      /*
        * 🚨 GUARDED. An unsafe event never reaches the sink, and a broken
        * metrics backend never breaks a mailbox read — telemetry that can fail
        * the operation it measures is worse than no telemetry.
@@ -992,14 +1003,14 @@ async function main(): Promise<void> {
     // Identity, never payload. Same derivation every other scoped route uses.
     principalFor: (request) => memoryScopeFrom(request),
     /*
-     * Resolved per request, from the caller's own scope. A failure here leaves
-     * the context unresolved, and the email capability reports unavailable
-     * rather than guessing — losing one row beats reporting someone else's
-     * mailbox as connected.
+     * Resolved from the PRINCIPAL, so the identical function answers for an
+     * HTTP call and for a step inside the autonomous agent loop. A failure here
+     * leaves the context unresolved, and the email capability reports
+     * unavailable rather than guessing — losing one row beats reporting
+     * someone else's mailbox as connected.
      */
-    readinessFor: async (request) => {
+    readinessFor: async (scope) => {
       if (!mailConnections) return {};
-      const scope = memoryScopeFrom(request);
       return {
         mail: await connectionStatus({
           scope,
@@ -1175,7 +1186,19 @@ async function main(): Promise<void> {
   if (pilotRuntimeClient) app.log.info('Pilot Runtime delegation ENABLED (agent runs may route to pilot-api).');
   const agentStore = new AgentRunStore();
   const agentService = new AgentService(agentRegistry, agentStore, toolDeps, { pilotClient: pilotRuntimeClient });
-  registerAgentRoutes(app, { toolDeps, registry: agentRegistry, store: agentStore, service: agentService });
+  registerAgentRoutes(app, {
+    toolDeps,
+    registry: agentRegistry,
+    store: agentStore,
+    service: agentService,
+    /*
+     * 🚨 THE SAME DERIVATION THE TOOL ROUTE USES. Without this the autonomous
+     * loop has no identity, and every connected-account capability is denied
+     * inside it — which reads as "not available" rather than as a missing wire,
+     * which is exactly how it went unnoticed.
+     */
+    principalFor: (request) => memoryScopeFrom(request),
+  });
   // Read-Only Production Diagnostics (Slice 5): a DEDICATED provider, separate
   // from the tool boundary + approval store above. Disabled by default; fails
   // closed; only server-registered targets; no mutation path. Its operator token

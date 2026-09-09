@@ -28,6 +28,11 @@
  * Both are worse than refusing.
  */
 
+import {
+  resolveFilePolicy,
+  type FilePipelineConfig,
+} from '@migrapilot/shared-types/file-policy';
+
 import type { ToolHandlerContext } from '../models/capabilityRegistry.js';
 
 import type { MailConnectionStore } from './connectionStore.js';
@@ -41,7 +46,7 @@ import {
   type BridgeRefusal,
   type CanonicalFileHandoff,
 } from './attachmentBridge.js';
-import type { EmailAttachmentEvidence } from './evidence.js';
+import { attachmentEvidence, messageEvidence, type EmailAttachmentEvidence } from './evidence.js';
 import type {
   EmailAttachment, EmailFailure, EmailMessage, EmailProvider, EmailQuery, EmailThread,
 } from './types.js';
@@ -59,6 +64,15 @@ export interface EmailExecutionBinding {
    * that can fail an operation is worse than no telemetry.
    */
   telemetry?: EmailTelemetrySink;
+  /**
+   * The file pipeline's deployment configuration — NOT a policy.
+   *
+   * 🚨 THE POLICY IS DERIVED, PER CALLER, BY THE CANONICAL RESOLVER. Holding a
+   * resolved policy here would freeze it at boot and put a second copy of the
+   * answer in this process; accepting one from a caller would let a prompt
+   * choose its own limits. Configuration is the only thing a deployment owns.
+   */
+  filePipeline: FilePipelineConfig;
 }
 
 let binding: EmailExecutionBinding | null = null;
@@ -105,7 +119,10 @@ const NO_PRINCIPAL: EmailFailure = {
 async function resolveForCaller(
   ctx: ToolHandlerContext | undefined,
   what: string,
-): Promise<{ ok: true; provider: EmailProvider } | { ok: false; failure: EmailFailure }> {
+): Promise<
+  | { ok: true; provider: EmailProvider; principal: { owner: string; workspace: string } }
+  | { ok: false; failure: EmailFailure }
+> {
   if (!binding) return { ok: false, failure: NOT_CONFIGURED };
 
   const principal = ctx?.principal;
@@ -140,7 +157,13 @@ async function resolveForCaller(
       failure: { kind: 'refused', reason: `Choose which connected email account to ${what}.` },
     };
   }
-  return { ok: true, provider: resolved.provider };
+  return {
+    ok: true,
+    provider: resolved.provider,
+    // Carried out so the file policy can be resolved for THIS caller rather
+    // than from ambient state — the identity is already proven here.
+    principal: { owner: principal.owner, workspace: principal.workspace },
+  };
 }
 
 /**
@@ -290,7 +313,6 @@ export type EmailAttachmentFetchResult =
  */
 export async function executeEmailFetchAttachment(input: {
   evidence: EmailAttachmentEvidence;
-  policy: AttachmentPolicy;
   ctx: ToolHandlerContext | undefined;
 }): Promise<EmailAttachmentFetchResult> {
   const startedAt = binding?.now() ?? 0;
@@ -301,16 +323,33 @@ export async function executeEmailFetchAttachment(input: {
   }
 
   /*
+   * 🚨 THE POLICY IS RESOLVED HERE, FROM THE CANONICAL AUTHORITY, FOR THIS
+   * PRINCIPAL — it is not a parameter, and there is no seam to substitute one.
+   *
+   * It used to be an input, which meant whoever called this chose the limits.
+   * The rules now live in one implementation that the consumer's upload path
+   * calls too, so an attachment accepted by email is accepted by upload and
+   * refused the same way, by construction rather than by two teams agreeing.
+   */
+  const policy = resolveFilePolicy({
+    config: binding!.filePipeline,
+    principal: {
+      principalId: resolved.principal.owner,
+      workspaceId: resolved.principal.workspace,
+    },
+  });
+
+  /*
    * Refused BEFORE the bytes are fetched when the provider already told us the
    * size. Downloading a 200MB file to then refuse it spends the user's time and
    * our memory to reach a conclusion we could have drawn from the listing.
    */
   const declared = input.evidence.sizeBytes;
-  if (typeof declared === 'number' && declared > input.policy.maxBytes) {
+  if (typeof declared === 'number' && declared > policy.maxBytes) {
     record('attachment_read', startedAt, 'refused');
     return {
       ok: false,
-      refusal: { kind: 'too_large', limitBytes: input.policy.maxBytes, actualBytes: declared },
+      refusal: { kind: 'too_large', limitBytes: policy.maxBytes, actualBytes: declared },
     };
   }
 
@@ -326,7 +365,7 @@ export async function executeEmailFetchAttachment(input: {
   const bridged = bridgeDownloadedAttachment({
     evidence: input.evidence,
     downloaded: outcome.value,
-    policy: input.policy,
+    policy,
   });
 
   record('attachment_read', startedAt, bridged.ok ? 'ok' : 'refused', bridged.ok ? 1 : undefined);
@@ -338,11 +377,8 @@ export async function executeEmailFetchAttachment(input: {
 /**
  * Judge what actually arrived.
  *
- * 🚨 THE DOWNLOAD WINS OVER THE LISTING, and this is a separate exported
- * function so that can be tested at all: the Gmail adapter has no HTTP seam
- * yet, so nothing downstream of a successful provider read is otherwise
- * reachable from a test. Extracting it is the difference between a claim and
- * an assertion.
+ * 🚨 THE DOWNLOAD WINS OVER THE LISTING. Exported separately so the rule can
+ * be asserted directly on bytes, without standing up a provider to reach it.
  *
  * Why it matters: a listing is metadata from the sender's side of the world. A
  * message can advertise `notes.txt` and deliver a name — or a size — that the
@@ -362,5 +398,64 @@ export function bridgeDownloadedAttachment(input: {
     },
     bytes: input.downloaded.bytes,
     policy: input.policy,
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Ingestion — the caller names ids, and nothing else
+ * ------------------------------------------------------------------ */
+
+/**
+ * Fetch one attachment by id and hand it to the canonical file pipeline.
+ *
+ * 🚨 THE CALLER SUPPLIES TWO IDS. NOT a filename, not a MIME type, not a size,
+ * and not a policy.
+ *
+ * `executeEmailFetchAttachment` takes an evidence object, which is right for a
+ * server that already read the message — and catastrophic as a capability
+ * input, because a prompt could then describe an attachment rather than name
+ * one. Provenance would record whatever it claimed, and a downstream citation
+ * would repeat it.
+ *
+ * So the evidence is DERIVED here, from a message this caller's own connection
+ * just returned. The two ids are the only thing that crosses the boundary, and
+ * an id that is not on that message is a refusal rather than a fetch.
+ */
+export async function executeEmailIngestAttachment(input: {
+  providerMessageId: string;
+  providerAttachmentId: string;
+  ctx: ToolHandlerContext | undefined;
+}): Promise<EmailAttachmentFetchResult> {
+  const startedAt = binding?.now() ?? 0;
+  const resolved = await resolveForCaller(input.ctx, 'read');
+  if (!resolved.ok) {
+    record('attachment_read', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
+
+  /*
+   * Read through the SAME per-caller provider the bytes will come from. Taking
+   * the message from anywhere else would let the attachment inherit a scope the
+   * message never had.
+   */
+  const message = await resolved.provider.readMessage(input.providerMessageId);
+  if (!message.ok) {
+    record('attachment_read', startedAt, outcomeOf(message.failure));
+    return { ok: false, failure: message.failure };
+  }
+
+  const attachment = message.value.attachments.find(
+    (candidate) => candidate.providerAttachmentId === input.providerAttachmentId,
+  );
+  if (!attachment) {
+    // Named something this message does not carry. Reported as not_found rather
+    // than fetched anyway: an attachment id means nothing apart from its message.
+    record('attachment_read', startedAt, 'not_found');
+    return { ok: false, failure: { kind: 'not_found' } };
+  }
+
+  return executeEmailFetchAttachment({
+    evidence: attachmentEvidence(attachment, messageEvidence(message.value, 'gmail')),
+    ctx: input.ctx,
   });
 }

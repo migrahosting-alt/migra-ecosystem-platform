@@ -73,6 +73,7 @@ async function rig() {
     key,
     refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
     now: () => NOW,
+    filePipeline: {},
   });
 
   const status = (scope: typeof ALICE) =>

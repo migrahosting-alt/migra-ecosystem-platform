@@ -24,6 +24,8 @@ import type { EmailConnection } from '../email/types.js';
 import { emailReadinessFor } from '../email/emailReadiness.js';
 import {
   executeEmailReadMessage,
+  executeEmailIngestAttachment,
+  executeEmailListAttachments,
   executeEmailReadThread,
   executeEmailSearch,
 } from '../email/emailExecution.js';
@@ -229,7 +231,15 @@ export const LOCAL_GRANTS: ReadonlySet<string> = new Set([
  * existed keeps working.
  */
 export const EmailSearchRequestSchema = z.object({
-  op: z.enum(['search', 'readMessage', 'readThread']).optional(),
+  op: z.enum(['search', 'readMessage', 'readThread', 'listAttachments', 'fetchAttachment']).optional(),
+  /**
+   * 🚨 An attachment is named by ID, never described.
+   *
+   * There is deliberately no filename, mimeType or size field: the evidence is
+   * derived server-side from the message this caller's own connection returns,
+   * so a prompt cannot decide what a downloaded file claims to be.
+   */
+  attachmentId: z.string().min(1).max(200).optional(),
   /** Required by readMessage. Meaningless across mailboxes — see the executor. */
   messageId: z.string().min(1).max(200).optional(),
   from: z.string().max(200).optional(),
@@ -544,9 +554,10 @@ const TOOLS: RunnableCapability[] = [
      */
     handler: async (input, ctx) => {
       const request = input as {
-        op?: 'search' | 'readMessage' | 'readThread';
+        op?: 'search' | 'readMessage' | 'readThread' | 'listAttachments' | 'fetchAttachment';
         messageId?: string;
         threadId?: string;
+        attachmentId?: string;
         limit?: number;
       } & Record<string, unknown>;
 
@@ -564,6 +575,41 @@ const TOOLS: RunnableCapability[] = [
           }
           const result = await executeEmailReadThread(request.threadId, ctx);
           return result.ok ? { ok: true, thread: result.thread } : { ok: false, failure: result.failure };
+        }
+        case 'listAttachments': {
+          if (!request.messageId) {
+            return { ok: false, failure: { kind: 'refused', reason: 'No message was named to read.' } };
+          }
+          const result = await executeEmailListAttachments(request.messageId, ctx);
+          return result.ok
+            ? { ok: true, attachments: result.attachments }
+            : { ok: false, failure: result.failure };
+        }
+        case 'fetchAttachment': {
+          if (!request.messageId || !request.attachmentId) {
+            return {
+              ok: false,
+              failure: { kind: 'refused', reason: 'No attachment was named to open.' },
+            };
+          }
+          /*
+           * 🚨 THE POLICY IS NOT AN INPUT AND NEVER REACHES THIS LAYER. It is
+           * resolved inside the executor, per principal, by the canonical
+           * shared implementation the consumer's upload path also calls.
+           *
+           * A refusal is reported as a REFUSAL, not a failure: "we will not
+           * take this file" and "we could not reach your mail" call for
+           * different words and different remedies.
+           */
+          const result = await executeEmailIngestAttachment({
+            providerMessageId: request.messageId,
+            providerAttachmentId: request.attachmentId,
+            ctx,
+          });
+          if (result.ok) return { ok: true, file: result.handoff };
+          return 'refusal' in result
+            ? { ok: false, refusal: result.refusal }
+            : { ok: false, failure: result.failure };
         }
         default: {
           const result = await executeEmailSearch({ ...request, limit: request.limit ?? 20 } as never, ctx);

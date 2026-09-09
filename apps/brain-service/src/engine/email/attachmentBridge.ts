@@ -36,12 +36,16 @@
 
 import type { EmailAttachmentEvidence } from './evidence.js';
 
-/** The file pipeline's own rules, supplied by whoever owns them. */
-export interface AttachmentPolicy {
-  /** Lower-case, without the dot. The canonical upload list. */
-  allowedExtensions: readonly string[];
-  maxBytes: number;
-}
+/**
+ * The file pipeline's own rules.
+ *
+ * 🚨 NOT DECLARED HERE — this is the canonical shared type, re-exported under
+ * the name this module has always used. A structurally identical interface
+ * defined locally would compile forever while the two definitions drifted
+ * apart, which is the precise failure the shared package exists to prevent.
+ */
+export type { FilePolicy as AttachmentPolicy } from '@migrapilot/shared-types/file-policy';
+import type { FilePolicy as AttachmentPolicy } from '@migrapilot/shared-types/file-policy';
 
 /**
  * What the file pipeline receives. Deliberately the shape of an upload.

@@ -33,7 +33,7 @@ import { randomUUID } from 'node:crypto';
 import { CapabilityRegistry, type ReadinessContext } from '../models/capabilityRegistry.js';
 import { ToolApprovalStore } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
-import { executeToolCore } from './toolExecutor.js';
+import { executeToolCore, type ToolExecDeps } from './toolExecutor.js';
 import { telemetryHub } from '../observability/telemetryHub.js';
 import { makeStageLogger, jsonLineSink } from '../observability/correlation.js';
 
@@ -59,8 +59,15 @@ export interface ToolRoutesDeps {
    *
    * Absent means the deployment has no such facts to resolve, and every probe
    * that needs one will report unavailable rather than assume.
+   *
+   * 🚨 TAKES A PRINCIPAL, NOT A REQUEST. It used to take the request, which
+   * quietly made it unusable from the autonomous agent loop — there is no
+   * request there — so the loop resolved nothing and every connected-account
+   * capability was denied inside it. Keyed on the principal, the identical
+   * resolver serves the HTTP path and the agent loop, and neither can develop
+   * its own idea of what is connected.
    */
-  readinessFor?(request: FastifyRequest): Promise<ReadinessContext>;
+  readinessFor?(principal: { owner: string; workspace: string }): Promise<ReadinessContext>;
 }
 
 interface ExecuteBody {
@@ -70,11 +77,7 @@ interface ExecuteBody {
   approvalId?: string;
 }
 
-export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRoutesDeps = {}): {
-  registry: CapabilityRegistry;
-  approvals: ToolApprovalStore;
-  audit: ToolAudit;
-} {
+export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRoutesDeps = {}): ToolExecDeps {
   const registry = deps.registry ?? new CapabilityRegistry();
   // Instrument the approval store via the shared telemetry hub (mint/consume/
   // expiry/eviction events, health snapshot).
@@ -95,7 +98,8 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
      */
     let ctx: ReadinessContext | undefined;
     try {
-      ctx = await deps.readinessFor?.(request);
+      const listPrincipal = deps.principalFor?.(request) ?? null;
+      ctx = listPrincipal ? await deps.readinessFor?.(listPrincipal) : undefined;
     } catch {
       ctx = undefined;
     }
@@ -129,13 +133,17 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
     // without pretending it happened in the original HTTP request.
     const inbound = String((request.headers['x-correlation-id'] as string | undefined) ?? '').trim();
     const stage = inbound ? makeStageLogger(inbound, jsonLineSink((line) => request.log.info(line))) : undefined;
-    let execReadiness: ReadinessContext | undefined;
-    try {
-      execReadiness = await deps.readinessFor?.(request);
-    } catch {
-      execReadiness = undefined;
-    }
-    const outcome = await executeToolCore({ registry, approvals, audit }, {
+    const outcome = await executeToolCore({
+      registry,
+      approvals,
+      audit,
+      /*
+       * 🚨 THE RESOLVER, NOT A RESOLVED VALUE. The executor derives readiness
+       * from the principal it was given, so this path and the agent loop reach
+       * the same answer through the same code.
+       */
+      ...(deps.readinessFor ? { readinessFor: deps.readinessFor } : {}),
+    }, {
       tool: body.tool,
       input: body.input,
       dryRun: body.dryRun,
@@ -148,12 +156,6 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
        * than fall back to a shared default.
        */
       ...(deps.principalFor?.(request) ? { principal: deps.principalFor(request)! } : {}),
-      /*
-       * The availability gate runs before the handler and needs the same
-       * per-caller facts the listing does — otherwise a capability whose
-       * readiness depends on the caller is denied for everyone.
-       */
-      ...(execReadiness ? { readiness: execReadiness } : {}),
     });
     if (outcome.ok) {
       const { httpStatus: _s, ok: _o, ...payload } = outcome;
@@ -173,7 +175,21 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
     return { events: audit.recent(limit) };
   });
 
-  return { registry, approvals, audit };
+  /*
+   * 🚨 THE RESOLVER TRAVELS WITH THE DEPS.
+   *
+   * These deps are handed to the agent service, which reaches capabilities
+   * through the same executor. Returning only the registry, approvals and
+   * audit left the autonomous loop with no way to resolve readiness at all —
+   * so every connected-account capability was denied inside it, and the denial
+   * looked exactly like a correct refusal.
+   */
+  return {
+    registry,
+    approvals,
+    audit,
+    ...(deps.readinessFor ? { readinessFor: deps.readinessFor } : {}),
+  };
 }
 
 /**

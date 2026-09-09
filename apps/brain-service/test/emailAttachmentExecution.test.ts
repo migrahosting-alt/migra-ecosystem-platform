@@ -10,6 +10,8 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 
+import { resolveFilePolicy, type FilePipelineConfig } from '@migrapilot/shared-types/file-policy';
+
 import {
   bindEmailExecution,
   executeEmailFetchAttachment,
@@ -31,7 +33,20 @@ const NOW = 1_000_000;
 const ALICE = { owner: 'user:alice', workspace: 'ws:1' };
 const BOB = { owner: 'user:bob', workspace: 'ws:1' };
 
-const POLICY: AttachmentPolicy = { allowedExtensions: ['pdf', 'csv', 'txt'], maxBytes: 1_000 };
+/*
+ * 🚨 THE REAL RESOLVER, NOT A HAND-WRITTEN POLICY.
+ *
+ * The policy is no longer an input to the fetch — it is derived from the
+ * binding's deployment configuration by the canonical shared implementation,
+ * so a test that invented its own object would be asserting against something
+ * the product never uses. These tests drive the configuration instead, which
+ * is the only thing a deployment actually owns.
+ */
+const PIPELINE: FilePipelineConfig = { maxFileMb: 1 };
+const POLICY: AttachmentPolicy = resolveFilePolicy({
+  config: PIPELINE,
+  principal: { principalId: 'test-owner', workspaceId: 'test-workspace' },
+});
 
 function record(scope: typeof ALICE, accountId: string, over: Partial<MailConnectionRecord> = {}): MailConnectionRecord {
   const b = (purpose: 'access_token' | 'refresh_token') => ({
@@ -88,6 +103,7 @@ function bind(records: MailConnectionRecord[]) {
     key,
     refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
     now: () => NOW,
+    filePipeline: PIPELINE,
   });
   return { lookups };
 }
@@ -105,7 +121,7 @@ afterEach(() => {
 
 test('🚨 an attachment fetch resolves the CALLER’s connection, and nothing else', async () => {
   const { lookups } = bind([record(ALICE, 'alice-1'), record(BOB, 'bob-1')]);
-  await executeEmailFetchAttachment({ evidence: evidence(), policy: POLICY, ctx: ctxFor(BOB) });
+  await executeEmailFetchAttachment({ evidence: evidence(), ctx: ctxFor(BOB) });
   assert.ok(lookups.length > 0, 'no connection was resolved for the fetch');
   for (const lookup of lookups) {
     assert.ok(lookup.endsWith(BOB.owner), `an attachment fetch crossed a boundary: ${lookup}`);
@@ -118,7 +134,7 @@ test('🚨 with NO principal, no bytes are fetched', async () => {
    * connection, and without a principal there is no connection to resolve.
    */
   const { lookups } = bind([record(ALICE, 'alice-1')]);
-  const result = await executeEmailFetchAttachment({ evidence: evidence(), policy: POLICY, ctx: undefined });
+  const result = await executeEmailFetchAttachment({ evidence: evidence(), ctx: undefined });
   assert.equal(result.ok, false);
   if (!result.ok && 'failure' in result) assert.equal(result.failure.kind, 'refused');
   assert.equal(lookups.length, 0, 'a fetch was attempted with no principal');
@@ -126,7 +142,7 @@ test('🚨 with NO principal, no bytes are fetched', async () => {
 
 test('a caller with no connection gets no bytes, not someone else’s', async () => {
   bind([record(ALICE, 'alice-1')]);
-  const result = await executeEmailFetchAttachment({ evidence: evidence(), policy: POLICY, ctx: ctxFor(BOB) });
+  const result = await executeEmailFetchAttachment({ evidence: evidence(), ctx: ctxFor(BOB) });
   assert.equal(result.ok, false);
   if (!result.ok && 'failure' in result) assert.equal(result.failure.kind, 'not_connected');
 });
@@ -155,7 +171,6 @@ test('🚨 a DECLARED oversize is refused before the bytes are downloaded', asyn
   bind([record(ALICE, 'alice-1')]);
   const result = await executeEmailFetchAttachment({
     evidence: evidence({ sizeBytes: POLICY.maxBytes + 1 }),
-    policy: POLICY,
     ctx: ctxFor(ALICE),
   });
   assert.equal(result.ok, false);
@@ -179,11 +194,10 @@ test('🚨 a refusal is a DIFFERENT outcome from a provider failure', async () =
   bind([record(ALICE, 'alice-1')]);
   const refused = await executeEmailFetchAttachment({
     evidence: evidence({ sizeBytes: POLICY.maxBytes + 1 }),
-    policy: POLICY,
     ctx: ctxFor(ALICE),
   });
   const unreachable = await executeEmailFetchAttachment({
-    evidence: evidence(), policy: POLICY, ctx: ctxFor(BOB),
+    evidence: evidence(), ctx: ctxFor(BOB),
   });
   assert.ok(!refused.ok && 'refusal' in refused);
   assert.ok(!unreachable.ok && 'failure' in unreachable);
@@ -193,7 +207,6 @@ test('🚨 no failure or refusal carries a credential', async () => {
   bind([record(ALICE, 'alice-1')]);
   const result = await executeEmailFetchAttachment({
     evidence: evidence({ sizeBytes: POLICY.maxBytes + 1 }),
-    policy: POLICY,
     ctx: ctxFor(ALICE),
   });
   const serialised = JSON.stringify(result);

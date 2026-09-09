@@ -33,13 +33,18 @@ export interface ToolExecInput {
    */
   principal?: { owner: string; workspace: string };
   /**
-   * Per-request facts the availability gate needs.
+   * 🚨 READINESS IS NOT AN INPUT. It is resolved below, from `principal`, by
+   * `deps.readinessFor`.
    *
-   * 🚨 The gate runs BEFORE the handler, so a capability whose readiness
-   * depends on the caller is denied for everyone without this — a capability
-   * that can never run, which reads as "not available" and never as a bug.
+   * It used to be passed in, which meant the HTTP route resolved it and the
+   * autonomous agent loop simply did not — so every connected-account
+   * capability was denied inside the loop, and the denial read as "not
+   * available" rather than as a missing wire. Two callers, two behaviours, one
+   * of them silently wrong.
+   *
+   * Accepting it here would also let a caller declare its own readiness, which
+   * on a capability that reads a mailbox is a second authorization path.
    */
-  readiness?: ReadinessContext;
 }
 
 /** Discriminated execution outcome. `httpStatus` lets the HTTP route map 1:1;
@@ -52,6 +57,20 @@ export interface ToolExecDeps {
   registry: CapabilityRegistry;
   approvals: ToolApprovalStore;
   audit: ToolAudit;
+  /**
+   * Resolve what a principal may currently do — their live connections and
+   * authorization state.
+   *
+   * 🚨 ONE RESOLVER, FOR EVERY CALLER. The HTTP route and the autonomous agent
+   * loop both reach capabilities through `executeToolCore`, so resolving here
+   * is what stops the agent path from becoming a second authorization path
+   * with its own idea of what is connected.
+   *
+   * Absent means no per-caller facts are available, which fails CLOSED: a
+   * capability whose readiness depends on the caller stays unavailable rather
+   * than falling back to a global lookup.
+   */
+  readinessFor?(principal: { owner: string; workspace: string }): Promise<ReadinessContext>;
 }
 
 export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): Promise<ToolExecOutcome> {
@@ -84,7 +103,19 @@ export async function executeToolCore(deps: ToolExecDeps, req: ToolExecInput): P
     audit.record({ requestId, tool: toolId, action: 'unknown_tool', readOnly: false, outcome: 'refused' });
     return { ok: false, httpStatus: 404, code: 'UNKNOWN_TOOL', tool: toolId, requestId, error: `Unknown capability: ${toolId}` };
   }
-  if (!registry.isAvailable(toolId, req.readiness)) {
+  /*
+   * 🚨 RESOLVED FROM THE PRINCIPAL, NEVER FROM THE REQUEST.
+   *
+   * No principal means no per-caller facts, and the gate below then denies any
+   * capability that needs them. That is the fail-closed direction: the
+   * alternative — looking up "the" connection without knowing whose — is a
+   * cross-tenant read waiting for one wiring mistake.
+   */
+  const readiness = req.principal && deps.readinessFor
+    ? await deps.readinessFor(req.principal)
+    : undefined;
+
+  if (!registry.isAvailable(toolId, readiness)) {
     audit.record({ requestId, tool: toolId, action: 'denied', readOnly: runnable.descriptor.readOnly, outcome: 'refused' });
     recordAudit('tool.denied', 'refused');
     // A machine-readable reason here too, so a client branches on one vocabulary rather

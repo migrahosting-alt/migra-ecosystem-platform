@@ -20,9 +20,18 @@ import { AgentRunStore } from './agentRunStore.js';
 import { AgentService, toRunView } from './agentRuntime.js';
 import type { ToolExecDeps } from '../tools/toolExecutor.js';
 import { engineCorrelationId } from '../tools/toolRoutes.js';
+import { executionIdentityFrom } from '../identity/executionIdentity.js';
 
 export interface AgentRoutesDeps {
   toolDeps: ToolExecDeps;
+  /**
+   * WHO a run acts as, from the request's own identity.
+   *
+   * 🚨 THE SAME DERIVATION THE TOOL ROUTE USES. A second way of deciding who is
+   * calling is a second authorization path, and the two would drift in exactly
+   * the direction nobody notices: the permissive one.
+   */
+  principalFor?(request: FastifyRequest): { owner: string; workspace: string } | null;
   registry?: AgentRegistry;
   store?: AgentRunStore;
   service?: AgentService;
@@ -67,7 +76,14 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRoutesDeps)
       reply.code(400);
       return { ok: false, code: 'INVALID_INPUT', error: 'An `agentId` is required.', requestId };
     }
-    const created = await service.createRun({ agentId: body.agentId, input: body.input, requestId, idempotencyKey });
+    /*
+     * Established ONCE, here, at the authenticated boundary — then frozen onto
+     * the run. Nothing downstream may widen it, and the model never sees it.
+     */
+    const identity = executionIdentityFrom(deps.principalFor?.(request) ?? null);
+    const created = await service.createRun({
+      agentId: body.agentId, input: body.input, requestId, idempotencyKey, identity,
+    });
     if (!created.ok) {
       reply.code(created.httpStatus);
       return { ok: false, code: created.code, error: created.error, issues: created.issues, requestId };

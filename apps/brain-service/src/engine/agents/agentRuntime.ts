@@ -23,6 +23,7 @@ import {
   type RunState,
 } from './agentRunStore.js';
 import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
+import { principalScopeOf, type ExecutionIdentity } from '../identity/executionIdentity.js';
 import type { PilotRuntimeClient, PilotRunOutcome } from '../pilot/pilotRuntimeClient.js';
 
 class AgentStepError extends Error {
@@ -65,7 +66,18 @@ export class LocalRuntimeAdapter implements RuntimeAdapter {
         callTool: async <T = unknown>(tool: string, input: unknown): Promise<T> => {
           this.enforceLimits(rec, def);
           const stepId = this.store.newStepId();
-          const outcome = await executeToolCore(this.toolDeps, { tool, input, requestId: rec.requestId });
+          const outcome = await executeToolCore(this.toolDeps, {
+            tool,
+            input,
+            requestId: rec.requestId,
+            /*
+             * 🚨 IDENTITY, AND ONLY IDENTITY. The executor resolves this
+             * principal's live connections itself, on every call — so a run
+             * cannot keep reading a mailbox that was disconnected mid-run, and
+             * there is no second path that skips that check.
+             */
+            ...(rec.identity ? { principal: principalScopeOf(rec.identity) } : {}),
+          });
           rec.steps.push({ stepId, kind: 'tool', label: tool, status: outcome.ok ? 'ok' : 'error' });
           if (!outcome.ok) throw new AgentStepError(outcome.code);
           return (outcome as { result?: T }).result as T;
@@ -83,7 +95,12 @@ export class LocalRuntimeAdapter implements RuntimeAdapter {
       // Mutating: mint a single-use approval through the tool boundary (this both
       // validates the action and returns a preview) and park for approval.
       this.enforceLimits(rec, def);
-      const mint = await executeToolCore(this.toolDeps, { tool: outcome.tool, input: outcome.input, requestId: rec.requestId });
+      const mint = await executeToolCore(this.toolDeps, {
+        tool: outcome.tool,
+        input: outcome.input,
+        requestId: rec.requestId,
+        ...(rec.identity ? { principal: principalScopeOf(rec.identity) } : {}),
+      });
       if (!mint.ok || mint.status !== 'approval_required' || !mint.approvalId) {
         throw new AgentStepError('PROPOSE_FAILED');
       }
@@ -124,6 +141,12 @@ export class LocalRuntimeAdapter implements RuntimeAdapter {
         input: pend.input,
         approvalId: pend.approvalId,
         requestId: rec.requestId,
+        /*
+         * The RUN's identity, re-supplied on resume. An approval does not carry
+         * authority of its own: the executor re-resolves what this principal
+         * may do now, which may differ from when the action was proposed.
+         */
+        ...(rec.identity ? { principal: principalScopeOf(rec.identity) } : {}),
       });
       rec.steps.push({ stepId: this.store.newStepId(), kind: 'apply', label: pend.tool, status: exec.ok ? 'ok' : 'error' });
       if (exec.ok && exec.status === 'executed') {
@@ -381,7 +404,18 @@ export class AgentService {
     return def.runtime === 'pilot' ? this.pilot : this.local;
   }
 
-  async createRun(params: { agentId: string; input: unknown; requestId: string; idempotencyKey?: string }): Promise<CreateResult> {
+  async createRun(params: {
+    agentId: string;
+    input: unknown;
+    requestId: string;
+    idempotencyKey?: string;
+    /**
+     * 🚨 DERIVED AT THE AUTHENTICATED BOUNDARY, never from the request body and
+     * never from the model. Absent means the run has no identity and every
+     * capability that needs one stays unavailable inside it.
+     */
+    identity: ExecutionIdentity | null;
+  }): Promise<CreateResult> {
     const def = this.registry.definition(params.agentId);
     if (!def) {
       return { ok: false, httpStatus: 404, code: 'UNKNOWN_AGENT', error: `Unknown agent: ${params.agentId}` };
@@ -405,7 +439,13 @@ export class AgentService {
       input: parsed.data,
       limits: { maxSteps: def.descriptor.maxSteps, maxRuntimeMs: def.descriptor.maxRuntimeMs },
     };
-    const rec = this.store.create({ spec, runtime: def.runtime, requestId: params.requestId, idempotencyKey: params.idempotencyKey });
+    const rec = this.store.create({
+      spec,
+      runtime: def.runtime,
+      requestId: params.requestId,
+      idempotencyKey: params.idempotencyKey,
+      identity: params.identity,
+    });
     // Only drive a freshly-created run; an idempotent retry returns the existing
     // run untouched (reconcile, never replay).
     if (rec.state === 'CREATED') {

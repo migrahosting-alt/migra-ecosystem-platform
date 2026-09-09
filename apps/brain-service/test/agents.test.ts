@@ -87,7 +87,7 @@ test('agent discovery + capability filtering', () => {
 
 test('immutable run specification (frozen)', async () => {
   const { service } = svc();
-  const res = await service.createRun({ agentId: 'workspace.diagnostics', input: TARGET, requestId: 'r1' });
+  const res = await service.createRun({ agentId: 'workspace.diagnostics', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(res.ok);
   const spec = res.run.spec;
   assert.ok(Object.isFrozen(spec) && Object.isFrozen(spec.limits));
@@ -96,7 +96,7 @@ test('immutable run specification (frozen)', async () => {
 
 test('read-only run completes with a result', async () => {
   const { service } = svc();
-  const res = await service.createRun({ agentId: 'workspace.diagnostics', input: TARGET, requestId: 'r1' });
+  const res = await service.createRun({ agentId: 'workspace.diagnostics', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(res.ok);
   assert.equal(res.run.state, 'COMPLETED');
   assert.deepEqual(res.run.result, { count: 0, items: [] });
@@ -104,7 +104,7 @@ test('read-only run completes with a result', async () => {
 
 test('approval-required run parks WAITING and does not mutate', async () => {
   const { service, fake } = svc();
-  const res = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1' });
+  const res = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(res.ok);
   assert.equal(res.run.state, 'WAITING_FOR_APPROVAL');
   assert.ok(res.run.pendingAction?.summary);
@@ -113,7 +113,7 @@ test('approval-required run parks WAITING and does not mutate', async () => {
 
 test('reject → CANCELLED, no mutation', async () => {
   const { service, fake } = svc();
-  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1' });
+  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(created.ok);
   const rejected = await service.resumeRun(created.run.runId, 'reject');
   assert.ok(rejected.ok);
@@ -123,7 +123,7 @@ test('reject → CANCELLED, no mutation', async () => {
 
 test('approve → executes once (single-use) → COMPLETED', async () => {
   const { service, fake } = svc();
-  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1' });
+  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(created.ok);
   const approved = await service.resumeRun(created.run.runId, 'approve');
   assert.ok(approved.ok);
@@ -133,7 +133,7 @@ test('approve → executes once (single-use) → COMPLETED', async () => {
 
 test('replay refusal: approving twice → 2nd INVALID_STATE, no second execution', async () => {
   const { service, fake } = svc();
-  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1' });
+  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(created.ok);
   await service.resumeRun(created.run.runId, 'approve');
   const replay = await service.resumeRun(created.run.runId, 'approve');
@@ -144,8 +144,8 @@ test('replay refusal: approving twice → 2nd INVALID_STATE, no second execution
 
 test('idempotent create reconciles (no replay of a mutating run)', async () => {
   const { service, fake } = svc();
-  const a = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', idempotencyKey: 'k1' });
-  const b = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r2', idempotencyKey: 'k1' });
+  const a = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null, idempotencyKey: 'k1' });
+  const b = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r2', identity: null, idempotencyKey: 'k1' });
   assert.ok(a.ok && b.ok);
   assert.equal(a.run.runId, b.run.runId, 'same run returned');
   assert.equal(fake.applied.length, 0, 'idempotent retry never re-runs/mutates');
@@ -153,7 +153,7 @@ test('idempotent create reconciles (no replay of a mutating run)', async () => {
 
 test('cancellation: request → confirmed, distinguishable', async () => {
   const { service } = svc();
-  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1' });
+  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(created.ok);
   const cancelled = await service.cancelRun(created.run.runId);
   assert.ok(cancelled.ok);
@@ -165,7 +165,7 @@ test('cancellation: request → confirmed, distinguishable', async () => {
 
 test('step limit enforced server-side → FAILED LIMIT_EXCEEDED', async () => {
   const { service } = svc({ extra: [LOOPER] });
-  const res = await service.createRun({ agentId: '_test.looper', input: TARGET, requestId: 'r1' });
+  const res = await service.createRun({ agentId: '_test.looper', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(res.ok);
   assert.equal(res.run.state, 'FAILED');
   assert.equal(res.run.error?.code, 'LIMIT_EXCEEDED');
@@ -173,7 +173,7 @@ test('step limit enforced server-side → FAILED LIMIT_EXCEEDED', async () => {
 
 test('terminal-state immutability: resume/cancel a COMPLETED run → INVALID_STATE', async () => {
   const { service } = svc();
-  const created = await service.createRun({ agentId: 'workspace.diagnostics', input: TARGET, requestId: 'r1' });
+  const created = await service.createRun({ agentId: 'workspace.diagnostics', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(created.ok && created.run.state === 'COMPLETED');
   const resume = await service.resumeRun(created.run.runId, 'approve');
   assert.equal(resume.ok, false);
@@ -185,7 +185,7 @@ test('terminal-state immutability: resume/cancel a COMPLETED run → INVALID_STA
 
 test('pilot-runtime outage → FAILED, NO local mutating fallback', async () => {
   const { service, fake } = svc({ extra: [PILOT_MUTATE] });
-  const res = await service.createRun({ agentId: '_test.pilot-mutate', input: TARGET, requestId: 'r1' });
+  const res = await service.createRun({ agentId: '_test.pilot-mutate', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(res.ok);
   assert.equal(res.run.state, 'FAILED');
   assert.equal(res.run.error?.code, 'RUNTIME_UNAVAILABLE');
@@ -194,17 +194,17 @@ test('pilot-runtime outage → FAILED, NO local mutating fallback', async () => 
 
 test('unknown agent + denied input surface structured errors', async () => {
   const { service } = svc();
-  const unknown = await service.createRun({ agentId: 'nope', input: TARGET, requestId: 'r1' });
+  const unknown = await service.createRun({ agentId: 'nope', input: TARGET, requestId: 'r1', identity: null });
   assert.equal(unknown.ok, false);
   assert.equal((unknown as { code: string }).code, 'UNKNOWN_AGENT');
-  const bad = await service.createRun({ agentId: 'workspace.diagnostics', input: { rootPath: 1 }, requestId: 'r1' });
+  const bad = await service.createRun({ agentId: 'workspace.diagnostics', input: { rootPath: 1 }, requestId: 'r1', identity: null });
   assert.equal(bad.ok, false);
   assert.equal((bad as { code: string }).code, 'INVALID_INPUT');
 });
 
 test('sanitized run view: omits approval material + never leaks tool inputs', async () => {
   const { service } = svc();
-  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1' });
+  const created = await service.createRun({ agentId: 'workspace.test-generator', input: TARGET, requestId: 'r1', identity: null });
   assert.ok(created.ok);
   const view = toRunView(created.run);
   const json = JSON.stringify(view);
