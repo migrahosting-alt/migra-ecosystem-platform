@@ -1,4 +1,11 @@
-import { DOCUMENT_EXTENSIONS, MAX_UPLOAD_MB, contentMismatch, refusalFor } from '@/features/attachments/capability'
+import {
+  DOCUMENT_EXTENSIONS,
+  MAX_UPLOAD_MB,
+  contentMismatch,
+  megabytesToBytes,
+  refusalFor,
+  resolveFilePolicy,
+} from '@/features/attachments/capability'
 import 'server-only'
 
 import { createHash } from 'node:crypto'
@@ -55,7 +62,23 @@ const uploadRoot = (): string => process.env.UPLOAD_ROOT ?? '/var/lib/migrapilot
 // The DOCUMENT pipeline only. Images have their own store and their own
 // reader; letting a PNG into the file library would put it where nothing
 // can look at it.
-const ALLOWED = new Set<string>(DOCUMENT_EXTENSIONS)
+/**
+ * 🚨 NO MODULE-SCOPE ALLOWLIST ANY MORE.
+ *
+ * The allowed set and the ceiling are resolved PER CALLER by
+ * `resolveFilePolicy`, which is the same function the Brain calls before it
+ * ingests a Gmail attachment. A constant captured at import time would be a
+ * second copy of the answer, and the day a rule varies by workspace the upload
+ * path would quietly keep the old one.
+ */
+async function policyForCaller(): Promise<{ allowedExtensions: readonly string[]; maxBytes: number }> {
+  const session = await requireSession()
+  const scope = deriveBrainScope(session)
+  return resolveFilePolicy({
+    config: { maxFileMb: process.env.MIGRAPILOT_MAX_FILE_MB },
+    principal: { principalId: scope.owner, workspaceId: scope.workspace },
+  })
+}
 
 /*
  * `sql` AND `env` WERE REMOVED FROM THE LIST ABOVE, and the omission is the point.
@@ -78,7 +101,12 @@ const ALLOWED = new Set<string>(DOCUMENT_EXTENSIONS)
  * together so they cannot drift apart again.
  */
 
-export const ALLOWED_EXTENSIONS = [...ALLOWED].sort()
+/*
+ * What the API ADVERTISES. Enforcement resolves per caller in `saveFile`;
+ * this is the same static table, so the advertised list and the enforced one
+ * cannot describe different rules.
+ */
+export const ALLOWED_EXTENSIONS = [...DOCUMENT_EXTENSIONS].sort()
 
 /** A single upload, and the whole library, are both bounded. */
 /*
@@ -93,10 +121,14 @@ export const ALLOWED_EXTENSIONS = [...ALLOWED].sort()
  * be met in normal use and low enough to keep one upload from ending the
  * service — and it is one environment variable away from anything else.
  */
-const megabytes = (value: string | undefined, fallback: number): number => {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed * 1024 * 1024 : fallback * 1024 * 1024
-}
+/*
+ * Delegates to the canonical conversion rather than repeating it. These other
+ * ceilings are DIFFERENT limits — how much may be retained, how much may be
+ * parsed — but the megabytes-to-bytes rule, including what a nonsense value
+ * does, is one rule and lives in one place.
+ */
+const megabytes = (value: string | undefined, fallback: number): number =>
+  megabytesToBytes(value, fallback)
 
 /** Sizes as a person reads them. Whole MB, because a tenth of a megabyte has
  *  never helped anyone decide whether a file is too big. */
@@ -120,7 +152,7 @@ const readableSize = (bytes: number): string =>
  * the ceiling means raising `client_max_body_size` on the proxy FIRST and then
  * changing that one constant — there is no longer a second place to forget.
  */
-export const MAX_FILE_BYTES = megabytes(process.env.MIGRAPILOT_MAX_FILE_MB, MAX_UPLOAD_MB)
+export const MAX_FILE_BYTES = megabytesToBytes(process.env.MIGRAPILOT_MAX_FILE_MB, MAX_UPLOAD_MB)
 export const MAX_LIBRARY_BYTES = megabytes(process.env.MIGRAPILOT_MAX_LIBRARY_MB, 20 * 1024)
 export const MAX_FILES = Number(process.env.MIGRAPILOT_MAX_FILES) || 2000
 
@@ -230,7 +262,12 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
   const name = safeName(rawName)
   const extension = extensionOf(name)
 
-  if (!ALLOWED.has(extension)) {
+  // Resolved before anything is inspected, from the canonical authority. The
+  // Gmail ingestion path resolves the identical policy from the identical
+  // function, which is what makes "one policy" a property rather than a claim.
+  const policy = await policyForCaller()
+
+  if (!policy.allowedExtensions.includes(extension)) {
     /*
      * The reason comes from the same definition that decides selectability, so
      * a refusal can be SPECIFIC: "export the sheet as CSV" is actionable where
@@ -248,7 +285,7 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
   const mismatch = contentMismatch(name, new Uint8Array(data.slice(0, 512)))
   if (mismatch) throw new FileRejected('unsupported_type', mismatch)
   if (data.byteLength === 0) throw new FileRejected('empty_file', 'That file is empty.')
-  if (data.byteLength > MAX_FILE_BYTES) {
+  if (data.byteLength > policy.maxBytes) {
     /*
      * NAMES BOTH NUMBERS, because "files are limited to 256 MB" alone leaves the
      * user to work out whether their file is over by a little or by tenfold —
@@ -258,7 +295,7 @@ export async function saveFile(rawName: string, data: ArrayBuffer): Promise<Stor
      */
     throw new FileRejected(
       'too_large',
-      `That file is ${readableSize(data.byteLength)}. Files are limited to ${readableSize(MAX_FILE_BYTES)}.`,
+      `That file is ${readableSize(data.byteLength)}. Files are limited to ${readableSize(policy.maxBytes)}.`,
     )
   }
 

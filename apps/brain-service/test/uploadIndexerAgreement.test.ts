@@ -35,15 +35,25 @@ import { DEFAULT_MAX_INDEX_FILE_BYTES } from '../src/engine/rag/fsFileSource.js'
 const STORAGE = join(
   process.cwd(), '..', 'migrapilot-consumer', 'src', 'server', 'files', 'storage.ts',
 );
+/*
+ * 🚨 THE TABLE MOVED, AND SO DID THIS PATH.
+ *
+ * The attachment rules now live in @migrapilot/shared-types/file-policy,
+ * because the Brain has to obey the same ones when it ingests a Gmail
+ * attachment — and the alternative was a second copy in this service, which is
+ * the drift this whole test exists to detect. The consumer's
+ * features/attachments/capability.ts is now a re-export, so parsing it would
+ * find no table at all.
+ */
 const CAPABILITY = join(
-  process.cwd(), '..', 'migrapilot-consumer', 'src', 'features', 'attachments', 'capability.ts',
+  process.cwd(), '..', '..', 'packages', 'shared-types', 'src', 'filePolicy.ts',
 );
 
 /*
  * Reads the consumer's CANONICAL attachment definition. The allowlist used to be
  * written out inside storage.ts beside a separately hand-written picker list;
  * they drifted until the product offered 48 types and accepted 27. Both now come
- * from capability.ts, and this parses that one file.
+ * from the shared file-policy module, and this parses that one file.
  */
 function allowedExtensions(): string[] {
   const source = readFileSync(CAPABILITY, 'utf8');

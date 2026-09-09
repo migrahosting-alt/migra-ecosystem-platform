@@ -23,9 +23,45 @@ test('one constant governs the ceiling, and storage derives from it', () => {
 
   // The literal must not come back. A hand-written number here is exactly how
   // the client and the server drifted apart the first time.
-  assert.match(storage, /MAX_FILE_BYTES = megabytes\(process\.env\.MIGRAPILOT_MAX_FILE_MB, MAX_UPLOAD_MB\)/,
+  assert.match(storage, /MAX_FILE_BYTES = megabytesToBytes\(process\.env\.MIGRAPILOT_MAX_FILE_MB, MAX_UPLOAD_MB\)/,
     'storage must take its ceiling from the capability contract')
-  assert.match(storage, /import \{[^}]*MAX_UPLOAD_MB[^}]*\} from '@\/features\/attachments\/capability'/)
+  assert.match(storage, /import \{[\s\S]*?MAX_UPLOAD_MB[\s\S]*?\} from '@\/features\/attachments\/capability'/)
+})
+
+/*
+ * 🚨 ENFORCEMENT GOES THROUGH THE RESOLVER, NOT A CAPTURED CONSTANT.
+ *
+ * The rules moved to @migrapilot/shared-types/file-policy so the Brain could
+ * obey the same ones when it ingests a Gmail attachment. That only holds while
+ * BOTH callers go through `resolveFilePolicy`: an allowlist captured at import
+ * time here would be a second copy of the answer, and the day a rule varies by
+ * workspace this path would quietly keep the old one.
+ */
+test('🚨 upload enforcement resolves the canonical policy per caller', () => {
+  const storage = source('src/server/files/storage.ts')
+
+  assert.match(storage, /resolveFilePolicy\(\{/, 'upload must call the canonical resolver')
+  assert.match(storage, /principal: \{ principalId: scope\.owner, workspaceId: scope\.workspace \}/,
+    'the policy must be resolved for the authenticated principal, not globally')
+  assert.match(storage, /policy\.allowedExtensions\.includes\(extension\)/,
+    'the allowlist must come from the resolved policy')
+  assert.match(storage, /data\.byteLength > policy\.maxBytes/,
+    'the ceiling must come from the resolved policy')
+
+  // The old module-scope capture must not return.
+  assert.doesNotMatch(storage, /const ALLOWED = new Set/,
+    'a captured allowlist is the second source of truth this move removed')
+})
+
+test('🚨 the rules live in the shared package, and the consumer only re-exports', () => {
+  const capability = source('src/features/attachments/capability.ts')
+
+  assert.match(capability, /export \* from '@migrapilot\/shared-types\/file-policy'/)
+  // Nothing may be DEFINED here again, or the Brain and the browser diverge.
+  assert.doesNotMatch(capability, /ATTACHMENT_TYPES: readonly AttachmentType\[\] = \[/,
+    'the type table must exist in exactly one place')
+  assert.doesNotMatch(capability, /export const MAX_UPLOAD_MB = /,
+    'the ceiling must exist in exactly one place')
 })
 
 test('the ceiling the API advertises is the ceiling the contract defines', () => {

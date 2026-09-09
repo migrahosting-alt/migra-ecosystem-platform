@@ -45,6 +45,10 @@
     "./orchestration-decision": {
       "types": "./src/orchestrationDecision.ts",
       "default": "./dist/orchestrationDecision.js"
+    },
+    "./file-policy": {
+      "types": "./src/filePolicy.ts",
+      "default": "./dist/filePolicy.js"
     }
   },
   "files": [
