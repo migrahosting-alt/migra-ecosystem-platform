@@ -19,6 +19,9 @@ import {
   deleteConnection, getConnection, listConnections, markAuthorizationRevoked, putConnection, recordRefresh,
 } from '../src/engine/persistence/postgres/mailConnectionRepo.js';
 import {
+  prunePending, putPending, takePending,
+} from '../src/engine/persistence/postgres/mailPendingRepo.js';
+import {
   appRoleUrl, postgresTestSkipReason, startDisposablePostgres, type DisposablePostgres,
 } from './support/disposablePostgres.js';
 import type { MailConnectionRecord } from '../src/engine/email/connectionStore.js';
@@ -189,4 +192,76 @@ test("🚨 one principal cannot disconnect another's account", async (t) => {
   await scoped(A, (c) => putConnection(c, record({ providerAccountId: 'guard-1' })));
   assert.equal(await scoped(B, (c) => deleteConnection(c, BSCOPE, 'gmail', 'guard-1')), false);
   assert.ok(await scoped(A, (c) => getConnection(c, ASCOPE, 'gmail', 'guard-1')), "another principal's disconnect removed the row");
+});
+
+/* ------------------------------------------------------------------ *
+ * In-flight attempts — migration 28
+ * ------------------------------------------------------------------ */
+
+/**
+ * The pending table carries no migra_scope columns and no RLS policy, so it is
+ * reached on a plain transaction rather than a scoped one. That is deliberate:
+ * a callback arrives before we know whose it is, and this row is what tells us.
+ */
+async function plain<T>(fn: (c: import('pg').PoolClient) => Promise<T>): Promise<T> {
+  const c = new PostgresConnection({ databaseUrl: appUrl });
+  try {
+    return await c.transaction(fn);
+  } finally {
+    await c.close();
+  }
+}
+
+const pendingRow = (stateHash: string, over: Partial<{ createdAt: number; returnTo: string }> = {}) => ({
+  stateHash,
+  ownerScope: A.ownerScope,
+  workspaceScope: A.workspaceScope,
+  provider: 'gmail',
+  grants: ['read'] as never,
+  returnTo: over.returnTo ?? '/chat',
+  createdAt: over.createdAt ?? 1_000,
+});
+
+test('migration 28 applies and an attempt round-trips', async (t) => {
+  if (skip) return t.skip(skip);
+  await plain((c) => putPending(c, pendingRow('hash-roundtrip')));
+  const taken = await plain((c) => takePending(c, 'hash-roundtrip'));
+  assert.equal(taken?.ownerScope, A.ownerScope);
+  assert.equal(taken?.returnTo, '/chat');
+  assert.deepEqual(taken?.grants, ['read']);
+  assert.equal(typeof taken?.createdAt, 'number', 'BIGINT arrived as a string');
+});
+
+test('🚨 an attempt is TAKEN, not read — a second take finds nothing', async (t) => {
+  if (skip) return t.skip(skip);
+  /*
+   * This is what makes state single-use, and it is one statement
+   * (DELETE ... RETURNING) rather than a read followed by a delete. The
+   * sequential version has a window in which two concurrent callbacks both
+   * succeed — and a replayed callback is precisely the request that would
+   * find it.
+   */
+  await plain((c) => putPending(c, pendingRow('hash-single-use')));
+  assert.ok(await plain((c) => takePending(c, 'hash-single-use')));
+  assert.equal(await plain((c) => takePending(c, 'hash-single-use')), null, 'a replayed state was accepted twice');
+});
+
+test('🚨 CONCURRENT takes of one attempt: exactly one wins', async (t) => {
+  if (skip) return t.skip(skip);
+  // The property a single-threaded test cannot show. Ten simultaneous
+  // callbacks, one row: read-then-delete would let more than one through.
+  await plain((c) => putPending(c, pendingRow('hash-race')));
+  const results = await Promise.all(
+    Array.from({ length: 10 }, () => plain((c) => takePending(c, 'hash-race'))),
+  );
+  const winners = results.filter((r) => r !== null);
+  assert.equal(winners.length, 1, `${winners.length} concurrent callbacks took the same attempt`);
+});
+
+test('abandoned attempts are prunable by age, and live ones are not', async (t) => {
+  if (skip) return t.skip(skip);
+  await plain((c) => putPending(c, pendingRow('hash-old', { createdAt: 1_000 })));
+  await plain((c) => putPending(c, pendingRow('hash-new', { createdAt: 9_000 })));
+  assert.equal(await plain((c) => prunePending(c, 5_000)), 1);
+  assert.ok(await plain((c) => takePending(c, 'hash-new')), 'a live attempt was pruned');
 });

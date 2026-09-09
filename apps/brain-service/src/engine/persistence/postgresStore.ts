@@ -62,6 +62,7 @@ import type {
   AgentRunReproposalInput,
   AgentRunReproposalResult,
   MailConnectionRow,
+  MailPendingRow,
   ProjectBindingRow,
   SealedTokenValue,
   IdempotencyRow,
@@ -76,6 +77,7 @@ import * as operational from './postgres/operationalRepo.js';
 import * as agentRuns from './postgres/agentRunRepo.js';
 import * as agentRunChildren from './postgres/agentRunChildRepo.js';
 import * as mailConnections from './postgres/mailConnectionRepo.js';
+import * as mailPending from './postgres/mailPendingRepo.js';
 import * as projectBindings from './postgres/projectBindingRepo.js';
 import * as idempotency from './postgres/idempotencyRepo.js';
 import { latestVersion } from './postgres/migrations.js';
@@ -202,6 +204,27 @@ export class PostgresDurableStore implements DurableStore {
   async deleteMailConnection(scope: PersistenceScope, provider: string, providerAccountId: string): Promise<boolean> {
     return this.inScope(scope, (c) =>
       mailConnections.deleteConnection(c, { owner: scope.owner, workspace: scope.workspace }, provider, providerAccountId));
+  }
+
+  /* ── in-flight OAuth attempts ──────────────────────────────────────────── */
+
+  /*
+   * Unscoped by necessity, not by oversight: a callback arrives before we know
+   * whose it is, and this row is what tells us. Ownership is enforced after the
+   * take, by comparing the recorded principal to the session making the call.
+   */
+
+  async putMailPending(record: MailPendingRow): Promise<void> {
+    // The persistence row types grants as string[]; the email module narrows it.
+    await this.tx((c) => mailPending.putPending(c, record as never));
+  }
+
+  async takeMailPending(stateHash: string): Promise<MailPendingRow | null> {
+    return this.tx((c) => mailPending.takePending(c, stateHash));
+  }
+
+  async pruneMailPending(cutoff: number): Promise<number> {
+    return this.tx((c) => mailPending.prunePending(c, cutoff));
   }
 
   /* ── idempotency ───────────────────────────────────────────────────────── */

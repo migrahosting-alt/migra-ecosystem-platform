@@ -767,7 +767,38 @@ export function hasMailConnections<T extends object>(s: T): s is T & MailConnect
     && typeof p.markMailAuthorizationRevoked === 'function' && typeof p.deleteMailConnection === 'function';
 }
 
-export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence, ProjectBindingPersistence, IdempotencyPersistence, MailConnectionPersistence {
+/**
+ * In-flight OAuth attempts.
+ *
+ * Durable for one reason worth stating: an in-memory map cannot make "taken,
+ * not read" atomic across concurrent callbacks, and a replayed callback is the
+ * request that would exploit the gap. It also means a Brain restart during a
+ * user's consent does not silently invalidate their attempt.
+ */
+export interface MailPendingPersistence {
+  putMailPending(record: MailPendingRow): Promise<void>;
+  /** Atomically removes and returns. Never read-then-delete. */
+  takeMailPending(stateHash: string): Promise<MailPendingRow | null>;
+  pruneMailPending(cutoff: number): Promise<number>;
+}
+
+export interface MailPendingRow {
+  stateHash: string;
+  ownerScope: string;
+  workspaceScope: string;
+  provider: string;
+  grants: string[];
+  returnTo: string;
+  createdAt: number;
+}
+
+export function hasMailPending<T extends object>(s: T): s is T & MailPendingPersistence {
+  const p = s as Partial<MailPendingPersistence>;
+  return typeof p.putMailPending === 'function' && typeof p.takeMailPending === 'function'
+    && typeof p.pruneMailPending === 'function';
+}
+
+export interface DurableStore extends ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence, WorkspacePersistence, OperationalPersistence, AgentRunJournalPersistence, ProjectBindingPersistence, IdempotencyPersistence, MailConnectionPersistence, MailPendingPersistence {
   health(): Promise<PersistenceHealth>;
   integrityCheck(): Promise<string>;
   close(): Promise<void>;

@@ -13,10 +13,11 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteMailConnectionStore } from '../email/sqliteMailConnection.js';
+import { SqliteMailPendingStore } from '../email/sqliteMailPending.js';
 import { SqliteProjectBindingStore } from '../projects/sqliteProjectBinding.js';
 import { SqliteIdempotencyPersistence } from '../tools/sqliteIdempotency.js';
 import type { ProjectBindingStore } from '../projects/projectBinding.js';
-import type { ProjectBindingRow, IdempotencyRow, MailConnectionRow, SealedTokenValue } from './types.js';
+import type { ProjectBindingRow, IdempotencyRow, MailConnectionRow, MailPendingRow, SealedTokenValue } from './types.js';
 import { statSync } from 'node:fs';
 import type {
   ConversationPersistence, MemoryItemPersistence, RagIndexPersistence, EmbeddingCachePersistence,
@@ -705,6 +706,18 @@ export class SqliteDurableStore implements DurableStore {
     return this.mail().disconnect({ owner: scope.owner, workspace: scope.workspace }, provider, providerAccountId);
   }
 
+  async putMailPending(record: MailPendingRow): Promise<void> {
+    await this.pending().put(record as never);
+  }
+
+  async takeMailPending(stateHash: string): Promise<MailPendingRow | null> {
+    return this.pending().take(stateHash) as Promise<MailPendingRow | null>;
+  }
+
+  async pruneMailPending(cutoff: number): Promise<number> {
+    return this.pending().pruneOlderThan(cutoff);
+  }
+
   async idempotencyInsertIfAbsent(record: IdempotencyRow): Promise<IdempotencyRow | null> {
     return this.idem().insertIfAbsent(record as never) as Promise<IdempotencyRow | null>;
   }
@@ -723,6 +736,11 @@ export class SqliteDurableStore implements DurableStore {
     return this.bindingStore;
   }
 
+  private pending(): SqliteMailPendingStore {
+    this.pendingStore ??= new SqliteMailPendingStore(this.db);
+    return this.pendingStore;
+  }
+
   private mail(): SqliteMailConnectionStore {
     this.mailStore ??= new SqliteMailConnectionStore(this.db);
     return this.mailStore;
@@ -736,6 +754,7 @@ export class SqliteDurableStore implements DurableStore {
   private bindingStore?: ProjectBindingStore;
   private idempotencyStore?: SqliteIdempotencyPersistence;
   private mailStore?: SqliteMailConnectionStore;
+  private pendingStore?: SqliteMailPendingStore;
 
   private schemaVersion = 0;
   private migrationState = 'pending';

@@ -1413,6 +1413,48 @@ BEGIN
 END $$;
 `;
 
+/**
+ * Migration 28 — in-flight OAuth attempts.
+ *
+ * 🚨 THE STATE IS STORED AS A HASH, never in the clear. It is short-lived, but
+ * the same argument that seals the tokens applies: a dump of this table should
+ * not let anyone resume someone else's connection attempt. The lookup is by
+ * hash, so the raw value never has to exist here.
+ *
+ * 🚨 SINGLE-USE IS ENFORCED BY `DELETE ... RETURNING`, not by read-then-delete.
+ * Read-then-delete has a window in which two concurrent callbacks both find the
+ * row, and a replayed callback is exactly the request that would exploit it.
+ * One statement, atomic, is what makes "taken, not read" true under
+ * concurrency rather than only in a single-threaded test.
+ *
+ * No RLS policy and no scope columns of the migra_scope type: a callback
+ * arrives before we know which connection it belongs to, and the row's whole
+ * job is to tell us. Ownership is enforced by comparing the recorded principal
+ * to the session making the callback.
+ */
+const M28_MAIL_OAUTH_PENDING = `
+CREATE TABLE IF NOT EXISTS mail_oauth_pending (
+  state_hash      TEXT PRIMARY KEY,
+  owner_scope     TEXT   NOT NULL,
+  workspace_scope TEXT   NOT NULL,
+  provider        TEXT   NOT NULL,
+  grants          TEXT[] NOT NULL,
+  return_to       TEXT   NOT NULL,
+  created_at      BIGINT NOT NULL
+);
+
+-- Abandoned attempts are swept by age, not left to accumulate forever.
+CREATE INDEX IF NOT EXISTS mail_oauth_pending_created_idx
+  ON mail_oauth_pending (created_at);
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON mail_oauth_pending TO migrapilot_app;
+  END IF;
+END $$;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1441,6 +1483,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 25, name: 'conversation_project', sql: M25_CONVERSATION_PROJECT },
   { version: 26, name: 'tool_idempotency', sql: M26_TOOL_IDEMPOTENCY },
   { version: 27, name: 'mail_connections', sql: M27_MAIL_CONNECTIONS },
+  { version: 28, name: 'mail_oauth_pending', sql: M28_MAIL_OAUTH_PENDING },
 ];
 
 
