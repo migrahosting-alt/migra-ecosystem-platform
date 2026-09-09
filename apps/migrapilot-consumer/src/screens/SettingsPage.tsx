@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   Bell,
   CreditCard,
+  Mail,
   Link2,
   Palette,
   ShieldCheck,
@@ -28,6 +29,7 @@ import {
   PrivacyCard,
   SecurityCard,
 } from '@/features/settings/cards'
+import { ConnectedEmailCard } from '@/features/mail/ConnectedEmailCard'
 
 /**
  * The account hub.
@@ -61,6 +63,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'privacy', label: 'Privacy and data', icon: Lock },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'email', label: 'Email', icon: Bell },
+  { id: 'mailbox', label: 'Email account', icon: Mail },
   { id: 'plan', label: 'Plan and usage', icon: CreditCard },
   { id: 'danger', label: 'Delete history', icon: ShieldAlert },
 ]
@@ -179,6 +182,12 @@ export function SettingsPage({ session }: { session: PublicSession | null }) {
 
           <section id="email" className="scroll-mt-24">
             <NotificationsCard controller={preferences} />
+          </section>
+
+          {/* A connected mailbox, not a sign-in method. Its own section so the
+              two are never mistaken for each other. */}
+          <section id="mailbox" className="scroll-mt-24">
+            <ConnectedEmailCard />
           </section>
 
           <section id="plan" className="scroll-mt-24">
