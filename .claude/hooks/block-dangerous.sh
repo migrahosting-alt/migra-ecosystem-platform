@@ -53,6 +53,13 @@ ELEV="s""udo"   # split so this policy file can be edited by tooling that
 # any kind. The DSN never touches db-core's disk — it is piped straight to
 # VM111 — so no tee, chmod or /root path is needed here.
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTE: a temporary db-core AnnouPale database-migration exception existed
+# here on 2026-09-05, authorized by Bonex for creating the annoupale_app
+# role, restoring the annoupale database and restricting it in pg_hba.conf
+# to 10.10.0.15. It was REMOVED the same day once the migration and
+# isolation tests passed. Exact rule kept in
+# docs/annoupale/hook-patch-dbcore-annoupale-migration.md.
+
 dbcore_brain_postgres_provisioning() {
   local c="$1"
 
@@ -95,6 +102,43 @@ dbcore_brain_postgres_provisioning() {
 
   return 0
 }
+
+# NOTE: a temporary VM113 annoupale-core provisioning exception existed here
+# on 2026-09-05, authorized by Bonex for the base OS build only, and was
+# REMOVED the same day once that build was verified. The exact rule is kept in
+# docs/annoupale/hook-patch-vm113-provisioning.md if it is ever needed again.
+
+# NOTE: a temporary VM113 web-only deploy exception existed here on 2026-09-05,
+# authorized by Bonex. It deployed f87cf69 (header/footer) with no database, no
+# Prisma and no API restart, and was REMOVED once verified. Rule kept in
+# docs/annoupale/hook-patch-vm113-web-deploy.md.
+
+# NOTE: a temporary publish exception existed here on 2026-09-05, authorized by
+# Bonex (plus a one-line amendment adding `npm run prisma:generate`). It applied
+# migration 20260905170000_signup_profile_intent via psql and deployed 2ab15f7 to
+# VM 113, and was REMOVED once verified. Rule kept in
+# docs/annoupale/hook-patch-vm113-publish.md.
+
+# NOTE: a one-shot validation-OTP read exception existed here on 2026-09-05,
+# authorized by Bonex, limited to GET/TTL of a single exact otpval key. It was
+# used once and REMOVED immediately. Rule kept in
+# docs/annoupale/hook-patch-vm113-otp-read.md.
+
+# NOTE: a temporary VM113 re-pin/clean-rebuild exception existed here on
+# 2026-09-05, authorized by Bonex in writing (plus a one-line scope reduction
+# he approved), and was REMOVED the same day once the private smoke battery
+# passed at b5219ad. The exact rule is kept in
+# docs/annoupale/hook-patch-vm113-repin.md if it is ever needed again.
+
+# NOTE: a temporary VM113 S3 namespace-switch exception existed here on
+# 2026-09-05, authorized by Bonex in writing, and was REMOVED the same day
+# once media read/write/delete validation passed. The exact rule is kept in
+# docs/annoupale/hook-patch-vm113-s3-cutover.md if it is ever needed again.
+
+# NOTE: a temporary VM113 AnnouPale private application DEPLOYMENT exception
+# existed here on 2026-09-05, authorized by Bonex in writing, and was REMOVED
+# the same day once the private candidate was running and verified. The exact
+# rule is kept in docs/annoupale/hook-patch-vm113-deployment.md if needed again.
 
 vm111_migrapilot_provisioning() {
   local c="$1"
@@ -209,16 +253,164 @@ vm111_migrapilot_provisioning() {
   return 0
 }
 
+# ── PART 0, PERMANENT (Bonex 2026-09-08): EDGE IDENTITY.
+#    The edge must be classified by TARGET ASSET, not by literal spelling. The
+#    previous guard matched only the string "nginx-proxy-core", so every one of
+#    these reached the public edge as root, unguarded:
+#      ssh alias   srv1 / srv1-web        <- ~/.ssh/config, names the edge nowhere
+#      tailnet v4  100.101.106.88
+#      tailnet v6  fd7a:115c:a1e0::fa39:6a58
+#      vmbr10      10.10.0.2
+#      vmbr30      10.30.0.11
+#      via pve     qm guest exec 102      <- root on the edge, never names it
+#    The edge has NO public IP of its own (verified: it holds only the addresses
+#    above). 138.201.255.55 is *pve's* sshd, so the public vector is the
+#    guest-exec path already covered here; matching pve's IP outright would break
+#    all hypervisor administration without closing anything.
+#    IP tests are boundary-anchored so 10.10.0.2 does not match 10.10.0.20-29.
+edge_target() {
+  local c="$1"
+  case "$c" in
+    *"nginx-proxy-core"*|*"100.101.106.88"*|*"fd7a:115c:a1e0::fa39:6a58"*) return 0 ;;
+  esac
+  if [[ "$c" =~ (^|[^A-Za-z0-9_.-])srv1(-web)?([^A-Za-z0-9_.-]|$) ]]; then return 0; fi
+  if [[ "$c" =~ (^|[^0-9.])10\.10\.0\.2([^0-9]|$) ]]; then return 0; fi
+  if [[ "$c" =~ (^|[^0-9.])10\.30\.0\.11([^0-9]|$) ]]; then return 0; fi
+  if [[ "$c" =~ (qm|pct)[[:space:]]+(guest[[:space:]]+exec|exec|terminal|monitor|sendkey)[[:space:]]+102([^0-9]|$) ]]; then return 0; fi
+  return 1
+}
+
+# ── PART A companion, PERMANENT: no scoped exception is active. Parts B and C
+#    (the MigraCMS extraction grants, Bonex 2026-09-08) were REMOVED once the
+#    cutover was verified — exactly as authorized. Returning 1 means every
+#    write/control action on the public edge is refused. Part 0 above stays.
+#    A future cutover replaces this function body.
+nginx_edge_exception() { return 1; }
+
+# NOTE: a temporary PowerWash edge/certificate cleanup grant (Part F) existed here
+# on 2026-09-09, authorized by Bonex, later extended to three exact stale artifact
+# paths. It retired the vhost, the certificate lineage and three disabled migration
+# leftovers. REMOVED once zero PowerWash artifacts remained, the config test passed and
+# all active customer sites were verified unchanged. The permanent Part 0 target-asset
+# edge hardening stays.
+# ── PART E (Bonex 2026-09-09): READ-ONLY certificate metadata inspection.
+#    Purpose is certificate INVENTORY, not secret access. The guard must tell
+#    "public certificate metadata read" apart from "private-key access or
+#    certificate mutation" — so key material, the archive tree and the ACME
+#    account keys are refused outright, and certificate FIELDS come from
+#    `openssl x509`, never from raw file reads.
+letsencrypt_public_read() {
+  local c="$1"
+
+  [[ "$c" == *"ssh "* ]] || return 1
+  case "$c" in *"nginx-proxy-core"*) : ;; *) return 1 ;; esac
+  local _h="${c//nginx-proxy-core/EDGE}"
+  case "$_h" in *"-core"*|*"srv1"*|*"pct exec"*|*"qm guest exec"*) return 1 ;; esac
+
+  # 1. NEVER key material, the archive tree, or ACME account keys.
+  case "$c" in
+    *"privkey"*|*"private"*|*".key"*|*"/etc/letsencrypt/archive"*|\
+    *"/etc/letsencrypt/accounts"*|*"/etc/letsencrypt/keys"*) return 1 ;;
+  esac
+
+  # 2. NO MUTATION of any kind, and no certbot invocation.
+  case "$c" in
+    *"tee "*|*"sed -i"*|*"cp "*|*"mv "*|*"rm "*|*"unlink"*|*" > "*|*" >> "*|\
+    *"chmod"*|*"chown"*|*"truncate"*|*"shred"*|*"ln -s"*|*"install "*|\
+    *"letsencrypt-auto"*|*"systemctl"*|*"service "*|*"nginx -s"*|\
+    *"rsync"*|*"scp "*|*"tar "*|*"dd "*|\
+    *"ufw "*|*"iptables"*|*"nft "*|*"firewall-cmd"*|*"apt "*|*"apt-get"*|\
+    *"reboot"*|*"shutdown"*|*"poweroff"*|*"usermod"*|*"passwd "*|*"useradd"*) return 1 ;;
+  esac
+
+  # 2c. This is a CERTIFICATE-INVENTORY grant. If the command does not actually
+  #     touch /etc/letsencrypt it has no business being permitted here — without
+  #     this, any verb merely absent from the deny list above would slip through.
+  #     (`ufw disable` did exactly that until this was added.)
+  [[ "$c" == *"/etc/letsencrypt"* ]] || return 1
+
+  # 2b. The ACME client is refused EXCEPT `certbot plugins`, a read-only listing
+  #     of installed authenticators. The wildcard design needs to know whether a
+  #     DNS-01 plugin exists at all; that is inventory, not mutation.
+  if [[ "$c" == *"certbot"* ]]; then
+    [[ "$c" =~ certbot[[:space:]]+plugins ]] || return 1
+    case "$c" in
+      *"--force"*|*"delete"*|*"revoke"*|*"certonly"*|*"renew"*|*"register"*|*"--install"*) return 1 ;;
+    esac
+  fi
+
+  # 3. Any .pem named must be a PUBLIC certificate file. This closes the glob
+  #    hole: `.../live/*/ *.pem` would otherwise sweep in privkey.pem.
+  local p
+  while read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+      */cert.pem|*/chain.pem|*/fullchain.pem) continue ;;
+      *) return 1 ;;
+    esac
+  done < <(printf '%s\n' "$c" | grep -oE '[A-Za-z0-9_./*-]+\.pem' || true)
+
+  # 4. Content-reading verbs are refused except against renewal metadata, which
+  #    holds configuration, not key material. Inventory uses ls/stat/readlink/find.
+  case "$c" in
+    *"cat "*|*"head "*|*"tail "*|*"less "*|*"more "*|*"od "*|*"xxd"*|*"base64"*|*"strings "*)
+      [[ "$c" == *"/etc/letsencrypt/renewal/"* ]] || return 1 ;;
+  esac
+
+  # 5. openssl is permitted for x509 inspection only — never rsa/pkey/ec.
+  if [[ "$c" == *"openssl"* ]]; then
+    [[ "$c" =~ openssl[[:space:]]+x509 ]] || return 1
+  fi
+
+  return 0
+}
+
+# NOTE: a MigraCMS commercial-authority env grant (Part G) was DRAFTED on
+# 2026-09-09 to provision MIGRAPANEL_API_URL/_TRANSPORT/_INTERNAL_ORIGIN/_API_KEY
+# into /etc/migracms/migracms.env. It is NOT present and NOT dispatched: Bonex
+# has not authorized it, and every other exception in this file was authorized
+# in writing first. The proposed rule, the reason it needs a two-host clause,
+# and two holes found in the first draft are recorded in
+# docs/migracms/hook-patch-migracms-authority-env.md.
 # Always-blocked patterns.
 case "$CMD" in
   *"rm -rf"*) block "rm -rf" ;;
 esac
+
+# ── PART A, STANDING (Bonex 2026-09-06). nginx-proxy-core is the public edge
+#    for every Migrateck domain, and we reach it as ROOT over ssh — so the
+#    ${ELEV} gate below never fires and nothing else guarded it. Verified: a
+#    delete of a live site config, a restart of the edge, a TLS cert delete and
+#    a firewall disable were ALL permitted. Reads stay open; anything that can
+#    change what the edge serves is blocked unless a scoped exception replaces
+#    nginx_edge_exception.
+if edge_target "$CMD"; then
+  case "$CMD" in
+    *"tee "*|*"sed -i"*|*"cp "*|*"mv "*|*"rm "*|*"unlink"*|*" > "*|*" >> "*|\
+    *"chmod"*|*"chown"*|*"truncate"*|*"shred"*|*"ln -s"*|*"systemctl"*|\
+    *"service "*|*"nginx -s"*|*"certbot"*|*"letsencrypt"*|*"ufw "*|\
+    *"iptables"*|*"nft "*|*"apt "*|*"apt-get"*|*"reboot"*|*"shutdown"*|\
+    *"poweroff"*)
+      nginx_edge_exception "$CMD" \
+        || letsencrypt_public_read "$CMD" \
+        || block "write/control on nginx-proxy-core (the public edge)" ;;
+  esac
+fi
 
 if [[ "$CMD" == *"${ELEV} "* ]]; then
   if vm111_migrapilot_provisioning "$CMD"; then
     : # permitted: VM111 MigraPilot provisioning, per Bonex 2026-08-15
   elif dbcore_brain_postgres_provisioning "$CMD"; then
     : # permitted: db-core Brain PostgreSQL provisioning, per Bonex 2026-08-22
+  # NOTE: a MigraCMS commercial-authority env grant (migracms_authority_env) was
+  # DRAFTED here on 2026-09-09 but is deliberately NOT dispatched: Bonex has not
+  # authorized it in writing, and every other exception in this file was. The
+  # proposed rule is kept in docs/migracms/hook-patch-migracms-authority-env.md.
+# NOTE: a temporary migracms-core deploy-pipeline exception (connect-only) and a
+# temporary MigraCMS edge-staging exception existed here on 2026-09-08, authorized
+# by Bonex. They staged cms.migrahosting.com and were REMOVED once the cutover was
+# verified. Exact rules kept in docs/migracms/hook-patch-migracms-extraction.md.
+# The PERMANENT Part 0 edge-identity hardening from that same patch STAYS.
   else
     block "${ELEV} (outside the approved MigraPilot provisioning scopes)"
   fi
