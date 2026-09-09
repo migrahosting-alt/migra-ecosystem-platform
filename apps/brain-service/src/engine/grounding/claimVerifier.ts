@@ -30,6 +30,8 @@
  * PURE: no fs, no fetch, no model. © MigraTeck LLC.
  */
 
+import { adapterFor, significantTerms, tokensOf, type EvidenceScope } from './evidenceTypes.js';
+import type { TypedEvidenceLedger } from './typedEvidenceLedger.js';
 import {
   EvidenceLedger,
   extractCitations,
@@ -53,6 +55,26 @@ export interface ClaimSource {
   startLine: number;
   endLine: number;
   excerptHash: string;
+}
+
+/**
+ * A citation for evidence that is not a file.
+ *
+ * 🚨 SEPARATE FROM {@link ClaimSource} ON PURPOSE, and this is a narrow claim:
+ * only the CITATION SHAPE differs per kind. The verification decision — what
+ * counts as supported, what gets removed — stays in one place for every kind,
+ * because a second decision procedure is how "email claims are trusted"
+ * becomes a standard.
+ *
+ * A message has no line range. Forcing one would be a false locator, and a
+ * reader who followed it would find nothing.
+ */
+export interface OtherClaimSource {
+  kind: 'email';
+  /** How the source names itself to a reader. */
+  cite: string;
+  evidenceId: string;
+  providerMessageId: string;
 }
 
 /** A claim that survived verification. Mirrors the branch's grounding contract. */
@@ -80,6 +102,13 @@ export interface GroundedClaim {
   anchor: SourceAnchor;
   /** Set only on `inference`. */
   basis?: InferenceBasis;
+  /**
+   * Non-repository citations for this claim.
+   *
+   * Present when the claim was grounded in evidence that has no file span. The
+   * claim went through the SAME rules to get here.
+   */
+  otherSources?: OtherClaimSource[];
 }
 
 export type RejectionReason =
@@ -383,6 +412,8 @@ interface SentenceVerdict {
   terms: string[];
   sources: ClaimSource[];
   confidence: 'high' | 'medium' | 'low';
+  /** Citations for evidence with no file span. Same rules, different locator. */
+  otherSources?: OtherClaimSource[];
 }
 
 function toSource(span: EvidenceSpan): ClaimSource {
@@ -390,7 +421,7 @@ function toSource(span: EvidenceSpan): ClaimSource {
 }
 
 /** Classify one sentence against the ledger, given what its block may anchor to. */
-function verifySentence(sentence: string, ledger: EvidenceLedger, anchors: Anchors): SentenceVerdict {
+function verifySentence(sentence: string, ledger: EvidenceLedger, anchors: Anchors, other?: TypedEvidenceLedger): SentenceVerdict {
   const citations = anchors.citations;
   const terms = extractRepoTerms(sentence);
   const hedged = isHedged(sentence);
@@ -404,13 +435,27 @@ function verifySentence(sentence: string, ledger: EvidenceLedger, anchors: Ancho
   // narrative because it happens to be written in plain English would let the
   // easiest kind of fabrication straight through.
   const prose = contentWords(bareProse(sentence));
-  const substantive = terms.length > 0 || prose.length >= SUBSTANTIVE_WORD_COUNT;
+  /*
+   * 🚨 "SUBSTANTIVE" WAS REPO-SHAPED, AND THAT LET EMAIL CLAIMS THROUGH UNJUDGED.
+   *
+   * The test asks for a repository identifier or a long enough sentence. "The
+   * September invoice totals 48273.55." has neither — no identifier, four
+   * words — so it was classified as narrative: not verified, not removed, and
+   * left on screen as though it had been checked. An unjudged factual sentence
+   * is worse than a removed one, because nothing marks it.
+   *
+   * A sentence that shares distinctive vocabulary with retrieved non-repo
+   * evidence IS a claim about that evidence, whatever its length. Repo-only
+   * runs are untouched: `other` is empty, so this asks nothing new.
+   */
+  const claimsOther = Boolean(other && !other.isEmpty() && other.candidatesFor(sentence).length > 0);
+  const substantive = terms.length > 0 || prose.length >= SUBSTANTIVE_WORD_COUNT || claimsOther;
   if (!substantive || prose.length === 0) {
     return { kind: 'narrative', terms: [], sources: [], confidence: 'low' };
   }
 
   // Rule 1 — a term the run never retrieved, anywhere, is fabrication.
-  const absent = terms.filter((t) => !ledger.mentions(t.value));
+  const absent = terms.filter((t) => !ledger.mentions(t.value) && !(other?.mentions(t.value) ?? false));
   if (absent.length > 0) {
     return { kind: 'unsupported', reason: 'term-absent-from-evidence', terms: absent.map((t) => t.value), sources: [], confidence: 'low' };
   }
@@ -452,6 +497,23 @@ function verifySentence(sentence: string, ledger: EvidenceLedger, anchors: Ancho
   // Rule 2 — an unhedged repository claim must resolve to a real retrieved span,
   // either from its own citation or from a file it names that the run actually read.
   if (anchorSpans.length === 0) {
+    /*
+     * 🚨 NOT AN EMAIL BYPASS. A non-repo source has to carry the claim's whole
+     * vocabulary, which is exactly what rule 3 demands of a cited file — the
+     * locator differs, the standard does not. Repo-only runs never reach this
+     * branch, because `other` is empty and it returns null immediately.
+     */
+    const otherSources = groundInOther(sentence, terms, other);
+    if (otherSources) {
+      return {
+        kind: 'direct_evidence',
+        terms: terms.map((t) => t.value),
+        sources: [],
+        otherSources,
+        anchor: 'derived',
+        confidence: 'high',
+      };
+    }
     return { kind: 'unsupported', reason: 'no-source-span', terms: terms.map((t) => t.value), sources: [], confidence: 'low' };
   }
 
@@ -467,6 +529,26 @@ function verifySentence(sentence: string, ledger: EvidenceLedger, anchors: Ancho
   };
   const foreign = terms.filter((t) => !isCitedPath(t) && !termAppearsIn(citedText, t.value));
   if (foreign.length > 0) {
+    /*
+     * 🚨 THE INHERITED ANCHOR MAY SIMPLY BE THE WRONG SUBJECT.
+     *
+     * Prose refers back, so a sentence inherits whatever file was last named —
+     * which is right for "It also validates the header" and wrong for a
+     * sentence about a message that happens to follow one about code. Before
+     * removing it, ask whether non-repo evidence carries it under the SAME
+     * whole-vocabulary standard.
+     *
+     * This is not a softening of rule 3: the sentence still has to have every
+     * term in ONE source. It only stops the answer being judged against a
+     * subject it was never about.
+     */
+    const otherSources = anchor === 'derived' ? groundInOther(sentence, terms, other) : null;
+    if (otherSources) {
+      return {
+        kind: 'direct_evidence', terms: terms.map((t) => t.value), sources: [],
+        otherSources, anchor: 'derived', confidence: 'high',
+      };
+    }
     return { kind: 'unsupported', reason: 'term-not-in-cited-source', terms: foreign.map((t) => t.value), sources: [], confidence: 'low' };
   }
 
@@ -489,6 +571,13 @@ function verifySentence(sentence: string, ledger: EvidenceLedger, anchors: Ancho
         terms: terms.map((t) => t.value),
         sources: anchorSpans.map(toSource),
         confidence: 'low',
+      };
+    }
+    const fromOther = anchor === 'derived' ? groundInOther(sentence, terms, other) : null;
+    if (fromOther) {
+      return {
+        kind: 'direct_evidence', terms: terms.map((t) => t.value), sources: [],
+        otherSources: fromOther, anchor: 'derived', confidence: 'high',
       };
     }
     return { kind: 'unsupported', reason: 'citation-does-not-support', terms: terms.map((t) => t.value), sources: [], confidence: 'low' };
@@ -519,6 +608,93 @@ function verifyCodeBlock(block: Block, ledger: EvidenceLedger): { ok: boolean; m
 export interface VerifyOptions {
   /** The question, used only to phrase the gap statement. */
   question?: string;
+  /**
+   * Whose answer this is.
+   *
+   * 🚨 When given, evidence from any other principal REFUSES the answer rather
+   * than being filtered out of it. Silently dropping it would produce an answer
+   * built from fewer sources than it cites, with nothing saying so.
+   */
+  scope?: EvidenceScope;
+}
+
+/**
+ * Everything a run retrieved, of every kind.
+ *
+ * The repository ledger stays exactly what it was — its caching, expansion and
+ * span logic are qualified behaviour and are not re-derived here. `other`
+ * carries the kinds that have no file span.
+ */
+export interface VerificationSources {
+  repo: EvidenceLedger;
+  other?: TypedEvidenceLedger;
+}
+
+/** Accepts a bare repo ledger so the existing corpus needs no rewriting. */
+function asSources(input: EvidenceLedger | VerificationSources): VerificationSources {
+  return input instanceof EvidenceLedger ? { repo: input } : input;
+}
+
+/**
+ * Can non-repo evidence carry this claim on its own?
+ *
+ * 🚨 THE SAME STANDARD AS RULE 3, APPLIED TO A DIFFERENT LOCATOR. A repository
+ * claim must have its vocabulary in the span it is anchored to; an email claim
+ * must have its vocabulary in the message it is anchored to. What changes is
+ * where the text comes from, not how much of the claim has to be in it.
+ *
+ * Whole tokens, never substrings — `sendInvoice` is not evidence for a claim
+ * about an invoice that arrived by email.
+ */
+/**
+ * Would non-repo evidence carry this claim instead?
+ *
+ * 🚨 A FALLBACK, NEVER A PREFERENCE. Repository rules run first and win; this
+ * is asked only where they would REMOVE the sentence. So a repo claim is never
+ * re-attributed to a message that happens to share its words.
+ *
+ * 🚨 AND NEVER OVER AN EXPLICIT CITATION. When the model cited a file and the
+ * citation does not support the sentence, that is a wrong reference and a hard
+ * failure — rescuing it from elsewhere would have the gate quietly correcting
+ * the model's citations, which is how a confident wrong answer survives.
+ *
+ * That is enforced primarily by the vocabulary rule below: a cited sentence
+ * carries the PATH as one of its terms, and a message never contains a
+ * repository path, so every-term matching can never succeed for it. The
+ * `anchor === 'derived'` guard at the call sites is defence in depth on top of
+ * that, not the mechanism — worth stating, because a guard mistaken for the
+ * mechanism is the kind of thing that gets deleted as redundant.
+ */
+function groundInOther(
+  sentence: string,
+  terms: readonly RepoTerm[],
+  other: TypedEvidenceLedger | undefined,
+): OtherClaimSource[] | null {
+  if (!other || other.isEmpty()) return null;
+
+  const candidates = other.candidatesFor(sentence).filter((c) => c.item.kind !== 'repo');
+  if (candidates.length === 0) return null;
+
+  const wanted = terms.length > 0
+    ? terms.map((t) => t.value.toLowerCase())
+    : significantTerms(sentence);
+  if (wanted.length === 0) return null;
+
+  const sources: OtherClaimSource[] = [];
+  for (const candidate of candidates) {
+    const item = candidate.item;
+    if (item.kind !== 'email') continue;
+    const haystack = tokensOf(`${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`);
+    // EVERY term, exactly as rule 3 demands of a cited file.
+    if (!wanted.every((t) => haystack.has(t))) continue;
+    sources.push({
+      kind: 'email',
+      cite: adapterFor(item).describe(item as never),
+      evidenceId: item.id,
+      providerMessageId: item.locator.providerMessageId,
+    });
+  }
+  return sources.length > 0 ? sources : null;
 }
 
 /**
@@ -528,7 +704,35 @@ export interface VerifyOptions {
  * are removed rather than annotated, because an annotated fabrication is still on
  * screen, and a reader who skims sees the claim and not the warning.
  */
-export function verifyAnswer(raw: string, ledger: EvidenceLedger, opts: VerifyOptions = {}): VerifiedAnswer {
+export function verifyAnswer(
+  raw: string,
+  input: EvidenceLedger | VerificationSources,
+  opts: VerifyOptions = {},
+): VerifiedAnswer {
+  const sources = asSources(input);
+  const ledger = sources.repo;
+  const other = sources.other;
+
+  /*
+   * 🚨 A SCOPE MISMATCH REFUSES THE ANSWER, it does not filter the evidence.
+   *
+   * Filtering would produce an answer built from fewer sources than it was
+   * assembled from, with nothing saying so — and the caller would never learn
+   * that someone else's evidence had been in the run at all.
+   */
+  if (opts.scope && other && (
+    other.scope.principalId !== opts.scope.principalId
+    || other.scope.workspaceId !== opts.scope.workspaceId
+  )) {
+    return {
+      answer: 'This answer could not be verified: it drew on evidence belonging to a different account.',
+      claims: [],
+      rejected: [],
+      refused: true,
+      evidence: { readPaths: [], spanCount: 0, knownPathCount: 0 },
+    };
+  }
+
   const blocks = toBlocks(raw ?? '');
   const claims: GroundedClaim[] = [];
   const rejected: RejectedClaim[] = [];
@@ -571,7 +775,7 @@ export function verifyAnswer(raw: string, ledger: EvidenceLedger, opts: VerifyOp
       if (looksLikeRefusal(body)) sawRefusal = true;
       const kept: string[] = [];
       for (const sentence of toSentences(body)) {
-        const verdict = verifySentence(sentence, ledger, anchors);
+        const verdict = verifySentence(sentence, ledger, anchors, other);
         if (verdict.kind === 'narrative') {
           kept.push(sentence);
           continue;
@@ -587,6 +791,7 @@ export function verifyAnswer(raw: string, ledger: EvidenceLedger, opts: VerifyOp
           confidence: verdict.confidence,
           anchor: verdict.anchor ?? 'derived',
           ...(verdict.basis ? { basis: verdict.basis } : {}),
+          ...(verdict.otherSources ? { otherSources: verdict.otherSources } : {}),
         });
         // Rule — inference must be VISIBLE, per sentence. Labelling the block would
         // leave a hedged sentence sitting unmarked among evidenced ones.
@@ -611,7 +816,32 @@ export function verifyAnswer(raw: string, ledger: EvidenceLedger, opts: VerifyOp
     return { answer: gapStatement(ledger, rejected, claims, opts.question), claims, rejected, refused, evidence };
   }
   const disclosure = rejected.length ? '\n\n' + removalNote(rejected) : '';
-  return { answer: (body || gapStatement(ledger, rejected, claims, opts.question)) + disclosure, claims, rejected, refused, evidence };
+
+  /*
+   * 🚨 PARTIALITY IS DERIVED FROM THE EVIDENCE, NOT COPIED FROM A TOOL.
+   *
+   * A caveat carried over from what a tool reported would be a claim about the
+   * sources rather than a reading of them, and the two can disagree. Attached
+   * here rather than requested of the model, for the reason every such
+   * instruction fails: silently, on the answer nobody was watching.
+   *
+   * Only when a claim actually rests on the partial evidence — an answer that
+   * used none of it should not apologise for it.
+   */
+  const usedOther = claims.some((c) => (c.otherSources?.length ?? 0) > 0);
+  const limitations = usedOther && other ? other.limitations() : [];
+  const partiality = limitations
+    .filter((l) => !(body ?? '').includes(l))
+    .map((l) => `\n\n${l}`)
+    .join('');
+
+  return {
+    answer: (body || gapStatement(ledger, rejected, claims, opts.question)) + disclosure + partiality,
+    claims,
+    rejected,
+    refused,
+    evidence,
+  };
 }
 
 /** Visible marks for reasoning. Distinct texts: the two failure modes differ. */

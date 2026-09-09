@@ -251,3 +251,44 @@ test('🚨 9. whole-token matching is enforced — a substring is not evidence',
   assert.equal(result.refused, true, 'a substring match grounded a claim with no real source');
   assert.ok(!result.answer.includes('48273.55'));
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 A wrong citation is a hard failure, not something to rescue
+ * ------------------------------------------------------------------ */
+
+test('🚨 non-repo evidence must NEVER rescue a claim whose own CITATION is wrong', () => {
+  /*
+   * When the model CITES a file and the citation does not support the sentence,
+   * that is a wrong reference. Grounding it from a message instead would have
+   * the gate quietly correcting the model's citations, and a confident wrong
+   * answer would survive with a source that has nothing to do with it.
+   *
+   * 🚨 WHAT ACTUALLY ENFORCES THIS, stated precisely because I first assumed
+   * otherwise: the cited PATH is one of the claim's terms, and the fallback
+   * requires every term to appear in one non-repo source. A message never
+   * contains a repository path, so a cited sentence can never be rescued.
+   *
+   * The `anchor === 'derived'` guard in the verifier is belt-and-braces on top
+   * of that — removing it does not break this test, and saying so here is
+   * better than implying a mutation would catch it.
+   */
+  const repo = repoLedger();
+
+  // The sentence cites the rate limiter, but says something only the MESSAGE
+  // could support. The citation is wrong; the email must not paper over it.
+  const raw = 'In `src/rateLimiter.ts:1-3` the September invoice totals 48273.55.';
+  const result = verifyAnswer(raw, { repo, other: withMail(mail()) });
+
+  const rescued = result.claims.filter((c) => (c.otherSources?.length ?? 0) > 0);
+  assert.equal(rescued.length, 0, 'a wrong citation was rescued by unrelated email evidence');
+  assert.ok(!result.answer.includes('48273.55'), 'the wrongly-cited claim survived');
+});
+
+test('the same sentence WITHOUT a citation is grounded by the message', () => {
+  // The control: it is the wrongness of the CITATION that blocks the fallback,
+  // not the sentence being about mail.
+  const result = verifyAnswer('The September invoice totals 48273.55.', {
+    repo: repoLedger(), other: withMail(mail()),
+  });
+  assert.equal(result.claims.some((c) => (c.otherSources?.length ?? 0) > 0), true);
+});

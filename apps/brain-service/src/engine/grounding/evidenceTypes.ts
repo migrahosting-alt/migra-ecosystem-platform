@@ -141,14 +141,34 @@ export interface EvidenceAdapter<E extends EvidenceItem = EvidenceItem> {
  * first, and an unanchored ledger has no such protection.
  */
 export function tokensOf(text: string): Set<string> {
-  return new Set((text.toLowerCase().match(/[a-z0-9_.@$-]{2,}/g) ?? []));
+  return new Set(
+    (text.toLowerCase().match(/[a-z0-9_.@$-]{2,}/g) ?? [])
+      .map(trimEdgePunctuation)
+      .filter((t) => t.length >= 2),
+  );
+}
+
+/**
+ * 🚨 A TRAILING SENTENCE PERIOD IS NOT PART OF THE TOKEN.
+ *
+ * `.` has to be inside the character class — `foo.ts` and `48273.55` are single
+ * tokens and splitting them would destroy the two things most worth matching
+ * exactly. The cost is that "48273.55." at the end of a sentence captures the
+ * full stop, and then never matches the "48273.55" in its own source.
+ *
+ * That is not a cosmetic mismatch: it silently breaks every claim that ends on
+ * a number or a filename, which is most claims worth checking.
+ */
+function trimEdgePunctuation(token: string): string {
+  return token.replace(/^[.\-]+/, '').replace(/[.\-]+$/, '');
 }
 
 /** Terms worth matching on: words a claim and its source should share. */
 export function significantTerms(text: string): string[] {
   return [...new Set(
     (text.toLowerCase().match(/[a-z0-9_.@$-]{3,}/g) ?? [])
-      .filter((t) => !STOPWORDS.has(t)),
+      .map(trimEdgePunctuation)
+      .filter((t) => t.length >= 3 && !STOPWORDS.has(t)),
   )];
 }
 
