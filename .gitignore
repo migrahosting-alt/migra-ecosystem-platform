@@ -81,6 +81,17 @@
 !/docs/migrapilot/evidence/
 !/docs/migrapilot/evidence/*.json
 
+# The exact text of every scoped elevation grant. The guard in
+# .claude/hooks/block-dangerous.sh removes each grant once its slice closes and
+# leaves a comment pointing here — but 10 of the 11 documents those comments
+# named existed on exactly one disk, so the record of what elevated access was
+# granted, used and withdrawn was not actually kept anywhere durable. Scoped to
+# the hook-patch documents themselves, not the whole directory.
+!/docs/annoupale/
+!/docs/annoupale/hook-patch-*.md
+!/docs/migracms/
+!/docs/migracms/hook-patch-*.md
+
 # Allow ONLY nginx infra tree
 !infra/
 !infra/nginx/
@@ -146,6 +157,24 @@
 # Allowlist it explicitly so the ignore file matches what the repo actually tracks.
 !/apps/pilot-web/
 !/apps/pilot-web/**
+
+# Canonical MigraCredit repair operations app - recovered from the live
+# app-core deployment and now tracked as the source of truth.
+!/apps/migracredit/
+!/apps/migracredit/**
+
+# Keep generated output, local secrets, and production data out of source.
+/apps/migracredit/.next/
+/apps/migracredit/node_modules/
+/apps/migracredit/.data/
+/apps/migracredit/.backups/
+/apps/migracredit/backups/
+/apps/migracredit/worker-dist/
+/apps/migracredit/.env
+/apps/migracredit/.env.*
+/apps/migracredit/pass.md/
+/apps/migracredit/next-env.d.ts
+/apps/migracredit/tsconfig.tsbuildinfo
 
 # ...but the allowlist above also uncovers pilot-web's RUNTIME and GENERATED output, which
 # was only invisible because the whole directory was ignored. Re-exclude it explicitly:
