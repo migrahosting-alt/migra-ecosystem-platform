@@ -393,3 +393,164 @@ test('🚨 a read after DISCONNECT finds nothing to resolve', async () => {
       'a message was still readable after the mailbox was disconnected');
   }
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Observability — shapes, never content
+ * ------------------------------------------------------------------ */
+
+function observed(records: MailConnectionRecord[]) {
+  const events: Array<Record<string, unknown>> = [];
+  const { store } = storeOf(records);
+  bindEmailExecution({
+    connections: store,
+    key,
+    refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
+    now: () => NOW,
+    telemetry: (event) => events.push(event as unknown as Record<string, unknown>),
+  });
+  return { events };
+}
+
+test('🚨 a measurement carries NO content — not a query, an address or an id', async () => {
+  /*
+   * Metrics are retained longer and read more widely than the mailbox itself.
+   * A label carrying content turns monitoring into a partial mirror of
+   * someone's mail, with weaker access control and a longer retention period.
+   */
+  const { events } = observed([record(ALICE, 'alice-1')]);
+  await executeEmailSearch({ keywords: 'Hetzner invoice for owner@migrateck.com', limit: 5 } as never, ctxFor(ALICE));
+
+  assert.ok(events.length > 0, 'nothing was measured');
+  const serialised = JSON.stringify(events);
+  assert.ok(!serialised.includes('Hetzner'), `the query reached telemetry: ${serialised}`);
+  assert.ok(!serialised.includes('@'), `an address reached telemetry: ${serialised}`);
+  assert.ok(!serialised.includes('alice-1'), 'an account id reached telemetry');
+  assert.ok(!/refresh-|access-/.test(serialised), 'a credential reached telemetry');
+
+  for (const event of events) {
+    assert.deepEqual(
+      Object.keys(event).sort().filter((k) => k !== 'count'),
+      ['durationMs', 'outcome', 'provider', 'stage'],
+    );
+  }
+});
+
+test('🚨 a REFUSAL is measured, not silently unrecorded', async () => {
+  // An operation that refuses is an operational fact. A dashboard that only
+  // counts successes cannot tell "nobody asked" from "everybody was refused".
+  const { events } = observed([record(ALICE, 'alice-1')]);
+  await executeEmailSearch({ keywords: 'x', limit: 5 } as never, undefined);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.outcome, 'refused');
+  assert.equal(events[0]!.stage, 'search');
+});
+
+test('🚨 the outcome vocabulary IS the failure vocabulary', async () => {
+  /*
+   * One vocabulary, so the dashboard and the product cannot disagree about
+   * what happened. A separate mapping drifts, and then an incident is
+   * investigated against the wrong word.
+   */
+  const { events } = observed([record(ALICE, 'alice-1', { authorizationRevokedAt: 1 })]);
+  await executeEmailSearch({ keywords: 'x', limit: 5 } as never, ctxFor(ALICE));
+  assert.equal(events[0]!.outcome, 'authorization_expired');
+});
+
+test('🚨 a count distinguishes "found nothing" from "failed"', async () => {
+  /*
+   * Without it the two look identical on a dashboard, and "search returns
+   * zero" is exactly the symptom a broken integration produces.
+   */
+  const { events } = observed([record(ALICE, 'alice-1', { grantedScopes: [GOOGLE_SCOPES.send] })]);
+  await executeEmailSearch({ keywords: 'x', limit: 5 } as never, ctxFor(ALICE));
+  assert.equal(events[0]!.outcome, 'insufficient_scope');
+  assert.equal(events[0]!.count, undefined, 'a failed search reported a result count');
+});
+
+test('each operation reports its OWN stage', async () => {
+  const { executeEmailReadThread, executeEmailListAttachments } = await import('../src/engine/email/emailExecution.js');
+  const { events } = observed([record(ALICE, 'alice-1')]);
+
+  await executeEmailSearch({ keywords: 'x', limit: 5 } as never, ctxFor(ALICE));
+  __resetInFlightForTest();
+  await executeEmailReadThread('t-1', ctxFor(ALICE));
+  __resetInFlightForTest();
+  await executeEmailListAttachments('m-1', ctxFor(ALICE));
+
+  assert.deepEqual(events.map((e) => e.stage), ['search', 'read_thread', 'attachment_list']);
+});
+
+test('🚨 a GUARDED sink cannot break the operation it measures — and a raw one can', async () => {
+  /*
+   * Both directions, because only the pair proves the wrapper is doing the
+   * work. Asserting the guarded case alone would pass just as happily if
+   * nothing ever threw; asserting the raw case alone would document a hazard
+   * without showing it is handled.
+   *
+   * Production installs the guarded form. Telemetry that can fail a mailbox
+   * read is worse than no telemetry.
+   */
+  const { guarded } = await import('../src/engine/email/telemetry.js');
+  const explode = () => { throw new Error('metrics backend is down'); };
+
+  const bindWith = (telemetry: (e: never) => void) => {
+    const { store } = storeOf([record(ALICE, 'alice-1')]);
+    bindEmailExecution({
+      connections: store,
+      key,
+      refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
+      now: () => NOW,
+      telemetry: telemetry as never,
+    });
+  };
+
+  // Raw: the throw escapes and takes the read with it.
+  bindWith(explode as never);
+  await assert.rejects(
+    () => executeEmailSearch({ keywords: 'x', limit: 5 } as never, undefined),
+    'an unwrapped sink was expected to break the operation',
+  );
+
+  // Guarded: the same sink, and the read completes normally.
+  __resetInFlightForTest();
+  bindWith(guarded(explode) as never);
+  const result = await executeEmailSearch({ keywords: 'x', limit: 5 } as never, undefined);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.failure.kind, 'refused', 'the guarded sink changed the outcome');
+});
+
+test('🚨 a RESOLUTION failure reports its own operation’s stage', async () => {
+  /*
+   * 🚨 ADDED BECAUSE A MUTATION SURVIVED. Every stage assertion here used a
+   * path where resolution SUCCEEDED and the provider failed — so relabelling
+   * the resolution-failure branch of read_thread as 'search' broke nothing.
+   *
+   * A stage that lies about which operation failed sends an investigation to
+   * the wrong lane.
+   */
+  const { executeEmailReadThread, executeEmailListAttachments } = await import('../src/engine/email/emailExecution.js');
+  const { events } = observed([record(ALICE, 'alice-1')]);
+
+  // No principal: fails during resolution, before any provider call.
+  await executeEmailReadThread('t-1', undefined);
+  __resetInFlightForTest();
+  await executeEmailListAttachments('m-1', undefined);
+
+  assert.deepEqual(events.map((e) => e.stage), ['read_thread', 'attachment_list']);
+  for (const event of events) assert.equal(event.outcome, 'refused');
+});
+
+test('🚨 a PROVIDER-side failure reports no count either', async () => {
+  /*
+   * Also added because a mutation survived: the earlier count test exercised a
+   * resolution failure, so attaching a bogus count to the provider-failure
+   * branch went unnoticed. A count of 0 beside a failure reads as "searched
+   * and found nothing", which is the opposite of what happened.
+   */
+  const { events } = observed([record(ALICE, 'alice-1')]);
+  await executeEmailSearch({ keywords: 'x', limit: 5 } as never, ctxFor(ALICE));
+
+  const provider = events.at(-1)!;
+  assert.notEqual(provider.outcome, 'ok', 'the provider was expected to fail in a test environment');
+  assert.equal(provider.count, undefined, 'a failed provider call reported a result count');
+});

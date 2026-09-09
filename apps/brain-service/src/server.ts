@@ -33,6 +33,7 @@ import { registerMailConnectionRoutes } from './engine/email/mailConnectionRoute
 import { durableMailConnections, durableMailPending } from './engine/email/durableMailStores.js';
 import { connectionStatus } from './engine/email/connectionService.js';
 import { bindEmailExecution } from './engine/email/emailExecution.js';
+import { guarded as guardedEmailTelemetry } from './engine/email/telemetry.js';
 import type { MailConnectionStore } from './engine/email/connectionStore.js';
 import { hasMailConnections, hasMailPending } from './engine/persistence/types.js';
 import { oauthConfigFrom, configProblemMessage } from './engine/email/oauthConfig.js';
@@ -961,6 +962,14 @@ async function main(): Promise<void> {
       key: mailKey.key,
       refresh: (refreshToken) => refreshAccessToken(refreshToken, googleDeps),
       now: () => Date.now(),
+      /*
+       * 🚨 GUARDED. An unsafe event never reaches the sink, and a broken
+       * metrics backend never breaks a mailbox read — telemetry that can fail
+       * the operation it measures is worse than no telemetry.
+       */
+      telemetry: guardedEmailTelemetry((event) => {
+        app.log.info({ email: event }, 'email.operation');
+      }),
     });
     registerMailConnectionRoutes(app, {
       provider: 'gmail',

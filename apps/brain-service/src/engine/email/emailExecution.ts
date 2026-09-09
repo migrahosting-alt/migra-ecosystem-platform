@@ -34,6 +34,7 @@ import type { MailConnectionStore } from './connectionStore.js';
 import { mailProviderFor, type ProviderFactoryDeps } from './providerFactory.js';
 import type { RefreshOutcome } from './tokenRefresh.js';
 import type { SealKey } from './tokenSealing.js';
+import type { EmailEventOutcome, EmailStage, EmailTelemetrySink } from './telemetry.js';
 import {
   bridgeAttachment,
   type AttachmentPolicy,
@@ -50,6 +51,14 @@ export interface EmailExecutionBinding {
   key: SealKey;
   refresh(refreshToken: string): Promise<RefreshOutcome>;
   now(): number;
+  /**
+   * Where measurements go. Optional, and dropped when absent.
+   *
+   * 🚨 Wrapped in `guarded` by the installer, so an unsafe event never reaches
+   * a sink and a broken metrics backend never breaks a mailbox read. Telemetry
+   * that can fail an operation is worse than no telemetry.
+   */
+  telemetry?: EmailTelemetrySink;
 }
 
 let binding: EmailExecutionBinding | null = null;
@@ -134,16 +143,53 @@ async function resolveForCaller(
   return { ok: true, provider: resolved.provider };
 }
 
+/**
+ * Record one operation.
+ *
+ * 🚨 SHAPES, NOT CONTENT. The event carries a stage, an outcome, a duration and
+ * a count — never a subject, an address, a query or a message id. Metrics are
+ * retained longer and read more widely than the mailbox itself, so a label
+ * carrying content turns monitoring into a partial mirror of someone's mail.
+ *
+ * The COUNT is deliberately included: "search returned 0" and "search failed"
+ * are different operational facts, and without the count they look identical
+ * on a dashboard.
+ */
+function record(stage: EmailStage, startedAt: number, outcome: EmailEventOutcome, count?: number): void {
+  const sink = binding?.telemetry;
+  if (!sink) return;
+  sink({
+    stage,
+    outcome,
+    provider: 'gmail',
+    durationMs: Math.max(0, (binding?.now() ?? startedAt) - startedAt),
+    ...(count !== undefined ? { count } : {}),
+  });
+}
+
+/** A failure's kind IS its outcome. One vocabulary, so the dashboard and the
+ *  product cannot disagree about what happened. */
+const outcomeOf = (failure: EmailFailure): EmailEventOutcome => failure.kind as EmailEventOutcome;
+
 /** Search the caller's mailbox. */
 export async function executeEmailSearch(
   query: EmailQuery,
   ctx: ToolHandlerContext | undefined,
 ): Promise<EmailExecutionResult> {
+  const startedAt = binding?.now() ?? 0;
   const resolved = await resolveForCaller(ctx, 'search');
-  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+  if (!resolved.ok) {
+    record('search', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
 
   const outcome = await resolved.provider.search(query);
-  return outcome.ok ? { ok: true, messages: outcome.value } : { ok: false, failure: outcome.failure };
+  if (!outcome.ok) {
+    record('search', startedAt, outcomeOf(outcome.failure));
+    return { ok: false, failure: outcome.failure };
+  }
+  record('search', startedAt, 'ok', outcome.value.length);
+  return { ok: true, messages: outcome.value };
 }
 
 export type EmailMessageResult =
@@ -162,10 +208,15 @@ export async function executeEmailReadMessage(
   providerMessageId: string,
   ctx: ToolHandlerContext | undefined,
 ): Promise<EmailMessageResult> {
+  const startedAt = binding?.now() ?? 0;
   const resolved = await resolveForCaller(ctx, 'read');
-  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+  if (!resolved.ok) {
+    record('read_message', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
 
   const outcome = await resolved.provider.readMessage(providerMessageId);
+  record('read_message', startedAt, outcome.ok ? 'ok' : outcomeOf(outcome.failure), outcome.ok ? 1 : undefined);
   return outcome.ok ? { ok: true, message: outcome.value } : { ok: false, failure: outcome.failure };
 }
 
@@ -178,10 +229,19 @@ export async function executeEmailReadThread(
   providerThreadId: string,
   ctx: ToolHandlerContext | undefined,
 ): Promise<EmailThreadResult> {
+  const startedAt = binding?.now() ?? 0;
   const resolved = await resolveForCaller(ctx, 'read');
-  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+  if (!resolved.ok) {
+    record('read_thread', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
 
   const outcome = await resolved.provider.readThread(providerThreadId);
+  record(
+    'read_thread', startedAt,
+    outcome.ok ? 'ok' : outcomeOf(outcome.failure),
+    outcome.ok ? outcome.value.messages.length : undefined,
+  );
   return outcome.ok ? { ok: true, thread: outcome.value } : { ok: false, failure: outcome.failure };
 }
 
@@ -194,10 +254,19 @@ export async function executeEmailListAttachments(
   providerMessageId: string,
   ctx: ToolHandlerContext | undefined,
 ): Promise<EmailAttachmentListResult> {
+  const startedAt = binding?.now() ?? 0;
   const resolved = await resolveForCaller(ctx, 'read');
-  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+  if (!resolved.ok) {
+    record('attachment_list', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
 
   const outcome = await resolved.provider.listAttachments(providerMessageId);
+  record(
+    'attachment_list', startedAt,
+    outcome.ok ? 'ok' : outcomeOf(outcome.failure),
+    outcome.ok ? outcome.value.length : undefined,
+  );
   return outcome.ok ? { ok: true, attachments: outcome.value } : { ok: false, failure: outcome.failure };
 }
 
@@ -224,8 +293,12 @@ export async function executeEmailFetchAttachment(input: {
   policy: AttachmentPolicy;
   ctx: ToolHandlerContext | undefined;
 }): Promise<EmailAttachmentFetchResult> {
+  const startedAt = binding?.now() ?? 0;
   const resolved = await resolveForCaller(input.ctx, 'read');
-  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+  if (!resolved.ok) {
+    record('attachment_read', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
 
   /*
    * Refused BEFORE the bytes are fetched when the provider already told us the
@@ -234,6 +307,7 @@ export async function executeEmailFetchAttachment(input: {
    */
   const declared = input.evidence.sizeBytes;
   if (typeof declared === 'number' && declared > input.policy.maxBytes) {
+    record('attachment_read', startedAt, 'refused');
     return {
       ok: false,
       refusal: { kind: 'too_large', limitBytes: input.policy.maxBytes, actualBytes: declared },
@@ -244,7 +318,10 @@ export async function executeEmailFetchAttachment(input: {
     input.evidence.providerMessageId,
     input.evidence.providerAttachmentId,
   );
-  if (!outcome.ok) return { ok: false, failure: outcome.failure };
+  if (!outcome.ok) {
+    record('attachment_read', startedAt, outcomeOf(outcome.failure));
+    return { ok: false, failure: outcome.failure };
+  }
 
   const bridged = bridgeDownloadedAttachment({
     evidence: input.evidence,
@@ -252,6 +329,7 @@ export async function executeEmailFetchAttachment(input: {
     policy: input.policy,
   });
 
+  record('attachment_read', startedAt, bridged.ok ? 'ok' : 'refused', bridged.ok ? 1 : undefined);
   return bridged.ok
     ? { ok: true, handoff: bridged.handoff }
     : { ok: false, refusal: bridged.refusal };
