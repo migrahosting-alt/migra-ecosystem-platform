@@ -78,10 +78,18 @@ test('🚨 the Google Cloud console values are GENERATED, and asserted exactly',
    */
   assert.deepEqual(googleConsoleSetup('https://chat.example.com'), {
     authorizedRedirectUri: 'https://chat.example.com/api/account/mail/callback',
-    authorizedJavaScriptOrigin: 'https://chat.example.com',
   });
-  // Google rejects a JavaScript origin carrying a path or a trailing slash.
-  assert.ok(!googleConsoleSetup('https://chat.example.com').authorizedJavaScriptOrigin.endsWith('/'));
+  /*
+   * 🚨 A redirect URI and NOTHING else — asserted by deepEqual, so adding a
+   * field here fails rather than silently instructing an operator to register
+   * something extra.
+   *
+   * It previously emitted an authorized JavaScript origin. The flow is
+   * server-side — the browser never calls a Google endpoint — so registering
+   * one would widen the client's surface for a capability nothing uses. The
+   * error was caught at the console, with the value already typed.
+   */
+  assert.deepEqual(Object.keys(googleConsoleSetup('https://chat.example.com')), ['authorizedRedirectUri']);
   // And the redirect the running server would actually receive matches it.
   assert.equal(
     googleConsoleSetup('https://chat.example.com').authorizedRedirectUri,

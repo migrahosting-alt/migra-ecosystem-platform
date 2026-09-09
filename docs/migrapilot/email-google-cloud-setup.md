@@ -1,10 +1,46 @@
 # Migra Email — Google Cloud setup (BONEX'S ACTIONS)
 
-**Status: the code path is built and tested; no Google Cloud resource exists.**
+**Status: partially configured — see the checklist below.**
 
 Steps 1–7 of the ordered plan are complete and committed. This document is
-step 8, and every action in it is yours: the agent must never create, request,
-read back, or store these credentials.
+step 8. The parts that expose no credential have been done; the parts that
+mint or reveal one are yours, because the agent must never create, request,
+read back, or store them.
+
+### Done already (2026-09-08, agent, in the `migrapilot` project)
+
+- Gmail API **enabled** (`gmail.googleapis.com`).
+- Data Access: **`https://www.googleapis.com/auth/gmail.readonly` registered,
+  and nothing else.** It appears under *restricted scopes → Gmail*; the
+  sensitive and non-sensitive tables are empty. No `send`, `compose` or
+  `modify` anywhere.
+- Consent screen Branding was already complete and was **left untouched**:
+  app name `MigraPilot`, support email `migrateck@gmail.com`, authorized
+  domain `migrateck.com`, developer contact `support@migrateck.com`.
+
+### Still yours to do
+
+1. **Press Create** on the OAuth client form (see below). This is where the
+   client secret appears on screen — which is exactly why the agent stops
+   here.
+2. **Add the controlled test account** as a test user. The agent did not,
+   because it has not been told which account that is, and guessing would
+   risk enabling your personal mailbox for automated qualification.
+3. **Set the four environment variables** on the Brain.
+
+### The project's OAuth posture, as found
+
+- User type **External**, publishing status **Testing**, `0 users / 100 cap`,
+  **no test users yet** — so only accounts you add as test users can consent.
+- There is one pre-existing OAuth client, **`MigraPilot` (Web application,
+  created 24 Aug 2026)**. It was not modified. The new mail client is separate
+  so the two have independent secrets and can be revoked independently.
+- The console reports the app's OAuth configuration as "incomplete" and points
+  at Branding. Every *required* Branding field is filled and its Save button is
+  disabled, so nothing is pending there; the missing pieces are the optional-
+  looking **application home page, privacy policy and terms of service**, which
+  are required to *publish* and to pass verification — not to run in Testing.
+  Read-only qualification does not need them; a public launch will.
 
 Until the four environment variables below are set, the Brain logs
 `EMAIL CONNECT DISABLED` with the specific reason and serves everything else
@@ -24,22 +60,29 @@ For `MIGRAPILOT_PUBLIC_ORIGIN = https://chat.migrateck.com`:
 | Console field | Exact value |
 |---|---|
 | Authorized redirect URI | `https://chat.migrateck.com/api/account/mail/callback` |
-| Authorized JavaScript origin | `https://chat.migrateck.com` |
+| Authorized JavaScript origins | **none — leave empty** |
 
-No trailing slash on either. The redirect URI must match **character for
-character** — Google compares it literally, and a mismatch fails at a user's
-sign-in with `redirect_uri_mismatch`, not at deploy time.
+The redirect URI must match **character for character** — Google compares it
+literally, and a mismatch fails at a user's sign-in with
+`redirect_uri_mismatch`, not at deploy time.
+
+🚨 **No JavaScript origin.** An earlier version of this page told you to
+register one, and that was wrong: the flow is server-side, the browser is
+redirected *to* Google and Google redirects back to our own route, and no page
+ever calls a Google endpoint directly. Registering an origin would widen the
+client's surface for a capability nothing uses. `googleConsoleSetup()` no
+longer emits one, and a test asserts it emits only the redirect URI.
 
 ---
 
 ## What to create
 
-1. **Google Cloud project** — your account, your choice of project. The console
-   already had `migrapilot` selected when this was last checked.
+1. ~~**Google Cloud project**~~ — done: `MigraPilot`, project ID `migrapilot`,
+   project number `612143233496`, owner `migrateck@gmail.com`.
 
-2. **Enable the Gmail API** for that project.
+2. ~~**Enable the Gmail API**~~ — done.
 
-3. **OAuth consent screen**
+3. ~~**OAuth consent screen**~~ — scope registered; branding already complete
    - User type: whichever suits the account you are using.
    - Scopes: add **only** `https://www.googleapis.com/auth/gmail.readonly` for
      now. `gmail.compose` and `gmail.send` come later, deliberately — a consent

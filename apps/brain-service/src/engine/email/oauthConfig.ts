@@ -182,14 +182,24 @@ export function expectedRedirectUri(publicOrigin: string): string {
  */
 export function googleConsoleSetup(publicOrigin: string): {
   authorizedRedirectUri: string;
-  authorizedJavaScriptOrigin: string;
 } {
   const origin = new URL(publicOrigin).origin;
-  return {
-    authorizedRedirectUri: `${origin}${CALLBACK_PATH}`,
-    // Google requires the origin with no trailing slash and no path.
-    authorizedJavaScriptOrigin: origin,
-  };
+  /*
+   * 🚨 A REDIRECT URI, AND NOTHING ELSE.
+   *
+   * This deliberately does NOT emit an authorized JavaScript origin. The flow
+   * is server-side: the browser is redirected TO Google and Google redirects
+   * back to our own route, and no page ever calls a Google endpoint directly.
+   * Registering an origin for it would widen the client's surface for a
+   * capability nothing uses.
+   *
+   * An earlier version returned one, and it would have been entered into the
+   * console by an operator following this output — a generator that emits a
+   * value nobody should register is a trap, not a convenience. If a
+   * browser-side Google call is ever added, add the origin then, with the
+   * thing that needs it.
+   */
+  return { authorizedRedirectUri: `${origin}${CALLBACK_PATH}` };
 }
 
 export function scopesFor(grants: readonly GrantKind[]): string[] {
