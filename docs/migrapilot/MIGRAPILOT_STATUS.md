@@ -7,11 +7,62 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-07_
+_Last updated: 2026-09-08_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Lane 2026-09-08 — Migra Email: the OAuth path, steps 1–7
+
+Built in the order Bonex set, and stopped exactly where a human has to act. **No Google Cloud
+resource exists**; no credential has been created, read back or stored.
+
+Gate: brain **2938/2938**, consumer **1124/1124**, 0 fail, 0 skipped — including 12 tests against a
+real PostgreSQL, which is what proves migrations 27 and 28 apply rather than merely compile.
+
+**What each step decided, in one line:**
+
+| Step | The decision that mattered |
+|---|---|
+| 1. Config | The console is configured from the code, not the code from the console. `googleConsoleSetup()` generates the two exact values. |
+| 2. Callback | The principal check runs **before** the exchange, so a forged callback costs nothing; three forged refusals share one sentence, because distinguishing them is a probing oracle. |
+| 3. Token storage | Sealed under a key held **outside** the database. The AAD binds each ciphertext to its row — encryption stops a database *reader* and does nothing about a *writer*. |
+| 4. Refresh | Only an explicit `invalid_grant` marks a grant revoked. A 500, a timeout and an unrecognised 400 are unavailability. |
+| 5. Provider | The factory takes **no access token** — the absence of the parameter is the guarantee. |
+| 6. Redirect URI | `https://chat.migrateck.com/api/account/mail/callback`, generated and asserted exactly on both sides. |
+| 7. Routes | Scope always from request identity. Single-use state is `DELETE … RETURNING` in one statement, proven by racing ten concurrent takes. |
+
+**Why a refresh token is sealed when conversations are not.** It is a credential to a system that is
+not ours: it opens the user's actual mailbox from anywhere, survives a Migra password change, and
+does not expire on its own. A database dump must not be a permanent key to every connected mailbox.
+
+**The distinction that is easiest to get backwards.** An unreadable seal is *not*
+`authorization_expired`. That state's remedy is "reconnect" — and reconnecting would overwrite a good
+row to work around a misconfigured key, destroying the evidence. It surfaces as unavailability, and
+the operator gets the real fact.
+
+**Six test defects that mutation testing caught** — each one a test that passed against a
+deliberately broken implementation. The two worth repeating: the AAD collision fixture varied two
+fields that are *not adjacent* in the serialisation, so raw concatenation still produced different
+bytes; and every consumer "signed-out" test had no principal at all, so it exercised the wrong guard
+and never reached the one under test. Allowing anonymous mailbox connections broke nothing until a
+test configured the signing secret that makes an anonymous principal exist.
+
+**Measured, not assumed:** Fastify hands a GET handler no body at all, so one assertion there is
+carried by the framework rather than by route code. The test says so.
+
+### What is left, and who does it
+
+- **Bonex:** `docs/migrapilot/email-google-cloud-setup.md` — consent screen, Gmail API, web OAuth
+  client, the exact redirect URI, four environment variables, and a sealing key generated with
+  `openssl rand -base64 32` (never pasted into chat, a commit or a screenshot).
+- **Approval needed:** migrations 27 and 28 have **not** been applied to production. Production is
+  still schema 26 on `chat-platform-rc-0908`. Nothing is staged or deployed.
+- **Not built:** no UI control calls these routes yet; send orchestration is still unwired; only
+  `gmail.readonly` is requested, deliberately.
 
 ---
 
