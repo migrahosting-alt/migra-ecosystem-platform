@@ -73,6 +73,8 @@ export interface EmailThreadEvidence {
 
 export interface EmailAttachmentEvidence {
   id: string;
+  /** 🚨 The STABLE handle — see EmailAttachment.ref. Not a provider token. */
+  ref: string;
   /** 🚨 The message it came from. Provenance survives the file pipeline. */
   messageId: string;
   providerMessageId: string;
@@ -179,6 +181,7 @@ export function attachmentEvidence(
     messageId: message.id,
     providerMessageId: message.providerMessageId,
     providerThreadId: message.providerThreadId,
+    ref: attachment.ref,
     providerAttachmentId: attachment.providerAttachmentId,
     filename: attachment.filename,
     mimeType: attachment.mimeType,

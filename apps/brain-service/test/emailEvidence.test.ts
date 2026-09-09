@@ -179,6 +179,7 @@ const bytes = (n: number) => new Uint8Array(n);
 const attEvidence = (over: { filename?: string; mimeType?: string } = {}) =>
   attachmentEvidence(
     {
+      ref: 'ref-pa1',
       providerAttachmentId: 'pa1',
       filename: over.filename ?? 'invoice.pdf',
       mimeType: over.mimeType ?? 'application/pdf',

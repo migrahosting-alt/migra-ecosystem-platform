@@ -41,6 +41,21 @@ export interface EmailAddress {
 
 /** Attachment METADATA. Bytes are fetched separately and only when authorized. */
 export interface EmailAttachment {
+  /**
+   * 🚨 A STABLE HANDLE FOR THIS ATTACHMENT — ours, not the provider's.
+   *
+   * Gmail's `attachmentId` is regenerated on EVERY `messages.get`: two reads of
+   * the same immutable message return two different 404-character blobs.
+   * Measured against the live QA mailbox, where "list then fetch" returned
+   * not_found every time because the id had already changed underneath it.
+   *
+   * So the product hands out a reference derived from what does not change —
+   * the attachment's position and identity within the message — and resolves it
+   * to whatever ephemeral id the provider emits on the read that fetches the
+   * bytes. A caller never holds a provider token, which is also what keeps
+   * Gmail's shapes inside the adapter.
+   */
+  ref: string;
   /** Provider-scoped identity. Internal — never rendered as user-facing text. */
   providerAttachmentId: string;
   filename: string;

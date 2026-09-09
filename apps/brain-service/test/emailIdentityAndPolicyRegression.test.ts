@@ -222,6 +222,7 @@ const source = (...rel: string[]) => readFileSync(join(process.cwd(), ...rel), '
 
 const attachment = (over: Partial<EmailAttachmentEvidence> = {}): EmailAttachmentEvidence => ({
   id: 'att_1',
+  ref: 'ref-att-1',
   messageId: 'msg_1',
   providerMessageId: 'pm_1',
   providerThreadId: 'pt_1',

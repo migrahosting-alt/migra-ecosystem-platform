@@ -36,6 +36,8 @@
  * inbox would put someone's correspondence in the repository permanently.
  */
 
+import { createHash } from 'node:crypto';
+
 import type {
   EmailAddress,
   EmailAttachment,
@@ -193,13 +195,35 @@ function findPart(part: GmailPart | undefined, mimeType: string): GmailPart | un
 }
 
 /** Every part that is an attachment: it has a filename and an attachment id. */
+/**
+ * A stable reference for one attachment within one message.
+ *
+ * 🚨 DERIVED FROM WHAT DOES NOT CHANGE. Gmail's own attachment id changes on
+ * every read, so it is deliberately NOT an input here. Ordinal position,
+ * filename, type and size are properties of an immutable message and are
+ * identical on every read of it.
+ *
+ * Hashed rather than concatenated so the value is opaque, fixed-length and safe
+ * to put in a URL or a log line — a raw `0|invoice.pdf|application/pdf|27194`
+ * would leak a filename into places a filename should not go.
+ */
+function attachmentRef(ordinal: number, filename: string, mimeType: string, size: number | undefined): string {
+  return createHash('sha256')
+    .update(`${ordinal}\u0000${filename}\u0000${mimeType}\u0000${size ?? ''}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+
 function collectAttachments(part: GmailPart | undefined, into: EmailAttachment[] = []): EmailAttachment[] {
   if (!part) return into;
   if (part.filename && part.body?.attachmentId) {
+    const mimeType = part.mimeType ?? 'application/octet-stream';
     into.push({
+      // The ordinal is `into.length` — the position in a deterministic walk.
+      ref: attachmentRef(into.length, part.filename, mimeType, part.body.size),
       providerAttachmentId: part.body.attachmentId,
       filename: part.filename,
-      mimeType: part.mimeType ?? 'application/octet-stream',
+      mimeType,
       ...(part.body.size !== undefined ? { sizeBytes: part.body.size } : {}),
     });
   }
@@ -654,16 +678,24 @@ export class GmailProvider implements EmailProvider {
    */
   async readAttachment(
     providerMessageId: string,
-    providerAttachmentId: string,
+    /** 🚨 OUR stable ref — see EmailAttachment.ref. Never a provider token. */
+    attachmentRefValue: string,
   ): Promise<EmailOutcome<{ filename: string; mimeType: string; bytes: Uint8Array }>> {
     if (!this.configured) return this.unconfigured();
     const startedAt = this.#now();
 
+    /*
+     * 🚨 THE PROVIDER ID IS TAKEN FROM *THIS* READ, and used immediately.
+     *
+     * Gmail regenerates it per response, so an id captured by an earlier
+     * listing is already dead. Matching on our own ref and then using the id
+     * from the same payload is what makes list-then-fetch work at all.
+     */
     const message = await this.#getMessage(providerMessageId, 'full');
     if (!message.ok) return this.fail(message.failure, startedAt);
 
     const attachment = message.value.attachments.find(
-      (candidate) => candidate.providerAttachmentId === providerAttachmentId,
+      (candidate) => candidate.ref === attachmentRefValue,
     );
     // Not on this message. Reported as not_found rather than fetched anyway:
     // an attachment id is only meaningful against the message that carries it.
@@ -671,7 +703,7 @@ export class GmailProvider implements EmailProvider {
 
     const raw = await this.#call<{ data?: string }>(
       `/messages/${encodeURIComponent(providerMessageId)}`
-        + `/attachments/${encodeURIComponent(providerAttachmentId)}`,
+        + `/attachments/${encodeURIComponent(attachment.providerAttachmentId)}`,
     );
     if (!raw.ok) return this.fail(raw.failure, startedAt);
     if (typeof raw.value.data !== 'string') {

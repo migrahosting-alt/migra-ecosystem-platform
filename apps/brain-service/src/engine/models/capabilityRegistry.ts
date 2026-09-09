@@ -240,7 +240,19 @@ export const EmailSearchRequestSchema = z.object({
    * derived server-side from the message this caller's own connection returns,
    * so a prompt cannot decide what a downloaded file claims to be.
    */
-  attachmentId: z.string().min(1).max(200).optional(),
+  /**
+   * 🚨 BOUNDED, BUT NOT BY A GUESS.
+   *
+   * A provider attachment id is an OPAQUE blob, not an identifier with a shape
+   * we get to choose. Real Gmail ids measured against the live QA mailbox are
+   * 404 characters; the original 200-character cap rejected every genuine
+   * attachment before the provider was ever called, and the refusal read as
+   * "invalid input" rather than "our limit is wrong".
+   *
+   * Still bounded — an unbounded string is an unbounded log line and an
+   * unbounded URL — but bounded well clear of what the provider actually emits.
+   */
+  attachmentId: z.string().min(1).max(2048).optional(),
   /** Required by readMessage. Meaningless across mailboxes — see the executor. */
   messageId: z.string().min(1).max(200).optional(),
   from: z.string().max(200).optional(),
@@ -642,7 +654,8 @@ const TOOLS: RunnableCapability[] = [
            */
           const result = await executeEmailIngestAttachment({
             providerMessageId: request.messageId,
-            providerAttachmentId: request.attachmentId,
+            // The caller names OUR ref from a listing, never a provider token.
+            attachmentRef: request.attachmentId,
             ctx,
           });
           if (result.ok) return { ok: true, file: result.handoff };

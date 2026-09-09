@@ -389,7 +389,15 @@ test('🚨 the filename and type come from the MESSAGE, never from the caller', 
       ? { status: 200, body: { data: Buffer.from('%PDF-1.4 real bytes').toString('base64url') } }
       : { status: 200, body: WITH_ATTACHMENT });
 
-  const outcome = await provider.readAttachment('m1', 'att1');
+  /*
+   * Resolved by OUR ref, obtained from a listing — the provider's own id is
+   * regenerated per read and cannot be held onto.
+   */
+  const listed = await provider.listAttachments('m1');
+  assert.equal(listed.ok, true);
+  if (!listed.ok) return;
+
+  const outcome = await provider.readAttachment('m1', listed.value[0]!.ref);
   assert.equal(outcome.ok, true);
   if (outcome.ok) {
     assert.equal(outcome.value.filename, 'invoice.pdf');

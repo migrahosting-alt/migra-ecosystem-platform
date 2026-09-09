@@ -380,7 +380,8 @@ export async function executeEmailFetchAttachment(input: {
 
   const outcome = await resolved.provider.readAttachment(
     input.evidence.providerMessageId,
-    input.evidence.providerAttachmentId,
+    // Our ref, not the provider's ephemeral id.
+    input.evidence.ref,
   );
   if (!outcome.ok) {
     record('attachment_read', startedAt, outcomeOf(outcome.failure));
@@ -448,7 +449,8 @@ export function bridgeDownloadedAttachment(input: {
  */
 export async function executeEmailIngestAttachment(input: {
   providerMessageId: string;
-  providerAttachmentId: string;
+  /** 🚨 OUR stable ref, from a listing. A provider token would already be dead. */
+  attachmentRef: string;
   ctx: ToolHandlerContext | undefined;
 }): Promise<EmailAttachmentFetchResult> {
   const startedAt = binding?.now() ?? 0;
@@ -470,7 +472,7 @@ export async function executeEmailIngestAttachment(input: {
   }
 
   const attachment = message.value.attachments.find(
-    (candidate) => candidate.providerAttachmentId === input.providerAttachmentId,
+    (candidate) => candidate.ref === input.attachmentRef,
   );
   if (!attachment) {
     // Named something this message does not carry. Reported as not_found rather

@@ -66,6 +66,16 @@ export interface CanonicalFileHandoff {
     source: 'email';
     providerMessageId: string;
     providerThreadId: string;
+    /**
+     * 🚨 THE HANDLE THAT STILL WORKS LATER.
+     *
+     * `providerAttachmentId` below is recorded for the audit trail, but Gmail
+     * regenerates it on every read — so by the time anyone reads this
+     * provenance it refers to nothing. A document that cannot be traced back to
+     * a re-fetchable attachment has provenance in name only.
+     */
+    attachmentRef: string;
+    /** What was used at the time. Historical record; NOT re-usable. */
     providerAttachmentId: string;
     messageEvidenceId: string;
     attachmentEvidenceId: string;
@@ -157,6 +167,7 @@ export function bridgeAttachment(input: {
         source: 'email',
         providerMessageId: evidence.providerMessageId,
         providerThreadId: evidence.providerThreadId,
+        attachmentRef: evidence.ref,
         providerAttachmentId: evidence.providerAttachmentId,
         messageEvidenceId: evidence.messageId,
         attachmentEvidenceId: evidence.id,

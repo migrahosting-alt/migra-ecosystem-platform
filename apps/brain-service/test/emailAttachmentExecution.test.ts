@@ -73,6 +73,7 @@ function record(scope: typeof ALICE, accountId: string, over: Partial<MailConnec
 
 const evidence = (over: Partial<EmailAttachmentEvidence> = {}): EmailAttachmentEvidence => ({
   id: 'att-ev-1',
+  ref: 'ref-att-1',
   messageId: 'msg-ev-1',
   providerMessageId: 'pm-1',
   providerThreadId: 'pt-1',
