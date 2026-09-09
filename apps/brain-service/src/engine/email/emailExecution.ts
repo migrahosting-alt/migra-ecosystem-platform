@@ -34,7 +34,16 @@ import type { MailConnectionStore } from './connectionStore.js';
 import { mailProviderFor, type ProviderFactoryDeps } from './providerFactory.js';
 import type { RefreshOutcome } from './tokenRefresh.js';
 import type { SealKey } from './tokenSealing.js';
-import type { EmailFailure, EmailMessage, EmailProvider, EmailQuery, EmailThread } from './types.js';
+import {
+  bridgeAttachment,
+  type AttachmentPolicy,
+  type BridgeRefusal,
+  type CanonicalFileHandoff,
+} from './attachmentBridge.js';
+import type { EmailAttachmentEvidence } from './evidence.js';
+import type {
+  EmailAttachment, EmailFailure, EmailMessage, EmailProvider, EmailQuery, EmailThread,
+} from './types.js';
 
 export interface EmailExecutionBinding {
   connections: MailConnectionStore;
@@ -174,4 +183,106 @@ export async function executeEmailReadThread(
 
   const outcome = await resolved.provider.readThread(providerThreadId);
   return outcome.ok ? { ok: true, thread: outcome.value } : { ok: false, failure: outcome.failure };
+}
+
+export type EmailAttachmentListResult =
+  | { ok: true; attachments: EmailAttachment[] }
+  | { ok: false; failure: EmailFailure };
+
+/** What a message carries, without fetching any of it. */
+export async function executeEmailListAttachments(
+  providerMessageId: string,
+  ctx: ToolHandlerContext | undefined,
+): Promise<EmailAttachmentListResult> {
+  const resolved = await resolveForCaller(ctx, 'read');
+  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+
+  const outcome = await resolved.provider.listAttachments(providerMessageId);
+  return outcome.ok ? { ok: true, attachments: outcome.value } : { ok: false, failure: outcome.failure };
+}
+
+export type EmailAttachmentFetchResult =
+  | { ok: true; handoff: CanonicalFileHandoff }
+  | { ok: false; failure: EmailFailure }
+  /** The bytes arrived but the pipeline will not take them. A different fact. */
+  | { ok: false; refusal: BridgeRefusal };
+
+/**
+ * Fetch one attachment and hand it to the canonical file pipeline.
+ *
+ * 🚨 THE ATTACHMENT INHERITS THE MESSAGE'S SCOPE, because it is fetched through
+ * the same per-caller provider. There is no path here that takes bytes from
+ * anywhere else: an attachment id alone cannot reach a mailbox, and a caller
+ * with no connection gets no bytes rather than someone else's.
+ *
+ * 🚨 THE POLICY IS INJECTED. Allowed types and size limits belong to the file
+ * pipeline; restating them here would create a second source of truth that
+ * disagrees with the uploader the first time either changes.
+ */
+export async function executeEmailFetchAttachment(input: {
+  evidence: EmailAttachmentEvidence;
+  policy: AttachmentPolicy;
+  ctx: ToolHandlerContext | undefined;
+}): Promise<EmailAttachmentFetchResult> {
+  const resolved = await resolveForCaller(input.ctx, 'read');
+  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+
+  /*
+   * Refused BEFORE the bytes are fetched when the provider already told us the
+   * size. Downloading a 200MB file to then refuse it spends the user's time and
+   * our memory to reach a conclusion we could have drawn from the listing.
+   */
+  const declared = input.evidence.sizeBytes;
+  if (typeof declared === 'number' && declared > input.policy.maxBytes) {
+    return {
+      ok: false,
+      refusal: { kind: 'too_large', limitBytes: input.policy.maxBytes, actualBytes: declared },
+    };
+  }
+
+  const outcome = await resolved.provider.readAttachment(
+    input.evidence.providerMessageId,
+    input.evidence.providerAttachmentId,
+  );
+  if (!outcome.ok) return { ok: false, failure: outcome.failure };
+
+  const bridged = bridgeDownloadedAttachment({
+    evidence: input.evidence,
+    downloaded: outcome.value,
+    policy: input.policy,
+  });
+
+  return bridged.ok
+    ? { ok: true, handoff: bridged.handoff }
+    : { ok: false, refusal: bridged.refusal };
+}
+
+/**
+ * Judge what actually arrived.
+ *
+ * 🚨 THE DOWNLOAD WINS OVER THE LISTING, and this is a separate exported
+ * function so that can be tested at all: the Gmail adapter has no HTTP seam
+ * yet, so nothing downstream of a successful provider read is otherwise
+ * reachable from a test. Extracting it is the difference between a claim and
+ * an assertion.
+ *
+ * Why it matters: a listing is metadata from the sender's side of the world. A
+ * message can advertise `notes.txt` and deliver a name — or a size — that the
+ * policy would have refused. Re-judging the bytes we hold means the limit is
+ * applied to the file, not to a promise about it.
+ */
+export function bridgeDownloadedAttachment(input: {
+  evidence: EmailAttachmentEvidence;
+  downloaded: { filename: string; mimeType: string; bytes: Uint8Array };
+  policy: AttachmentPolicy;
+}) {
+  return bridgeAttachment({
+    evidence: {
+      ...input.evidence,
+      filename: input.downloaded.filename,
+      mimeType: input.downloaded.mimeType,
+    },
+    bytes: input.downloaded.bytes,
+    policy: input.policy,
+  });
 }
