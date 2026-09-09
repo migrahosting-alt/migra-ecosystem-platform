@@ -26,6 +26,7 @@ import {
   executeEmailReadMessage,
   executeEmailIngestAttachment,
   executeEmailListAttachments,
+  executeEmailSummarize,
   executeEmailReadThread,
   executeEmailSearch,
 } from '../email/emailExecution.js';
@@ -231,7 +232,7 @@ export const LOCAL_GRANTS: ReadonlySet<string> = new Set([
  * existed keeps working.
  */
 export const EmailSearchRequestSchema = z.object({
-  op: z.enum(['search', 'readMessage', 'readThread', 'listAttachments', 'fetchAttachment']).optional(),
+  op: z.enum(['search', 'readMessage', 'readThread', 'listAttachments', 'fetchAttachment', 'summarize']).optional(),
   /**
    * 🚨 An attachment is named by ID, never described.
    *
@@ -554,7 +555,7 @@ const TOOLS: RunnableCapability[] = [
      */
     handler: async (input, ctx) => {
       const request = input as {
-        op?: 'search' | 'readMessage' | 'readThread' | 'listAttachments' | 'fetchAttachment';
+        op?: 'search' | 'readMessage' | 'readThread' | 'listAttachments' | 'fetchAttachment' | 'summarize';
         messageId?: string;
         threadId?: string;
         attachmentId?: string;
@@ -575,6 +576,37 @@ const TOOLS: RunnableCapability[] = [
           }
           const result = await executeEmailReadThread(request.threadId, ctx);
           return result.ok ? { ok: true, thread: result.thread } : { ok: false, failure: result.failure };
+        }
+        case 'summarize': {
+          /*
+           * 🚨 ONE IMPLEMENTATION, reached identically from the HTTP tools
+           * route and from inside the autonomous loop — both arrive here.
+           *
+           * The scope is a thread, a message, or a query; the evidence is read
+           * through the caller's own connection, and the disclosure for a
+           * partial source set is attached by the executor rather than asked of
+           * the model.
+           */
+          const result = await executeEmailSummarize({
+            ...(request.threadId ? { threadId: request.threadId } : {}),
+            ...(request.messageId ? { messageId: request.messageId } : {}),
+            ...(typeof request.keywords === 'string' ? { keywords: request.keywords } : {}),
+            ...(request.limit ? { limit: request.limit } : {}),
+            ctx,
+          });
+          if (result.ok) {
+            return {
+              ok: true,
+              summary: result.summary,
+              complete: result.complete,
+              // Provenance travels with the answer: a claim with no source here
+              // has no basis, and a reader can open the message it came from.
+              sources: result.sources,
+            };
+          }
+          return 'refusal' in result
+            ? { ok: false, refusal: result.refusal }
+            : { ok: false, failure: result.failure };
         }
         case 'listAttachments': {
           if (!request.messageId) {

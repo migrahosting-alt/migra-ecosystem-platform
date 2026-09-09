@@ -974,6 +974,39 @@ async function main(): Promise<void> {
        */
       filePipeline: { maxFileMb: process.env.MIGRAPILOT_MAX_FILE_MB },
       /*
+       * 🚨 THE SUMMARISER GETS TEXT AND NOTHING ELSE.
+       *
+       * No provider, no connection, no credential, no principal — the material
+       * it is handed has already been resolved, scoped to the caller and
+       * completeness-checked. It cannot reach a mailbox even if asked to,
+       * because it is given nothing to fetch with.
+       *
+       * A non-2xx or an unparseable answer THROWS, which the executor maps to
+       * unavailability. Returning empty text instead would surface as a
+       * confident summary of nothing.
+       */
+      generateSummary: async ({ instructions, material }) => {
+        const base = env.providerBaseUrl.replace(/\/$/, '');
+        const res = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: env.defaultModel ?? env.localModel,
+            messages: [
+              { role: 'system', content: instructions },
+              { role: 'user', content: material },
+            ],
+            temperature: 0,
+            stream: false,
+          }),
+        });
+        if (!res.ok) throw new Error(`summariser responded ${res.status}`);
+        const body = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+        const text = body.choices?.[0]?.message?.content;
+        if (typeof text !== 'string' || !text.trim()) throw new Error('summariser returned no text');
+        return text;
+      },
+      /*
        * 🚨 GUARDED. An unsafe event never reaches the sink, and a broken
        * metrics backend never breaks a mailbox read — telemetry that can fail
        * the operation it measures is worse than no telemetry.

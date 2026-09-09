@@ -85,6 +85,16 @@ export async function selectAccount(input: {
 
 export interface ProviderFactoryDeps extends RefreshDeps {
   /**
+   * The HTTP transport the provider uses.
+   *
+   * Injected for the same reason `exchangeRefresh` is: the read path is only
+   * provable end-to-end if a test can decide what the provider answers. Absent
+   * means the real network, which is what production leaves it as.
+   */
+  transport?: typeof globalThis.fetch;
+  /** Provider API base. Overridden only by tests; production leaves it unset. */
+  providerBaseUrl?: string;
+  /**
    * False when the deployment has no OAuth client or no sealing key. Distinct
    * from "this user has not connected": one is an operator's problem and the
    * other is the user's next action.
@@ -155,7 +165,10 @@ export async function mailProviderFor(input: {
 
   return {
     ok: true,
-    provider: buildProvider(input.provider, authorization.value, input.deps.now),
+    provider: buildProvider(input.provider, authorization.value, input.deps.now, {
+      ...(input.deps.transport ? { fetch: input.deps.transport } : {}),
+      ...(input.deps.providerBaseUrl ? { baseUrl: input.deps.providerBaseUrl } : {}),
+    }),
     account: {
       providerAccountId: authorization.value.providerAccountId,
       accountAddress: authorization.value.accountAddress,
@@ -175,6 +188,7 @@ function buildProvider(
   provider: string,
   authorization: ResolvedAuthorization,
   now: () => number,
+  wire: { fetch?: typeof globalThis.fetch; baseUrl?: string } = {},
 ): EmailProvider {
   switch (provider) {
     case 'gmail':
@@ -183,6 +197,7 @@ function buildProvider(
           accessToken: authorization.accessToken,
           accountAddress: authorization.accountAddress,
           scopes: authorization.scopes,
+          ...wire,
         },
         now,
       );

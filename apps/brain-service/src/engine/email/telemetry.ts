@@ -27,6 +27,8 @@ export type EmailStage =
   | 'read_thread'
   | 'attachment_list'
   | 'attachment_read'
+  /* Orchestration over evidence already read — never a provider operation. */
+  | 'summarize'
   | 'draft_compose'
   | 'send_propose'
   | 'send_dispatch';

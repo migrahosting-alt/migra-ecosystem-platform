@@ -46,7 +46,13 @@ import {
   type BridgeRefusal,
   type CanonicalFileHandoff,
 } from './attachmentBridge.js';
-import { attachmentEvidence, messageEvidence, type EmailAttachmentEvidence } from './evidence.js';
+import {
+  attachmentEvidence, messageEvidence, summariseFrom, threadEvidence,
+  type EmailAttachmentEvidence, type EmailMessageEvidence,
+} from './evidence.js';
+import {
+  renderSummary, summaryContextFrom, summaryInstructions, summaryMaterial,
+} from './emailSummary.js';
 import type {
   EmailAttachment, EmailFailure, EmailMessage, EmailProvider, EmailQuery, EmailThread,
 } from './types.js';
@@ -73,6 +79,23 @@ export interface EmailExecutionBinding {
    * choose its own limits. Configuration is the only thing a deployment owns.
    */
   filePipeline: FilePipelineConfig;
+  /**
+   * Turn grounded material into prose.
+   *
+   * 🚨 IT RECEIVES TEXT, AND ONLY TEXT. No provider, no connection, no
+   * credential, no principal — the summariser cannot reach a mailbox even by
+   * accident, because it is handed the finished material and nothing to fetch
+   * with. Everything it may state has already been resolved, scoped and
+   * completeness-checked by the caller below.
+   *
+   * Absent means the deployment cannot summarise, and `op: summarize` refuses
+   * saying so. A summary invented without a generator would be the confident
+   * fabrication this whole layer exists to prevent.
+   */
+  generateSummary?(input: { instructions: string; material: string }): Promise<string>;
+  /** Provider transport. Production leaves it unset; tests decide the answers. */
+  transport?: typeof globalThis.fetch;
+  providerBaseUrl?: string;
 }
 
 let binding: EmailExecutionBinding | null = null;
@@ -134,6 +157,8 @@ async function resolveForCaller(
     exchangeRefresh: binding.refresh,
     now: binding.now,
     providerConfigured: true,
+    ...(binding.transport ? { transport: binding.transport } : {}),
+    ...(binding.providerBaseUrl ? { providerBaseUrl: binding.providerBaseUrl } : {}),
   };
 
   const resolved = await mailProviderFor({
@@ -458,4 +483,167 @@ export async function executeEmailIngestAttachment(input: {
     evidence: attachmentEvidence(attachment, messageEvidence(message.value, 'gmail')),
     ctx: input.ctx,
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Summarisation — orchestration over canonical evidence
+ * ------------------------------------------------------------------ */
+
+/** What a summary hands back. Provenance is part of the answer, not a footnote. */
+export type EmailSummarizeResult =
+  | {
+      ok: true;
+      summary: string;
+      /** False when any source was a preview; the disclosure is already in `summary`. */
+      complete: boolean;
+      /** 🚨 Every message the summary was built from. A claim with no source here has no basis. */
+      sources: Array<{
+        evidenceId: string;
+        providerMessageId: string;
+        providerThreadId: string;
+        from: string;
+        subject: string;
+        sentAt: string;
+        completeness: 'complete' | 'snippet';
+      }>;
+    }
+  | { ok: false; failure: EmailFailure }
+  | { ok: false; refusal: { kind: string; detail: string } };
+
+/**
+ * Summarise the caller's own mail.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 ORCHESTRATION, NOT A PROVIDER FEATURE
+ *
+ * principal → connection → read through the canonical provider → evidence →
+ * completeness → prose → provenance. The provider is never told a summary is
+ * happening, and the summariser is never given anything it could fetch with.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 A FAILURE TO READ CANNOT BECOME A CONFIDENT SUMMARY
+ *
+ * Every read failure returns before any material exists, and an empty result
+ * returns `no_results` rather than a summary of nothing. "Nobody looked" and
+ * "there was nothing to say" are different facts, and prose erases the
+ * difference — a summariser handed zero messages writes a fluent paragraph
+ * about an empty inbox that nobody actually opened.
+ */
+export async function executeEmailSummarize(input: {
+  threadId?: string;
+  messageId?: string;
+  keywords?: string;
+  limit?: number;
+  ctx: ToolHandlerContext | undefined;
+}): Promise<EmailSummarizeResult> {
+  const startedAt = binding?.now() ?? 0;
+  const resolved = await resolveForCaller(input.ctx, 'summarise');
+  if (!resolved.ok) {
+    record('summarize', startedAt, outcomeOf(resolved.failure));
+    return { ok: false, failure: resolved.failure };
+  }
+
+  /*
+   * Scope is resolved to MESSAGES first, through the same per-caller provider
+   * every other read uses. There is no summarise-only path to a mailbox.
+   */
+  let messages: EmailMessage[];
+  let thread: EmailThread | null = null;
+
+  if (input.threadId) {
+    const outcome = await resolved.provider.readThread(input.threadId);
+    if (!outcome.ok) {
+      record('summarize', startedAt, outcomeOf(outcome.failure));
+      return { ok: false, failure: outcome.failure };
+    }
+    thread = outcome.value;
+    messages = outcome.value.messages;
+  } else if (input.messageId) {
+    const outcome = await resolved.provider.readMessage(input.messageId);
+    if (!outcome.ok) {
+      record('summarize', startedAt, outcomeOf(outcome.failure));
+      return { ok: false, failure: outcome.failure };
+    }
+    messages = [outcome.value];
+  } else {
+    const outcome = await resolved.provider.search({
+      ...(input.keywords ? { keywords: input.keywords } : {}),
+      limit: input.limit ?? 20,
+    });
+    if (!outcome.ok) {
+      record('summarize', startedAt, outcomeOf(outcome.failure));
+      return { ok: false, failure: outcome.failure };
+    }
+    messages = outcome.value;
+  }
+
+  if (messages.length === 0) {
+    // A real answer, and it was empty. Reported as such rather than summarised.
+    record('summarize', startedAt, 'no_results');
+    return { ok: false, failure: { kind: 'no_results' } };
+  }
+
+  const evidence: EmailMessageEvidence[] = messages.map((m) => messageEvidence(m, 'gmail'));
+
+  /*
+   * 🚨 THE SOURCE SET IS BUILT FROM WHAT WAS RETRIEVED, and a thread summary is
+   * bounded to that thread's own messages — the realistic violation being a
+   * real message from elsewhere presented as part of the conversation.
+   */
+  const built = summariseFrom({
+    sourceIds: evidence.map((e) => e.id),
+    available: evidence,
+    ...(thread ? { thread: threadEvidence(thread, evidence) } : {}),
+  });
+  if (!built.ok) {
+    record('summarize', startedAt, 'refused');
+    return { ok: false, refusal: built.refusal };
+  }
+
+  const context = summaryContextFrom({ evidence: built.evidence, available: evidence });
+  if (!context.ok) {
+    record('summarize', startedAt, 'refused');
+    return { ok: false, refusal: context.refusal };
+  }
+
+  const generate = binding?.generateSummary;
+  if (!generate) {
+    record('summarize', startedAt, 'not_configured');
+    return {
+      ok: false,
+      refusal: { kind: 'no_summariser', detail: 'MigraPilot cannot write summaries on this deployment yet.' },
+    };
+  }
+
+  let prose: string;
+  try {
+    prose = await generate({
+      instructions: summaryInstructions(context.context),
+      material: summaryMaterial(context.context),
+    });
+  } catch {
+    // A generator that failed is unavailability, NOT an empty summary.
+    record('summarize', startedAt, 'provider_unavailable');
+    return {
+      ok: false,
+      failure: { kind: 'provider_unavailable', detail: 'Email is unavailable right now.' },
+    };
+  }
+
+  record('summarize', startedAt, 'ok', evidence.length);
+  return {
+    ok: true,
+    // 🚨 The disclosure is ATTACHED here, whatever the model wrote.
+    summary: renderSummary(prose, context.context),
+    complete: context.context.complete,
+    sources: evidence.map((e) => ({
+      evidenceId: e.id,
+      providerMessageId: e.providerMessageId,
+      providerThreadId: e.providerThreadId,
+      from: e.from,
+      subject: e.subject,
+      sentAt: e.sentAt,
+      completeness: e.completeness,
+    })),
+  };
 }
