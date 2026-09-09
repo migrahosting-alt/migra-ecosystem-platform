@@ -22,6 +22,8 @@
  */
 
 import { planEmail, type EmailPlan, type EmailPlanInput } from './plan.js';
+import { emailReadinessFor } from './emailReadiness.js';
+import type { EmailConnection, EmailScopes } from './types.js';
 
 /** The capability every mail read goes through. Named once. */
 export const EMAIL_CAPABILITY = 'migra.email';
@@ -32,11 +34,15 @@ export type EmailRoute =
   /** Invoke the capability with this input. No identity, by construction. */
   | { kind: 'capability'; tool: string; input: Record<string, unknown>; plan: EmailPlan }
   /**
-   * About mail, and deliberately not served yet. Distinct from `not_email`
-   * because the user asked for something real and deserves to be told it is not
-   * available — rather than have their request quietly answered as chat.
+   * A real mail request whose OPERATION needs an authority we may not hold.
+   *
+   * 🚨 NOT a hardcoded "we cannot send yet". The refusal is derived from the
+   * caller's actual authorization state by `scopeRefusal`, so the day send
+   * scope is granted this same route stops being refused — without anyone
+   * remembering to delete a sentence. A hardcoded refusal is a promise that
+   * outlives the condition it describes.
    */
-  | { kind: 'unsupported'; reason: string; plan: EmailPlan };
+  | { kind: 'requires_scope'; tool: string; needed: keyof EmailScopes; plan: EmailPlan };
 
 export interface EmailRouteInput extends EmailPlanInput {
   /** The thread already open in this turn, when there is one. */
@@ -95,15 +101,72 @@ export function routeEmail(input: EmailRouteInput): EmailRoute {
     case 'draft':
     case 'send':
       /*
-       * 🚨 NOT ROUTED. Governed send exists in the engine and is mutation-tested,
-       * but it is not wired end to end and the connection holds read scope only.
-       * Routing here would reach a capability that must refuse — so the refusal
-       * is stated plainly instead, at the moment the user asked.
+       * 🚨 ROUTED AS MAIL, and refused on AUTHORITY rather than reclassified.
+       *
+       * Calling this `no_email` would be a wrong classification that happens to
+       * be safe: the user asked to send mail, and answering as ordinary chat
+       * leaves them believing the product did not understand them rather than
+       * that sending is not authorised. Those are different facts and only one
+       * of them is true.
        */
       return {
-        kind: 'unsupported',
-        reason: 'MigraPilot can read your email, but cannot write or send it yet.',
+        kind: 'requires_scope',
+        tool: EMAIL_CAPABILITY,
+        needed: plan.intent === 'send' ? 'send' : 'draft',
         plan,
       };
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Refusing on authority, not on a sentence
+ * ------------------------------------------------------------------ */
+
+export type ScopeVerdict =
+  /** The caller holds it. The route is executable. */
+  | { permitted: true }
+  /** They do not, and this is why — in the engine's own words. */
+  | { permitted: false; reason: string; remedy?: 'connect-account' | 'reconnect-account' };
+
+/**
+ * Can this caller perform the operation their prompt asked for?
+ *
+ * 🚨 DERIVED FROM THE CONNECTION, EVERY TIME. The alternative — a constant
+ * saying "sending is not available yet" — is a claim about the product that
+ * silently becomes false the day send scope is granted, and nothing would fail
+ * to tell anyone. Reading the authorization state means the refusal disappears
+ * on its own when it stops being true.
+ *
+ * The ORDER matters: an unconnected mailbox is not a missing scope. Telling
+ * someone "not authorised to send" when they have not connected anything sends
+ * them looking for a permission screen that does not apply to them.
+ */
+export function scopeRefusal(
+  needed: keyof EmailScopes,
+  connection: EmailConnection | null,
+): ScopeVerdict {
+  const readiness = emailReadinessFor(connection);
+  if (!readiness.ready) {
+    // Not connected, expired, unconfigured, unavailable — each already has the
+    // right words and the right remedy. A scope message here would be wrong.
+    return {
+      permitted: false,
+      reason: readiness.reason ?? 'Email is unavailable right now.',
+      ...(readiness.remedy ? { remedy: readiness.remedy } : {}),
+    };
+  }
+
+  if (connection?.scopes[needed]) return { permitted: true };
+
+  /*
+   * Connected, working, and simply not authorised for THIS operation.
+   * Reconnecting is the remedy, because a wider consent is what grants it.
+   */
+  return {
+    permitted: false,
+    reason: needed === 'send'
+      ? 'MigraPilot can read your email, but is not authorised to send it.'
+      : 'MigraPilot can read your email, but is not authorised to write drafts in it.',
+    remedy: 'reconnect-account',
+  };
 }

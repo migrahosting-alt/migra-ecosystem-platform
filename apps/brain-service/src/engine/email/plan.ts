@@ -87,13 +87,34 @@ const FROM_SENDER = /\b(e-?mail|message|note)\b[^.?!]*\bfrom\b|\bwhat did\b[^.?!
 const MAILBOX_STATE = /\b(unread|starred|archived|spam)\b[^.?!]{0,40}?\b(e-?mails?|messages?|mail)\b|\b(e-?mails?|messages?)\b[^.?!]{0,40}?\b(unread|starred|archived)\b/i;
 
 const SUMMARIZE = /\b(summari[sz]e|summary of|catch me up|what.s in)\b/i;
+
+/**
+ * A mailbox the user is POINTING AT — "my emails", "the messages", "our inbox".
+ *
+ * 🚨 THE DETERMINER IS THE WHOLE GUARD, and it is why this is not just a noun
+ * list. "Summarise what you know about email marketing" contains the noun and
+ * must not open a mailbox; "summarise the emails about the invoice" points at
+ * one and must. A bare noun cannot tell those apart, and the earlier version of
+ * this file was burned by exactly that class of over-match.
+ */
+const MAILBOX_POSSESSED = /\b(my|our|the|these|those|his|her|their)\s+(e-?mails?|messages?|mail|inbox)\b/i;
 const THREAD = /\b(thread|conversation|this e-?mail|these e-?mails)\b/i;
 
 const REPLY = /\b(draft|write|compose|prepare)\b[^.?!]*\b(reply|response|answer|e-?mail|message)\b|\breply to\b|\brespond to\b/i;
 const FORWARD = /\bforward\b/i;
 
-/** Sending is matched narrowly and never inferred from "reply". */
-const SEND = /\b(send it|send this|send that|send the (e-?mail|message|reply)|go ahead and send|send now)\b/i;
+/**
+ * Sending. Still never inferred from "reply" — that is a draft.
+ *
+ * 🚨 WIDENED DELIBERATELY. The narrow form matched "send it" and "send the
+ * email" but not "send AN email to X", which is how people actually ask. That
+ * gap classified an explicit send request as `no_email`, and the turn was then
+ * answered as ordinary chat — which is not a neutral failure. It is a wrong
+ * classification that happens to be safe, and it leaves the user believing the
+ * product simply did not understand them rather than that sending is not yet
+ * authorised.
+ */
+const SEND = /\b(send it|send this|send that|send now|go ahead and send|send (an?|the|another) (e-?mail|message|note|reply))\b/i;
 
 /** Asking for supplied text to be changed. The material is in the prompt. */
 const REWRITE_SUPPLIED =
@@ -144,7 +165,7 @@ export function planEmail(input: EmailPlanInput): EmailPlan {
     if (THREAD.test(prompt) || input.hasOpenThread) {
       return plan('summarize', 'thread_summary', 'The user asked for a conversation to be summarised.');
     }
-    if (MAILBOX_STATE.test(prompt) || SEARCH.test(prompt)) {
+    if (MAILBOX_STATE.test(prompt) || SEARCH.test(prompt) || MAILBOX_POSSESSED.test(prompt)) {
       return plan('summarize', 'mailbox_state', 'The user asked for a summary of mail.');
     }
     if (hasAttachments) {

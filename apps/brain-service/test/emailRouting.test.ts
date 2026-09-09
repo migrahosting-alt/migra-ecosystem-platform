@@ -116,25 +116,31 @@ test('🚨 summarising with NO thread open does not invent one', () => {
  * 🚨 Writing is not routed
  * ------------------------------------------------------------------ */
 
-test('🚨 drafting and sending are UNSUPPORTED, not silently answered as chat', () => {
+test('🚨 writing routes as MAIL and needs an authority — it is not reclassified', () => {
   /*
-   * The user asked for something real. Routing it to a capability that must
-   * refuse, or letting it fall through to ordinary chat, both end with them
-   * believing something happened.
+   * Calling this `no_email` would be a wrong classification that happens to be
+   * safe: the user asked to send mail, and answering as ordinary chat leaves
+   * them believing the product did not understand them rather than that
+   * sending is not authorised. Different facts; only one is true.
    */
-  for (const prompt of ['reply to that email and tell them yes', 'go ahead and send it']) {
+  for (const [prompt, needed] of [
+    ['reply to that email and tell them yes', 'draft'],
+    ['go ahead and send it', 'send'],
+    ['send an email to billing@hetzner.com', 'send'],
+    ['Send an email to the team about the outage', 'send'],
+  ] as const) {
     const route = routeEmail({ prompt });
-    assert.equal(route.kind, 'unsupported', `"${prompt}" was not refused plainly`);
-    if (route.kind === 'unsupported') {
-      assert.match(route.reason, /cannot write or send/i);
-      assert.ok(!/google|gmail|oauth|scope/i.test(route.reason), 'machinery leaked into a refusal');
+    assert.equal(route.kind, 'requires_scope', `"${prompt}" was not routed as a mail request`);
+    if (route.kind === 'requires_scope') {
+      assert.equal(route.needed, needed, `"${prompt}" asked for the wrong authority`);
+      assert.equal(route.tool, EMAIL_CAPABILITY);
     }
   }
 });
 
-test('a refusal is distinct from "not about email"', () => {
-  // One says "I will not do that yet", the other says "that was not a mail
-  // request at all". Collapsing them loses the user's actual question.
+test('a scope-needing route is distinct from "not about email"', () => {
+  // One says "that needs an authority you do not hold", the other says "that
+  // was not a mail request at all". Collapsing them loses the user's question.
   const write = routeEmail({ prompt: 'Draft a reply to John' });
   const chat = routeEmail({ prompt: 'what is the capital of Peru?' });
   assert.notEqual(write.kind, chat.kind);
@@ -142,7 +148,7 @@ test('a refusal is distinct from "not about email"', () => {
 
 test('every route carries the plan that produced it', () => {
   // The trace has to be able to say WHY a turn opened a mailbox — or did not.
-  for (const prompt of ['search my email for x', 'what is 2 + 2', 'go ahead and send it']) {
+  for (const prompt of ['search my email for x', 'what is 2 + 2', 'send an email to a@b.com']) {
     const route = routeEmail({ prompt });
     assert.ok(route.plan.reason, `a route carried no reason: ${prompt}`);
     assert.ok(route.plan.explanation, `a route carried no explanation: ${prompt}`);
@@ -150,30 +156,133 @@ test('every route carries the plan that produced it', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * 🚨 Known planner gaps — recorded, not silently "fixed"
+ * 🚨 The two gaps that were pinned as known — now CLOSED
  * ------------------------------------------------------------------ */
 
-test('🚨 two natural phrasings are NOT recognised, and both fail closed', () => {
+test('🚨 "summarise the emails about X" now routes to the mailbox', () => {
   /*
-   * 🚨 FOUND BY PROBING THE PLANNER RATHER THAN ASSUMING IT.
-   *
-   * My first fixtures for this file used these phrasings and failed, because
-   * the planner classifies both as `no_email`:
-   *
-   *   "summarise the emails about the invoice"  — SUMMARIZE matches, but the
-   *     summarise branch also requires a thread, a mailbox-state word or a
-   *     search verb to qualify, and "the emails about X" has none.
-   *
-   *   "send an email to billing@hetzner.com"    — the SEND pattern matches
-   *     "send it" / "send the email", deliberately narrow, and "send AN email"
-   *     falls outside it.
-   *
-   * Both fail CLOSED: no mailbox is opened and nothing is sent — the turn is
-   * answered as ordinary chat. That is the safe direction, so the behaviour is
-   * pinned here rather than changed. Widening either pattern is a product
-   * decision about what a prompt is allowed to trigger, not a routing bug to
-   * quietly repair while wiring something else.
+   * Previously `no_email`: the summarise branch required a thread, a
+   * mailbox-state word or a search verb, and "the emails about X" had none. It
+   * failed closed, which was safe and still wrong — the user pointed at their
+   * mailbox and was answered as if they had not.
    */
-  assert.equal(routeEmail({ prompt: 'summarise the emails about the invoice' }).kind, 'not_email');
-  assert.equal(routeEmail({ prompt: 'send an email to billing@hetzner.com' }).kind, 'not_email');
+  const route = routeEmail({ prompt: 'summarise the emails about the invoice' });
+  assert.equal(route.kind, 'capability');
+  if (route.kind === 'capability') assert.equal(route.input.op, 'search');
+});
+
+test('🚨 "send an email to X" now routes as mail needing send authority', () => {
+  const route = routeEmail({ prompt: 'send an email to billing@hetzner.com' });
+  assert.equal(route.kind, 'requires_scope');
+  if (route.kind === 'requires_scope') assert.equal(route.needed, 'send');
+});
+
+test('🚨 THE NEGATIVE CONTROLS SURVIVED THE WIDENING', () => {
+  /*
+   * The whole risk of widening a router is that it starts opening mail on
+   * sentences that merely CONTAIN the words. These are the cases that must
+   * still not reach a mailbox — including the one that produced the original
+   * defect.
+   */
+  const mustNotOpenMail = [
+    'My inbox is a disaster, anyway — what is the capital of Peru?',
+    // Contains "email" as a topic word, with no mailbox being pointed at.
+    'Summarize what you know about email marketing',
+    'Rewrite this email to be shorter',
+    'What is email?',
+    'Explain how a hash map works',
+  ];
+  for (const prompt of mustNotOpenMail) {
+    assert.equal(routeEmail({ prompt }).kind, 'not_email', `"${prompt}" opened a mailbox`);
+  }
+});
+
+test('🚨 the determiner is what separates pointing at a mailbox from naming one', () => {
+  /*
+   * "the emails" points at a mailbox; "email marketing" merely contains the
+   * noun. A bare noun list cannot tell them apart, and that is precisely the
+   * over-match this codebase was burned by before.
+   */
+  assert.equal(routeEmail({ prompt: 'summarise the emails about the invoice' }).kind, 'capability');
+  assert.equal(routeEmail({ prompt: 'summarise email best practices' }).kind, 'not_email');
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Refusing on authority, not on a sentence
+ * ------------------------------------------------------------------ */
+
+const connection = (over: Partial<import('../src/engine/email/types.js').EmailConnection> = {}) => ({
+  state: 'connected' as const,
+  account: 'qa@example.com',
+  scopes: { read: true, draft: false, send: false },
+  checkedAt: '2026-09-09T00:00:00Z',
+  ...over,
+});
+
+test('🚨 the send refusal DISAPPEARS the moment send scope is held', async () => {
+  /*
+   * 🚨 THE POINT OF DERIVING IT. A constant saying "sending is not available
+   * yet" is a claim about the product that silently becomes false the day the
+   * scope is granted — and nothing would fail to tell anyone. Reading the
+   * authorization state means the refusal removes itself.
+   */
+  const { scopeRefusal } = await import('../src/engine/email/emailRouting.js');
+
+  const readOnly = scopeRefusal('send', connection());
+  assert.equal(readOnly.permitted, false);
+  if (!readOnly.permitted) assert.match(readOnly.reason, /not authorised to send/i);
+
+  const withSend = scopeRefusal('send', connection({ scopes: { read: true, draft: false, send: true } }));
+  assert.equal(withSend.permitted, true, 'a granted scope was still refused by a hardcoded sentence');
+});
+
+test('🚨 an UNCONNECTED mailbox is not a missing scope', async () => {
+  /*
+   * Telling someone "not authorised to send" when they have not connected
+   * anything sends them looking for a permission screen that does not apply to
+   * them. Connect first, scope second — the order is the message.
+   */
+  const { scopeRefusal } = await import('../src/engine/email/emailRouting.js');
+  const verdict = scopeRefusal('send', connection({ state: 'not_connected' }));
+  assert.equal(verdict.permitted, false);
+  if (!verdict.permitted) {
+    assert.doesNotMatch(verdict.reason, /not authorised to send/i, 'a scope message was shown to an unconnected user');
+    assert.equal(verdict.remedy, 'connect-account');
+  }
+});
+
+test('an expired grant asks to reconnect, not to widen scope', async () => {
+  const { scopeRefusal } = await import('../src/engine/email/emailRouting.js');
+  const verdict = scopeRefusal('send', connection({ state: 'authorization_expired' }));
+  assert.equal(verdict.permitted, false);
+  if (!verdict.permitted) assert.equal(verdict.remedy, 'reconnect-account');
+});
+
+test('an unconfigured deployment offers no remedy for a scope either', async () => {
+  const { scopeRefusal } = await import('../src/engine/email/emailRouting.js');
+  const verdict = scopeRefusal('send', null);
+  assert.equal(verdict.permitted, false);
+  if (!verdict.permitted) assert.equal(verdict.remedy, undefined, 'an operator fault offered the user a button');
+});
+
+test('draft and send are refused with DIFFERENT words', async () => {
+  // They are different authorities. One message for both would tell a user
+  // their draft failed because sending is unavailable.
+  const { scopeRefusal } = await import('../src/engine/email/emailRouting.js');
+  const send = scopeRefusal('send', connection());
+  const draft = scopeRefusal('draft', connection());
+  assert.equal(send.permitted, false);
+  assert.equal(draft.permitted, false);
+  if (!send.permitted && !draft.permitted) assert.notEqual(send.reason, draft.reason);
+});
+
+test('🚨 no refusal names a provider or an OAuth concept', async () => {
+  const { scopeRefusal } = await import('../src/engine/email/emailRouting.js');
+  for (const state of ['connected', 'not_connected', 'authorization_expired', 'provider_unavailable'] as const) {
+    const verdict = scopeRefusal('send', connection({ state }));
+    if (!verdict.permitted) {
+      assert.ok(!/google|gmail|oauth|token|gmail\.send/i.test(verdict.reason),
+        `machinery leaked into a refusal: ${verdict.reason}`);
+    }
+  }
 });
