@@ -10,6 +10,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { agenticAnswer, streamAgentic } from '../agents/agenticAnswer.js';
+import { executionIdentityFrom } from '../identity/executionIdentity.js';
+import type { ToolExecDeps } from '../tools/toolExecutor.js';
 import { describeTimings } from '../observability/answerTimings.js';
 import { DEFAULT_EVIDENCE_BUDGET, type EvidenceBudget } from '../planning/evidenceBudget.js';
 
@@ -43,6 +45,25 @@ interface AnswerBody {
 
 export interface AnswerRouteOptions {
   providerBaseUrl: string;
+  /**
+   * WHO the request is, from the request's own identity.
+   *
+   * 🚨 THE SAME DERIVATION THE TOOL ROUTE USES. This route ran the autonomous
+   * loop with no principal at all, so connected-account capabilities were
+   * unreachable from it — and the absence looked like a correct refusal.
+   */
+  principalFor?(request: FastifyRequest): { owner: string; workspace: string } | null;
+  /**
+   * The canonical capability executor's dependencies, handed to the loop.
+   *
+   * Passing these rather than a mail client is what makes this path and
+   * /api/ai/tools converge on one executor and one Email implementation.
+   *
+   * LATE-BOUND on purpose: this route registers before the tool executor is
+   * constructed, and re-ordering boot to fix that is how the mail binding got
+   * broken once already. A thunk keeps registration order irrelevant.
+   */
+  toolDeps?(): ToolExecDeps | undefined;
   /** Tool-capable local model (default tier). */
   defaultModel: string;
   /** Faster/stronger model for `tier: 'cloud'` (opt-in). */
@@ -192,8 +213,20 @@ export function registerAnswerRoutes(app: FastifyInstance, opts: AnswerRouteOpti
     }
     const req = parsed.value;
     const resolved = resolveRunner(req, opts);
+    /*
+     * 🚨 ESTABLISHED HERE, AT THE AUTHENTICATED BOUNDARY, and frozen. Nothing
+     * downstream may widen it, and the model never sees it — it carries
+     * principalId and workspaceId and nothing else.
+     */
+    const identity = executionIdentityFrom(opts.principalFor?.(request) ?? null);
+
     const loopOpts = {
       prompt: req.prompt,
+      ...(identity ? { identity } : {}),
+      ...(() => {
+        const deps = opts.toolDeps?.();
+        return deps ? { toolDeps: deps } : {};
+      })(),
       workspaceRoot: req.workspaceRoot,
       model: resolved.model,
       runner: resolved.runner,

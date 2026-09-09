@@ -76,6 +76,19 @@ export type BrainOperation =
   | { kind: 'completeMailConnection'; state?: string; code?: string; error?: string }
   | { kind: 'disconnectMail'; providerAccountId?: string }
   | { kind: 'listCapabilities' }
+  /**
+   * Run a registered capability through the Brain's canonical executor.
+   *
+   * 🚨 THE ONLY EXECUTION PATH THE CONSUMER HAS, and deliberately generic: it
+   * names a capability and an input and knows nothing else. It does not know
+   * that `migra.email` is Gmail, which account is connected, what scopes are
+   * held, or whether anything is connected at all — the Brain resolves every
+   * one of those from the principal this gateway derives.
+   *
+   * There is NO email-specific operation, and adding one would be the second
+   * execution path this design exists to prevent.
+   */
+  | { kind: 'runCapability'; tool: string; input: Record<string, unknown> }
   | { kind: 'conversationProject'; conversationId: string }
   | { kind: 'connectProject'; conversationId: string; projectId: string }
   | { kind: 'disconnectProject'; conversationId: string }
@@ -532,6 +545,22 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           ...(op.state === undefined ? {} : { state: text(op.state, 'state', 512) }),
           ...(op.code === undefined ? {} : { code: text(op.code, 'code', 2048) }),
           ...(op.error === undefined ? {} : { error: text(op.error, 'error', 128) }),
+        },
+      }
+
+    case 'runCapability':
+      return {
+        method: 'POST',
+        path: '/api/ai/tools',
+        /*
+         * 🚨 THE PRINCIPAL IS NOT IN THIS BODY, and cannot be. Identity travels
+         * as derived scope headers that `buildHeaders` constructs from the
+         * session — a caller cannot put an owner, a workspace, a mailbox or a
+         * provider account in here and have it mean anything.
+         */
+        body: {
+          tool: text(op.tool, 'tool', 128),
+          input: op.input ?? {},
         },
       }
 

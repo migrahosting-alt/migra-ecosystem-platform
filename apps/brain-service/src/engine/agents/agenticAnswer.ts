@@ -16,6 +16,8 @@
 // this instead of populating `tool_calls`). © MigraTeck LLC.
 
 import * as path from 'node:path';
+import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
+import { principalScopeOf, type ExecutionIdentity } from '../identity/executionIdentity.js';
 import { runInspection, type InspectOp } from '../workspace/inspectRoutes.js';
 import { retrieveContext } from '../../retrieval/retrieve.js';
 import { EvidenceLedger, type EvidenceCacheStats } from '../grounding/evidenceLedger.js';
@@ -120,6 +122,111 @@ export const OVERALL_DEADLINE_MS = 360_000; // hard ceiling for the whole loop
 const MIN_SYNTHESIS_BUDGET_RATIO = 0.1;
 
 /** Read-only tool surface exposed to the model (OpenAI/Ollama function schema). */
+/**
+ * 🚨 MAILBOX TOOLS — a THIN NAMING LAYER over one capability.
+ *
+ * Every one of these dispatches to `migra.email` through the SAME
+ * `executeToolCore` the HTTP tools route uses. They exist because a model needs
+ * distinct function names with distinct arguments, not because email has a
+ * second execution path — there is exactly one, and this is not it.
+ *
+ * Read-only by construction: there is no draft or send function here, and the
+ * capability would refuse one anyway.
+ */
+const EMAIL_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'email_search',
+      description:
+        'Search the signed-in user\'s connected mailbox. Returns message previews — subjects, '
+        + 'senders, dates and a snippet — NOT full bodies, and NOT whether a message has attachments.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search terms, as the mail provider understands them.' },
+          limit: { type: 'number', description: 'Maximum messages to return (1-50).' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'email_read',
+      description:
+        'Read ONE message in full: complete body, and the definitive list of its attachments. '
+        + 'A search result cannot tell you either of those.',
+      parameters: {
+        type: 'object',
+        properties: { messageId: { type: 'string' } },
+        required: ['messageId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'email_thread',
+      description: 'Read a whole conversation in full, oldest message first.',
+      parameters: {
+        type: 'object',
+        properties: { threadId: { type: 'string' } },
+        required: ['threadId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'email_attachments',
+      description:
+        'List what is attached to a message. Authoritative: an empty result here PROVES there '
+        + 'are none, unlike a search result.',
+      parameters: {
+        type: 'object',
+        properties: { messageId: { type: 'string' } },
+        required: ['messageId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'email_open_attachment',
+      description:
+        'Fetch one attachment and hand it to the canonical file pipeline. Use the `ref` from '
+        + 'email_attachments — never a provider id, which expires immediately.',
+      parameters: {
+        type: 'object',
+        properties: { messageId: { type: 'string' }, ref: { type: 'string' } },
+        required: ['messageId', 'ref'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'email_summarize',
+      description:
+        'Summarise a message, a thread, or search results with grounded provenance. Prefer this '
+        + 'over writing a summary yourself: it states when it worked only from previews.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: { type: 'string' },
+          threadId: { type: 'string' },
+          query: { type: 'string' },
+        },
+      },
+    },
+  },
+] as const;
+
+/** How each mailbox tool maps onto the ONE capability. */
+const EMAIL_TOOL_NAMES: ReadonlySet<string> = new Set<string>(EMAIL_TOOLS.map((t) => t.function.name));
+
 const TOOLS = [
   {
     type: 'function',
@@ -207,6 +314,103 @@ const SYSTEM_PROMPT =
 
 /** Map a model tool call to a read-only inspection op and execute it. Exported
  * for testing — it exercises the whole read-only tool surface without a model. */
+/**
+ * Run ONE mailbox tool through the canonical capability executor.
+ *
+ * 🚨 NO SECOND PATH. Every branch below builds an input for `migra.email` and
+ * hands it to `executeToolCore` — the same function the HTTP tools route calls,
+ * with the same availability gate and the same per-caller resolution. Nothing
+ * here talks to a provider, holds a token, or knows the mailbox is Gmail.
+ *
+ * 🚨 THE IDENTITY IS THE RUN'S, NEVER THE MODEL'S. `args` comes from a language
+ * model and carries only ids the model read out of earlier tool results. A
+ * principal, a workspace, an account or an authorization state appearing in
+ * `args` is ignored, because none of them is read here.
+ */
+async function executeEmailTool(
+  name: string,
+  args: Record<string, unknown>,
+  identity: ExecutionIdentity | undefined,
+  toolDeps: ToolExecDeps | undefined,
+  requestId: string,
+): Promise<{ ok: boolean; summary: string; feedback: string; data?: unknown; cached?: boolean }> {
+  if (!identity || !toolDeps) {
+    // Fail closed. An unidentified run has no mailbox, and saying so is the
+    // honest answer — not an empty result that reads like an empty inbox.
+    return {
+      ok: false,
+      summary: `${name}: no signed-in identity`,
+      feedback: 'Error: email is only available to a signed-in user in this session.',
+    };
+  }
+
+  const s = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  let input: Record<string, unknown>;
+
+  switch (name) {
+    case 'email_search':
+      input = { op: 'search', keywords: s(args.query) ?? '', limit: Math.min(50, Math.max(1, Number(args.limit) || 20)) };
+      break;
+    case 'email_read':
+      if (!s(args.messageId)) return { ok: false, summary: 'email_read: missing messageId', feedback: 'Error: `messageId` is required.' };
+      input = { op: 'readMessage', messageId: s(args.messageId) };
+      break;
+    case 'email_thread':
+      if (!s(args.threadId)) return { ok: false, summary: 'email_thread: missing threadId', feedback: 'Error: `threadId` is required.' };
+      input = { op: 'readThread', threadId: s(args.threadId) };
+      break;
+    case 'email_attachments':
+      if (!s(args.messageId)) return { ok: false, summary: 'email_attachments: missing messageId', feedback: 'Error: `messageId` is required.' };
+      input = { op: 'listAttachments', messageId: s(args.messageId) };
+      break;
+    case 'email_open_attachment':
+      if (!s(args.messageId) || !s(args.ref)) {
+        return { ok: false, summary: 'email_open_attachment: missing ids', feedback: 'Error: `messageId` and `ref` are required.' };
+      }
+      input = { op: 'fetchAttachment', messageId: s(args.messageId), attachmentId: s(args.ref) };
+      break;
+    case 'email_summarize':
+      input = {
+        op: 'summarize',
+        ...(s(args.messageId) ? { messageId: s(args.messageId) } : {}),
+        ...(s(args.threadId) ? { threadId: s(args.threadId) } : {}),
+        ...(s(args.query) ? { keywords: s(args.query) } : {}),
+      };
+      break;
+    default:
+      return { ok: false, summary: `${name}: unknown mail tool`, feedback: `Error: unknown tool ${name}.` };
+  }
+
+  const outcome = await executeToolCore(toolDeps, {
+    tool: 'migra.email',
+    input,
+    requestId,
+    // 🚨 From the RUN, converted once. The model never supplies this.
+    principal: principalScopeOf(identity),
+  });
+
+  if (!outcome.ok) {
+    return {
+      ok: false,
+      summary: `${name}: ${outcome.code}`,
+      feedback: `Error: ${outcome.error}`,
+    };
+  }
+
+  const result = outcome.result as Record<string, unknown> | undefined;
+  return {
+    ok: true,
+    summary: `${name}: ok`,
+    /*
+     * The model reads the capability's OWN answer. Reshaping it here would let
+     * this layer decide what a mailbox result means, which is how "no
+     * attachments" gets invented from a preview.
+     */
+    feedback: JSON.stringify(result ?? {}),
+    data: result,
+  };
+}
+
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
@@ -533,7 +737,15 @@ async function callModel(
   nativeChatUrl: string,
   model: string,
   messages: ChatMessage[],
-  useTools: boolean,
+  /**
+   * 🚨 THE TOOLS ACTUALLY OFFERED, not a boolean.
+   *
+   * Mailbox tools are added only when the run carries an identity, so an
+   * unidentified run cannot even NAME them — the model is never shown a door it
+   * would be refused at. `executeEmailTool` still fails closed if one is
+   * somehow called.
+   */
+  offeredTools: readonly unknown[] | null,
   loopSignal: AbortSignal,
   budgetMs: number,
   loopCause: () => TimeoutCategory,
@@ -550,7 +762,7 @@ async function callModel(
         model,
         messages,
         stream: false,
-        ...(useTools ? { tools: TOOLS } : {}),
+        ...(offeredTools ? { tools: offeredTools } : {}),
         options: { temperature: 0.1 },
       }),
       signal: budget.signal,
@@ -623,6 +835,26 @@ export function nativeChatUrlFrom(providerBaseUrl: string): string {
 
 export interface AgenticOptions {
   prompt: string;
+  /**
+   * WHO this run acts as, derived at the authenticated boundary.
+   *
+   * 🚨 IDENTITY ONLY — no mailbox, no account id, no token, no provider state.
+   * The capability executor resolves what this principal may currently do on
+   * every call, so a run cannot act on a connection that has since changed.
+   *
+   * Absent means the mailbox tools are not offered AT ALL, and would refuse if
+   * they were: an unidentified run must not reach anybody's mail.
+   */
+  identity?: ExecutionIdentity;
+  /**
+   * The canonical capability executor's dependencies.
+   *
+   * Passing these rather than an email client is what makes the autonomous path
+   * and the HTTP tools route CONVERGE: both call `executeToolCore`, which runs
+   * the same availability gate, the same readiness resolution and the same
+   * handler. A dedicated mail client here would be a second execution path.
+   */
+  toolDeps?: ToolExecDeps;
   workspaceRoot: string;
   model: string;
   providerBaseUrl: string;
@@ -779,6 +1011,18 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
   const timeline = new AnswerTimeline(opts.clock);
   const ledger = new EvidenceLedger();
 
+  /*
+   * 🚨 THE MAILBOX TOOLS ARE OFFERED ONLY TO AN IDENTIFIED RUN.
+   *
+   * Without an identity the model is never shown them, so it cannot propose a
+   * call it would be refused at — and `executeEmailTool` still fails closed if
+   * one arrives anyway. Two layers, because the first is a UX nicety and the
+   * second is the actual guarantee.
+   */
+  const emailAvailable = Boolean(opts.identity && opts.toolDeps);
+  const offeredTools: readonly unknown[] = emailAvailable ? [...TOOLS, ...EMAIL_TOOLS] : TOOLS;
+  const runRequestId = `agentic-${Date.now().toString(36)}`;
+
   const controller = new AbortController();
   let loopCause: TimeoutCategory = 'overall_deadline';
   const cause = (): TimeoutCategory => loopCause;
@@ -845,7 +1089,7 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
             toolStepsBefore: toolSteps,
           });
           try {
-            const msg = await callModel(nativeChatUrl, opts.model, planMessages as ChatMessage[], false, controller.signal, budgetMs, cause);
+            const msg = await callModel(nativeChatUrl, opts.model, planMessages as ChatMessage[], null, controller.signal, budgetMs, cause);
             handle.end('ok', { toolStepsAfter: toolSteps });
             return (msg.content ?? '').trim();
           } catch (err) {
@@ -912,7 +1156,7 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
       let msg: ChatMessage;
       let record: ModelCallTiming;
       try {
-        msg = await callModel(nativeChatUrl, opts.model, messages, true, controller.signal, perCallBudgetMs, cause);
+        msg = await callModel(nativeChatUrl, opts.model, messages, offeredTools, controller.signal, perCallBudgetMs, cause);
         record = handle.end('ok', { toolStepsAfter: toolSteps });
       } catch (err) {
         if (err instanceof ModelBudgetExhausted) {
@@ -968,7 +1212,12 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
         }
       }
       if (refusedCalls.length) fallbackStop = 'tool-step-budget-exhausted';
-      const results = await Promise.all(admitted.map((c) => executeToolCached(ledger, c.name, c.args, opts.workspaceRoot)));
+      const results = await Promise.all(admitted.map((c) => (
+        EMAIL_TOOL_NAMES.has(c.name)
+          // Same executor as /api/ai/tools — see executeEmailTool.
+          ? executeEmailTool(c.name, c.args, opts.identity, opts.toolDeps, runRequestId)
+          : executeToolCached(ledger, c.name, c.args, opts.workspaceRoot)
+      )));
       endTools();
       for (const call of refusedCalls) {
         const summary = `${call.name}: refused — tool-step budget exhausted`;
@@ -1080,7 +1329,7 @@ export async function* streamAgentic(opts: AgenticOptions): AsyncGenerator<Agent
           toolStepsBefore: toolSteps,
         });
         try {
-          const finalMsg = await callModel(nativeChatUrl, opts.model, synthesisMessages, false, controller.signal, retryBudgetMs, cause);
+          const finalMsg = await callModel(nativeChatUrl, opts.model, synthesisMessages, null, controller.signal, retryBudgetMs, cause);
           retryHandle.end('ok', { toolStepsAfter: toolSteps });
           streamed = (finalMsg.content ?? '').trim();
         } catch (err) {

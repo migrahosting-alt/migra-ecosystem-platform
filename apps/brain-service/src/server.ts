@@ -426,8 +426,22 @@ async function main(): Promise<void> {
   // ── Agentic answer path (`POST /api/ai/answer`): the model gathers real
   // workspace evidence with read-only tools before answering — Copilot-style,
   // grounded + cited. Read-only by construction. Uses a tool-capable local model.
+  /*
+   * Assigned below, read by the answer route's thunk. Declared here so the
+   * registration order of the two routes cannot matter.
+   */
+  let answerToolDeps: ReturnType<typeof registerToolExecutionRoutes> | undefined;
+
   registerAnswerRoutes(app, {
     providerBaseUrl: env.providerBaseUrl,
+    /*
+     * 🚨 The SAME derivation the tools route uses. Without it the autonomous
+     * loop has no identity, and every connected-account capability is
+     * unreachable inside it — which reads as a correct refusal, not a gap.
+     */
+    principalFor: (request) => memoryScopeFrom(request),
+    // Resolved at CALL time: the executor is constructed further down.
+    toolDeps: () => answerToolDeps,
     defaultModel: process.env.MIGRAPILOT_AGENT_MODEL ?? 'qwen3-coder:30b',
     cloudModel: process.env.MIGRAPILOT_AGENT_CLOUD_MODEL ?? 'gpt-oss:120b-cloud',
   });
@@ -1055,6 +1069,10 @@ async function main(): Promise<void> {
       };
     },
   });
+
+  // Published for the answer route's late-bound thunk, so the autonomous
+  // loop reaches the SAME executor this route serves.
+  answerToolDeps = toolDeps;
 
   /*
    * The user-tool approval round-trip (propose → decline | dispatch).
