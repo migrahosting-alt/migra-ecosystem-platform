@@ -15,6 +15,77 @@ _Last updated: 2026-09-09_
 
 ---
 
+## Lane 2026-09-09 (final) — one policy, one identity, attachments reachable
+
+Three commits, each its own evidence boundary: `e78a9bea` transport, `fde2defa` file policy,
+`5931048f` identity + attachments.
+
+### One policy implementation, two callers
+
+The attachment rules lived only in the consumer. Gmail attachments needed the same decisions, and
+restating them in the Brain would have produced a second source of truth **across two processes** —
+whose drift shape is an attachment accepted by email and refused by upload, or worse the reverse.
+That file already carried the scars of the same failure in one process: the picker once offered 48
+extensions while storage accepted 27.
+
+They moved to `@migrapilot/shared-types/file-policy`. The consumer's `capability.ts` re-exports and
+defines nothing. **Enforcement resolves per caller** — `saveFile` calls `resolveFilePolicy` with the
+authenticated principal instead of a set captured at import time, and the Brain's ingestion calls the
+identical function. The principal is *required* even though no rule varies by workspace today, stated
+plainly in the type rather than implied.
+
+### The autonomous loop learns who it is acting as
+
+`agentRuntime` carried no identity, so every connected-account capability was denied inside it —
+and nothing looked broken, because a denial is what a correct system does when it cannot tell who is
+asking.
+
+`ExecutionIdentity` is derived once at the authenticated boundary and frozen onto the run:
+`principalId` and `workspaceId`, nothing else. No account id, no token, no provider state, no
+readiness snapshot — each of those would let a run keep reading a mailbox that was disconnected while
+it ran.
+
+**Readiness stopped being an executor input.** It was resolved by the HTTP route and simply not
+resolved by the agent loop: two callers, two behaviours, one silently wrong. It is now derived inside
+`executeToolCore` from the principal, through one resolver both share.
+
+> 🚨 **Half of that wire was also missing.** `registerToolExecutionRoutes` returned
+> `{ registry, approvals, audit }` **without** the resolver — and those deps are exactly what the
+> agent service is handed. Threading identity alone would have left the loop resolving nothing, with
+> the denial still looking like a correct refusal.
+
+### Attachments are product-reachable
+
+`migra.email` gained `listAttachments` and `fetchAttachment`. The caller names **two ids** — no
+filename, no MIME type, no size, no policy. Evidence is derived from a message the caller's own
+connection just returned, so a prompt cannot decide what a downloaded file claims to be, and
+provenance records what arrived rather than what was claimed.
+
+### The four regressions, each mutation-tested
+
+| # | Property | Mutation that breaks it |
+|---|---|---|
+| 1 | one runtime, two principals, interleaved — no bleed | runtime caches the last principal |
+| 2 | A's turn cannot execute Email with B's connection | same |
+| 3 | no principal → denied at the gate, never a global lookup | fallback to a default principal |
+| 4 | a policy change moves upload *and* Gmail ingestion | Brain grows its own policy |
+
+Gate: brain **3058/3058**, consumer **1173/1173**, 0 fail, 0 skipped.
+
+### Still not reachable
+
+`routeEmail` and the whole of `emailSummary` still have **zero callers**. The autonomous loop can now
+reach `migra.email` through the model's own tool selection, so the deterministic planner may be
+redundant — that is an open decision, not an oversight.
+
+### Next
+Seed the QA mailbox and reconnect. The disconnect qualification ran on the freshly reconnected grant
+and revoked it again — `pg_stat_user_tables` on `mail_connection` reads `inserts=1, updates=2,
+deletes=1`, which is exactly the reconnect, the forced expiry plus refresh, and the disconnect.
+Seeding never landed: `users.getProfile` still reports `messagesTotal=2`.
+
+---
+
 ## Lane 2026-09-09 (latest) — Migra Email: qualified as far as it is wired
 
 **Passed against the real QA mailbox**, through the full per-principal path:

@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — Gmail read qualified; THREE read-slice surfaces found unwired",
+  "updatedBy": "Claude (Opus 5) — file policy extracted, identity boundary closed, attachments reachable",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "GMAIL READ QUALIFIED against the real QA mailbox: search, readMessage, readThread, token refresh under a real expiry, cross-principal isolation, disconnect (revoked at Google, no stale provider), sealed storage. BLOCKED, and NOT by code quality: (1) the QA mailbox was never seeded — Gmail's own profile reports messagesTotal=2, both Google onboarding mail, zero attachments; (2) THREE read-slice surfaces have NO CALLER ANYWHERE, so attachment retrieval, canonical file ingestion, grounded summarisation and live intent routing cannot be qualified through the product at all.",
+    "status": "READ QUALIFIED LIVE (search/read/thread/refresh/isolation/disconnect). Attachments and the autonomous identity boundary are now BUILT AND WIRED but not yet live-qualified: the QA mailbox still has no seeded mail, and the disconnect test removed the grant again. Summarisation and the deterministic routeEmail planner remain unreachable.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2644,13 +2644,28 @@
     },
     "operationalLossThisSession": "The Brain qualification Postgres (127.0.0.1:32790, db migrapilot_test) was REMOVED mid-session — no container, no volume, no record of it. The sealed Gmail connection went with it. Replaced by a NAMED, non-ephemeral container `migrapilot-brainqual` recorded in /tmp/qual-brain-container.txt; schema 28 reapplied, mail_connection back to 0 rows. Cost: one more Connect email click.",
     "unwiredSurfaces": {
-      "_finding": "Same defect class as the missing Gmail transport: built, mutation-tested, declared complete, and reachable by nothing. Found by grepping for callers across apps/*/src.",
-      "routeEmail": "apps/brain-service/src/engine/email/emailRouting.ts — ZERO callers. A user typing \"summarize the emails about X\" never reaches the email capability.",
-      "emailSummary": "summaryContextFrom / summaryMaterial / summaryInstructions / renderSummary — ZERO callers. (The only renderSummary hit in the repo is an unrelated one in engine/memory/contextBuilder.ts.)",
-      "attachmentExecution": "executeEmailListAttachments / executeEmailFetchAttachment / bridgeDownloadedAttachment — ZERO callers. migra.email's schema only admits op: search | readMessage | readThread, so there is no attachment op to call.",
-      "whyNotJustWiredNow": "The attachment bridge takes its AttachmentPolicy by injection ON PURPOSE — allowed types and size limits belong to the consumer's file pipeline (MAX_UPLOAD_MB=256 in features/attachments/capability), and the bridge's own header says restating them in the Brain would create a second source of truth that drifts. So exposing a fetchAttachment op requires deciding how the consumer's policy reaches the Brain. That is a design decision inside the slice, not a qualification step.",
-      "routingBlockedBy": "Live intent routing runs in the model turn, and agentRuntime still carries no principal — the gap Bonex ruled must be closed through the governed identity boundary, not by bolting account state onto the agent."
+      "_finding": "Same defect class as the missing Gmail transport: built, mutation-tested, declared complete, reachable by nothing.",
+      "attachmentExecution": "CLOSED. migra.email now takes op: listAttachments | fetchAttachment. The caller names two IDS only — evidence is derived server-side from a message the caller's own connection returned, and the policy is resolved inside the executor.",
+      "agentRuntimeIdentity": "CLOSED. ExecutionIdentity is derived at the authenticated boundary, frozen onto the run, and carries principalId/workspaceId only. Readiness is no longer an executor INPUT — it is derived from the principal by one resolver shared by the HTTP path and the agent loop.",
+      "routeEmail": "STILL UNWIRED. apps/brain-service/src/engine/email/emailRouting.ts has zero callers. The autonomous loop can now reach migra.email through the model's own tool selection, so this deterministic planner may be redundant — that is a decision, not an oversight, and it is open.",
+      "emailSummary": "STILL UNWIRED. summaryContextFrom / summaryMaterial / summaryInstructions / renderSummary have zero callers. Needs a turn-level caller that consumes resolved-scope evidence."
     },
-    "reconnectRequired": "Disconnect REVOKED the grant at Google, so reconnecting needs a full consent screen again. That was the point of the test and Bonex authorised it by naming disconnect/reconnect. The mailbox also has to be seeded before anything further can be qualified, so both actions fall in one round."
+    "reconnectRequired": "The disconnect qualification ran on the freshly reconnected grant and revoked it again (pg_stat_user_tables on mail_connection: inserts=1, updates=2, deletes=1 — the reconnect, the forced expiry plus the refresh, and the disconnect). Reconnect is needed once more, together with seeding, which never landed: Gmail users.getProfile still reports messagesTotal=2.",
+    "filePolicyAuthority": {
+      "module": "@migrapilot/shared-types/file-policy (packages/shared-types/src/filePolicy.ts)",
+      "why": "The rules lived only in the consumer. Restating them in the Brain would have produced a second source of truth across two processes, whose drift shape is: an attachment accepted by email and refused by upload, or worse the reverse.",
+      "consumer": "features/attachments/capability.ts is now a re-export and defines nothing. saveFile resolves the policy PER CALLER via resolveFilePolicy with the authenticated principal, replacing a module-scope allowlist captured at import time.",
+      "brain": "executeEmailFetchAttachment resolves the policy itself from binding.filePipeline + the caller's principal. The policy is not a parameter and there is no seam to substitute one.",
+      "principalRequired": "resolveFilePolicy requires a principal even though no rule varies by workspace today — stated plainly in the type rather than implied — so the day one does, it is added in one place."
+    },
+    "regressionTests": {
+      "file": "apps/brain-service/test/emailIdentityAndPolicyRegression.test.ts (8 tests)",
+      "1": "One runtime, two principals, INTERLEAVED (A, B, A) — no bleed. Sequential order alone would pass a last-principal cache.",
+      "2": "A's model turn cannot execute Email with B's connection; B's own turn is the control so the assertion is about isolation, not about email being broken.",
+      "3": "No principal denies at the gate with CAPABILITY_DENIED, and no mailbox address appears in the outcome. Empty identity parts are refused too.",
+      "4": "A policy change moves both upload and Gmail ingestion; neither side redeclares the table or the ceiling; the capability accepts no policy and no file description.",
+      "mutationsCaught": "3/3 — a runtime caching the last principal (fails 1 and 2), a global readiness fallback (fails 3), and the Gmail path growing its own policy (fails 4b and 4c)."
+    },
+    "halfWireFound": "registerToolExecutionRoutes returned { registry, approvals, audit } WITHOUT the readiness resolver — and those deps are what the agent service is handed. Threading identity alone would have left the autonomous loop still resolving nothing, with the denial still looking like a correct refusal."
   }
 }
