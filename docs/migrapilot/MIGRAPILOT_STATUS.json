@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — live qualification: everything the seeded mailbox can support",
+  "updatedBy": "Claude (Opus 5) — thread ordering + thread summary qualified live; attachments still absent",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2692,16 +2692,18 @@
         "grounded summary, COMPLETE path — complete=true, NO partiality caveat, accurate to the real body, provenance carries evidenceId + providerMessageId",
         "grounded summary, PARTIAL path — complete=false, all 3 sources snippet, disclosure attached EXACTLY ONCE, provenance for all three",
         "cross-principal isolation — different owner, same owner in another workspace, a foreign principal holding the REAL message id, and no principal: all CAPABILITY_DENIED while the owner control succeeds",
-        "telemetry — stage/outcome/provider/durationMs/count only; zero addresses, subjects, bodies, names, ya29./1// or Bearer in any log line while real mail was read and summarised"
+        "telemetry — stage/outcome/provider/durationMs/count only; zero addresses, subjects, bodies, names, ya29./1// or Bearer in any log line while real mail was read and summarised",
+        "THREAD ORDERING on a real 2-message thread — chronological, oldest first, and the thread subject is the ORIGINAL message's, not the \"Fwd:\" reply that arrived later",
+        "THREAD-SCOPED SUMMARY — complete=true over two full bodies, no false caveat, and every source bounded to that thread (providerThreadId identical across sources)"
       ],
       "blockedOnContent": [
-        "MIGRA_EMAIL_SENTINEL_0909 — absent from every message body and HTML; targeted search returns 0",
-        "PDF attachment — has:attachment and filename:pdf both return 0",
+        "MIGRA_EMAIL_SENTINEL_0909 — absent from Gmail's index AND from the decoded bodies of both new messages (2757 and 1034 chars scanned)",
+        "PDF attachment — listAttachments (format=full) returns 0 on ALL FOUR messages, and has:attachment/filename:pdf return 0",
         "XLSX exact values (48273.55 / 7319.42 / 91504.08) — filename:xlsx returns 0",
-        "canonical file ingestion — needs an attachment to ingest",
-        "thread ORDERING — all 3 messages are single-message threads; readThread works but ordering is untested"
+        "canonical file ingestion — needs an attachment to ingest"
       ],
-      "mailboxEvidence": "3 messages, 3 distinct threads, 0 attachments, checked with q=in:anywhere which covers Spam and Trash. One new arrival: \"MigraTeck System Test\" from migrateck@gmail.com, unread, plain body with a signature block and no sentinel."
-    }
+      "mailboxEvidence": "4 messages, 3 threads, 0 attachments (q=in:anywhere, which covers Spam and Trash). The fixture that arrived was a FORWARD of the existing test message, which created the 2-message thread. No attachment ever reached the mailbox."
+    },
+    "searchAttachmentCaveat": "FINDING, not yet fixed. Search uses format=metadata, which carries no MIME tree, so every search result reports attachments: [] regardless of reality — an empty array is a CLAIM about the message. The same class of problem bodyComplete already solves for bodies. Gmail-side filtering (has:attachment) is unaffected because it is evaluated by Google, and listAttachments/readMessage (format=full) are correct. A caller that reads message.attachments.length off a SEARCH result would wrongly conclude a message has none. Raised for a decision: omit the field on metadata reads, or carry an explicit attachmentsKnown flag."
   }
 }
