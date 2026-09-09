@@ -680,13 +680,39 @@ function groundInOther(
     : significantTerms(sentence);
   if (wanted.length === 0) return null;
 
+  const carries = (item: { text: string; subject: string; from: string; sentAt: string }): boolean => {
+    const haystack = tokensOf(`${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`);
+    // EVERY term, exactly as rule 3 demands of a cited file.
+    return wanted.every((t) => haystack.has(t));
+  };
+
+  const byId = new Map(other.all().map((i) => [i.id, i]));
+
   const sources: OtherClaimSource[] = [];
   for (const candidate of candidates) {
     const item = candidate.item;
     if (item.kind !== 'email') continue;
-    const haystack = tokensOf(`${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`);
-    // EVERY term, exactly as rule 3 demands of a cited file.
-    if (!wanted.every((t) => haystack.has(t))) continue;
+    if (!carries(item)) continue;
+
+    /*
+     * 🚨 A DERIVED ITEM MAY NOT OUTRANK WHAT IT CAME FROM.
+     *
+     * A summary of two previews reads exactly like a summary of two full
+     * messages, and a summary of one thread reads exactly like a summary of a
+     * mailbox. Without this, summarising would launder partial, narrowly-scoped
+     * evidence into a source that appears to support more than was retrieved.
+     *
+     * So a summary grounds a claim only where one of its own sources does too.
+     * The summary still supplies the CITATION — a reader wants the message, not
+     * the prose about it.
+     */
+    if (item.derivedFrom && item.derivedFrom.length > 0) {
+      const backed = item.derivedFrom.some((id) => {
+        const source = byId.get(id);
+        return source !== undefined && source.kind === 'email' && carries(source);
+      });
+      if (!backed) continue;
+    }
     sources.push({
       kind: 'email',
       cite: adapterFor(item).describe(item as never),

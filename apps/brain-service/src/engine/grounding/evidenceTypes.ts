@@ -95,6 +95,21 @@ export interface EmailEvidence extends EvidenceCommon {
    * "the summariser said so" becomes a laundering step.
    */
   preGrounded?: boolean;
+  /**
+   * The evidence this item was DERIVED from — set on summaries.
+   *
+   * 🚨 A SUMMARY MUST NOT OUTRANK ITS SOURCES. Prose is lossy in one direction
+   * and confident in the other: a summary of two previews reads exactly like a
+   * summary of two full messages, and a summary of one thread reads exactly
+   * like a summary of a mailbox. Left unconstrained, summarising would LAUNDER
+   * partial, narrowly-scoped evidence into a source that appears to support
+   * more than anything actually retrieved.
+   *
+   * So a derived item may support a claim only where one of these ids also
+   * supports it. Enforced in the verifier, which is the only place that sees
+   * the whole ledger — an adapter sees one item and could not check it.
+   */
+  derivedFrom?: readonly string[];
 }
 
 export type EvidenceItem = RepoEvidence | EmailEvidence;
