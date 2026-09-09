@@ -165,3 +165,41 @@ test('the transcript keeps the image in its own shape', () => {
    */
   assert.match(message, /max-h-\d+ w-auto max-w-full/)
 })
+
+/* ------------------------------------------------------------------ *
+ * The Composer's glue
+ *
+ * 🚨 THESE ARE STRUCTURAL ASSERTIONS OVER SOURCE, and they are weaker than the
+ * rest of this file's neighbours. The behaviour they guard is proven properly
+ * elsewhere: `hubRemedy.test.ts` RENDERS a row and checks which callback a
+ * press runs, and `connectEmail.test.ts` proves a failed start returns no URL.
+ * What is left here is wiring that only a fully-mounted Composer could
+ * exercise, so it is checked at the seam rather than pretended to be covered.
+ * ------------------------------------------------------------------ */
+
+test('🚨 the connect remedy is attached only to a row that HAS a flow', () => {
+  /*
+   * A remedy token on a row with no handler must not render a control. That is
+   * the button-pretending-to-be-a-capability problem in a new costume: the
+   * engine could add `connect-account` to a capability this app has no connect
+   * screen for, and the row would offer to open nothing.
+   */
+  assert.match(composer, /row\.remedy && row\.id === 'email'/)
+})
+
+test('🚨 a failed start sets a notice instead of navigating', () => {
+  // Navigating anyway takes the user's mailbox permission at a consent screen
+  // whose callback is guaranteed to be refused.
+  assert.match(composer, /if \(!outcome\.ok\) \{\s*\n\s*setMailNotice\(outcome\.message\)\s*\n\s*return/)
+  assert.match(composer, /window\.location\.assign\(outcome\.authorizationUrl\)/)
+})
+
+test('mail notices do not share the image error slot', () => {
+  /*
+   * They shared one once, which is how a .wav error appeared under a PDF.
+   * Identity is what makes a notice dismissible without guessing which action
+   * produced it.
+   */
+  assert.match(composer, /const \[mailNotice, setMailNotice\]/)
+  assert.doesNotMatch(composer, /setImageError\(outcome\.message\)/)
+})

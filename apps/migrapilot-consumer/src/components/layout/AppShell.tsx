@@ -7,6 +7,7 @@ import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import type { PublicSession } from '@/server/auth'
 import { cn } from '@/lib/cn'
+import { MailConnectionNotice } from '@/features/mail/MailConnectionNotice'
 
 /**
  * `session` is resolved on the server and passed down. It is `PublicSession`,
@@ -28,6 +29,9 @@ export function AppShell({
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-canvas">
       <TopBar onOpenNav={() => setNavOpen(true)} session={session} />
+      {/* App-wide: the mail callback lands the user wherever they started, which
+          is deliberately not a single page. */}
+      <MailConnectionNotice />
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden lg:block">

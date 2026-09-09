@@ -12,6 +12,7 @@ import { useRegistryCapabilities } from '@/features/capabilities/useRegistryCapa
 import { useVisionAvailability, visionDisabledReason } from '@/features/attachments/useVisionAvailability'
 import { useDocumentAvailability, documentDisabledReason } from '@/features/attachments/useDocumentAvailability'
 import { ActionHub, type HubAction } from '@/components/chat/ActionHub'
+import { beginEmailConnection, remedyLabel } from '@/features/mail/connectEmail'
 import { IMAGE_ACCEPT, classifyAttachment } from '@/features/attachments/capability'
 import { ImageTray } from '@/components/chat/ImageTray'
 import type { PublicImage } from '@/app/api/images/route'
@@ -171,6 +172,12 @@ export function Composer({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [pendingImage, setPendingImage] = useState<{ name: string } | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
+  /*
+   * Mail gets its OWN notice slot, deliberately. Sharing one with image errors
+   * is how a .wav error once appeared under a PDF — identity is what makes a
+   * notice dismissible without guessing which action produced it.
+   */
+  const [mailNotice, setMailNotice] = useState<string | null>(null)
   /*
    * Refusals carry the NAME of the file that caused them.
    *
@@ -637,6 +644,26 @@ export function Composer({
 
   const capabilities = useRegistryCapabilities(registryIdsIn(catalog))
 
+  /*
+   * Starting a connection.
+   *
+   * 🚨 A FAILURE MUST NOT NAVIGATE. Sending someone to a consent screen whose
+   * callback is guaranteed to be refused takes their mailbox permission and
+   * then throws it away — so the destination is only followed when the server
+   * actually produced one.
+   */
+  const startEmailConnection = async () => {
+    setMailNotice(null)
+    const returnTo = typeof window === 'undefined' ? '/' : window.location.pathname
+    const outcome = await beginEmailConnection(returnTo)
+    if (!outcome.ok) {
+      setMailNotice(outcome.message)
+      return
+    }
+    // A full navigation, not a router push: the destination is another origin.
+    window.location.assign(outcome.authorizationUrl)
+  }
+
   const hubActions: HubAction[] = resolveCapabilities({
     catalog,
     registry: capabilities,
@@ -646,6 +673,15 @@ export function Composer({
     hint: row.hint,
     icon: row.icon as HubAction['icon'],
     ...(row.unavailableReason ? { unavailableReason: row.unavailableReason } : {}),
+    /*
+     * The remedy comes from the ENGINE's token, never from reading the reason.
+     * Only `email` has a connect flow today; a remedy on a row with no handler
+     * is dropped rather than rendered, because a control that opens nothing is
+     * the button-pretending-to-be-a-capability problem in a new costume.
+     */
+    ...(row.remedy && row.id === 'email'
+      ? { remedy: { label: remedyLabel(row.remedy), onSelect: () => { void startEmailConnection() } } }
+      : {}),
     onSelect: onSelect[row.id] ?? (() => {}),
   }))
 
@@ -803,6 +839,23 @@ export function Composer({
         onRemove={(id) => setImages((current) => current.filter((i) => i.id !== id))}
         onDismissError={() => setImageError(null)}
       />
+
+      {mailNotice && (
+        <div
+          role="status"
+          className="mb-2 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900"
+        >
+          <span>{mailNotice}</span>
+          <button
+            type="button"
+            onClick={() => setMailNotice(null)}
+            aria-label="Dismiss"
+            className="shrink-0 font-medium text-amber-700 hover:text-amber-900"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <textarea
         ref={textareaRef}
