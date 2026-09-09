@@ -280,3 +280,141 @@ test('🚨 no consumer source names a search backend', () => {
     }
   }
 })
+
+/* ------------------------------------------------------------------ *
+ * 🚨 A remedy is a token, not prose
+ * ------------------------------------------------------------------ */
+
+test('🚨 an actionable remedy is forwarded from the engine, not inferred from words', () => {
+  /*
+   * The alternative — reading `unavailableReason` for the word "connect" — is a
+   * keyword proxy for a semantic claim. It breaks silently the first time
+   * someone improves the sentence, and the Connect control disappears with no
+   * test failing.
+   */
+  const rows = resolveCapabilities({
+    catalog: [
+      { id: 'email', label: 'Email', hint: 'h', icon: 'i', source: { kind: 'registry', capabilityId: 'migra.email' } },
+    ],
+    registry: [
+      {
+        id: 'migra.email', displayName: 'Email', description: 'd', category: 'account',
+        readOnly: true, approvalRequired: false, available: false,
+        unavailableReason: 'Email is not connected yet.',
+        remedy: 'connect-account',
+      },
+    ],
+  })
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]!.remedy, 'connect-account')
+  assert.equal(rows[0]!.unavailableReason, 'Email is not connected yet.')
+})
+
+test('🚨 a reason WITHOUT a remedy stays inert', () => {
+  /*
+   * An unconfigured deployment and a provider outage both have reasons and
+   * neither has a user-actionable fix. Drawing a button would send someone to
+   * press a control that cannot help — and then to press it again.
+   */
+  const rows = resolveCapabilities({
+    catalog: [
+      { id: 'email', label: 'Email', hint: 'h', icon: 'i', source: { kind: 'registry', capabilityId: 'migra.email' } },
+    ],
+    registry: [
+      {
+        id: 'migra.email', displayName: 'Email', description: 'd', category: 'account',
+        readOnly: true, approvalRequired: false, available: false,
+        unavailableReason: 'Email is unavailable right now.',
+      },
+    ],
+  })
+  assert.equal(rows[0]!.unavailableReason, 'Email is unavailable right now.')
+  assert.equal(rows[0]!.remedy, undefined, 'an outage offered the user a button')
+})
+
+test('🚨 the remedy survives a reason that never says "connect"', () => {
+  /*
+   * 🚨 THIS TEST EXISTS BECAUSE THE OTHERS DID NOT CATCH THE OBVIOUS CHEAT.
+   *
+   * Replacing the token check with `/connect/i.test(unavailableReason)` passed
+   * the whole file, because every fixture's reason happened to contain the
+   * word. The real implementation and the keyword proxy were
+   * indistinguishable.
+   *
+   * Here the reason deliberately contains no remedy vocabulary at all, so only
+   * an implementation reading the TOKEN can still offer the control.
+   */
+  const rows = resolveCapabilities({
+    catalog: [
+      { id: 'email', label: 'Email', hint: 'h', icon: 'i', source: { kind: 'registry', capabilityId: 'migra.email' } },
+    ],
+    registry: [
+      {
+        id: 'migra.email', displayName: 'Email', description: 'd', category: 'account',
+        readOnly: true, approvalRequired: false, available: false,
+        unavailableReason: 'Your mailbox is not linked yet.',
+        remedy: 'connect-account',
+      },
+    ],
+  })
+  assert.equal(rows[0]!.remedy, 'connect-account', 'the remedy was read from the words, not the token')
+})
+
+test('🚨 a reason that SAYS "reconnect" but carries no remedy stays inert', () => {
+  /*
+   * The other half of the same trap, and the one with teeth: prose about
+   * reconnecting, with no remedy, because the grant is fine and the provider
+   * is simply down. A keyword sniff would draw a Connect button here and send
+   * someone to re-authorise a working account during an outage.
+   */
+  const rows = resolveCapabilities({
+    catalog: [
+      { id: 'email', label: 'Email', hint: 'h', icon: 'i', source: { kind: 'registry', capabilityId: 'migra.email' } },
+    ],
+    registry: [
+      {
+        id: 'migra.email', displayName: 'Email', description: 'd', category: 'account',
+        readOnly: true, approvalRequired: false, available: false,
+        unavailableReason: 'Email is unavailable right now. Reconnecting will not help.',
+      },
+    ],
+  })
+  assert.equal(rows[0]!.remedy, undefined, 'a control was offered because the SENTENCE mentioned reconnecting')
+})
+
+test('🚨 an UNRECOGNISED remedy is dropped rather than passed through', () => {
+  // A client must never render a control for a flow it has not built. If the
+  // engine grows a remedy this app does not implement, the row degrades to a
+  // plain reason instead of drawing a button that goes nowhere.
+  const rows = resolveCapabilities({
+    catalog: [
+      { id: 'email', label: 'Email', hint: 'h', icon: 'i', source: { kind: 'registry', capabilityId: 'migra.email' } },
+    ],
+    registry: [
+      {
+        id: 'migra.email', displayName: 'Email', description: 'd', category: 'account',
+        readOnly: true, approvalRequired: false, available: false,
+        unavailableReason: 'Something new happened.',
+        remedy: 'perform-a-ritual-we-have-not-built' as never,
+      },
+    ],
+  })
+  assert.equal(rows[0]!.remedy, undefined, 'a control was offered for a flow that does not exist')
+  assert.equal(rows[0]!.unavailableReason, 'Something new happened.')
+})
+
+test('an AVAILABLE capability carries no remedy, because nothing is wrong', () => {
+  const rows = resolveCapabilities({
+    catalog: [
+      { id: 'email', label: 'Email', hint: 'h', icon: 'i', source: { kind: 'registry', capabilityId: 'migra.email' } },
+    ],
+    registry: [
+      {
+        id: 'migra.email', displayName: 'Email', description: 'd', category: 'account',
+        readOnly: true, approvalRequired: false, available: true,
+      },
+    ],
+  })
+  assert.equal(rows[0]!.remedy, undefined)
+  assert.equal(rows[0]!.unavailableReason, undefined)
+})

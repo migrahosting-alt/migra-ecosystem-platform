@@ -57,7 +57,25 @@ export interface RegistryCapability {
   available: boolean
   /** Present when the engine explains why it is not available. */
   unavailableReason?: string
+  /**
+   * What the USER can do, as the engine's own token.
+   *
+   * 🚨 Read INSTEAD of parsing `unavailableReason`. Inferring "offer Connect"
+   * from the words of a sentence is a keyword proxy for a semantic claim: it
+   * breaks silently the first time someone improves the copy, and the control
+   * disappears with no test failing.
+   */
+  remedy?: CapabilityRemedy
 }
+
+/**
+ * The remedies this app knows how to offer.
+ *
+ * A closed set, mirroring the engine's. An unrecognised token renders as a
+ * plain reason with no control — a client must never draw a button for an
+ * action it has not built.
+ */
+export type CapabilityRemedy = 'connect-account' | 'reconnect-account'
 
 /** Readiness of a surface this app implements itself. */
 export interface LocalReadiness {
@@ -87,6 +105,15 @@ export interface ResolvedCapability {
   /** Absent when the capability can run. Present, with the authority's own
    *  words, when it is real but cannot run right now. */
   unavailableReason?: string
+  /**
+   * Present only when the user can fix it themselves, here.
+   *
+   * Absence is meaningful: an unconfigured deployment and a provider outage
+   * both carry a reason and NEITHER carries a remedy, because pressing
+   * something would not help. A row with a reason and no remedy is inert on
+   * purpose.
+   */
+  remedy?: CapabilityRemedy
 }
 
 /**
@@ -145,11 +172,24 @@ export function resolveCapabilities(input: {
             ...strip(entry),
             unavailableReason:
               capability.unavailableReason ?? `${capability.displayName} is not available right now.`,
+            /*
+             * Forwarded only when the engine named one, and only when it is a
+             * remedy this app has actually built. An unknown token is dropped
+             * rather than passed on: the alternative is a control that renders
+             * for a flow that does not exist.
+             */
+            ...(isKnownRemedy(capability.remedy) ? { remedy: capability.remedy } : {}),
           },
     )
   }
 
   return rows
+}
+
+const KNOWN_REMEDIES: readonly string[] = ['connect-account', 'reconnect-account']
+
+function isKnownRemedy(value: string | undefined): value is CapabilityRemedy {
+  return typeof value === 'string' && KNOWN_REMEDIES.includes(value)
 }
 
 const strip = (entry: CatalogEntry): ResolvedCapability => ({

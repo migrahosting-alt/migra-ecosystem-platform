@@ -27,6 +27,7 @@
  * ever sets it to true on the caller's behalf.
  */
 
+import type { CapabilityRemedy } from '../models/capabilityRegistry.js';
 import type {
   EmailConnection,
   EmailFailure,
@@ -58,6 +59,16 @@ export interface EmailReadiness {
   sendAvailable: boolean;
   /** Engine's words when something is unavailable. */
   reason?: string;
+  /**
+   * What the USER can do, as a token rather than prose.
+   *
+   * 🚨 Present ONLY when the user is the one who can fix it. An unconfigured
+   * deployment and an unreachable provider both have reasons and NEITHER has a
+   * remedy here — the first belongs to an operator and the second to time.
+   * Offering "Connect" for those sends someone to press a control that cannot
+   * help, and then to press it again.
+   */
+  remedy?: CapabilityRemedy;
 }
 
 export class MigraEmail {
@@ -101,6 +112,8 @@ export class MigraEmail {
         readAvailable: false,
         sendAvailable: false,
         reason: EMAIL_NOT_CONNECTED,
+        // They can fix this themselves, right here.
+        remedy: 'connect-account',
       };
     }
     if (connection.state === 'authorization_expired') {
@@ -112,6 +125,8 @@ export class MigraEmail {
         readAvailable: false,
         sendAvailable: false,
         reason: EMAIL_RECONNECT,
+        // The same flow, different words: the row records that they connected.
+        remedy: 'reconnect-account',
       };
     }
     if (connection.state === 'provider_unavailable') {

@@ -333,3 +333,59 @@ test('a health probe that throws reports unavailable, not the exception', async 
   assert.equal(connectionState.state, 'provider_unavailable');
   assert.ok(!connectionState.reason!.includes('invalid_grant'), 'a provider error string reached the reason');
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 A remedy is a TOKEN, never prose to be parsed
+ * ------------------------------------------------------------------ */
+
+test('🚨 not-connected offers a remedy the USER can act on', async () => {
+  /*
+   * The consumer must never read `reason` to decide whether to draw a Connect
+   * button. Parsing prose to infer a state is a keyword proxy: it breaks
+   * silently the first time someone improves a sentence, and the control
+   * disappears with no test failing.
+   */
+  const email = new MigraEmail({ provider: provider({}, connection({ state: 'not_connected' })) });
+  // readiness() reads a CACHED connection; without this the snapshot is null
+  // and every state collapses to "not connected", which would make the next
+  // three assertions pass for the wrong reason.
+  await email.refreshConnection();
+  const readiness = email.readiness();
+  assert.equal(readiness.readAvailable, false);
+  assert.equal(readiness.remedy, 'connect-account');
+});
+
+test('🚨 an expired grant asks to RECONNECT, a different remedy from connecting', async () => {
+  // They did connect. Offering "Connect" would describe a first-time action to
+  // someone whose account is already linked.
+  const email = new MigraEmail({ provider: provider({}, connection({ state: 'authorization_expired' })) });
+  await email.refreshConnection();
+  assert.equal(email.readiness().remedy, 'reconnect-account');
+});
+
+test('🚨 an UNCONFIGURED deployment offers NO remedy', () => {
+  /*
+   * Nothing the user does can fix a missing OAuth client. A Connect button here
+   * sends someone to press a control that cannot help — and then to press it
+   * again, because nothing changed.
+   */
+  const email = new MigraEmail({});
+  const readiness = email.readiness();
+  assert.equal(readiness.providerConfigured, false);
+  assert.ok(readiness.reason, 'an unconfigured deployment said nothing at all');
+  assert.equal(readiness.remedy, undefined, 'a deployment fault offered the user a button');
+});
+
+test('🚨 an UNREACHABLE provider offers no remedy either — the remedy is time', async () => {
+  const email = new MigraEmail({ provider: provider({}, connection({ state: 'provider_unavailable' })) });
+  await email.refreshConnection();
+  assert.equal(email.readiness().remedy, undefined, 'an outage offered the user a button');
+});
+
+test('a working connection has no remedy, because nothing is wrong', async () => {
+  const email = new MigraEmail({ provider: provider({}, connection({ state: 'connected' })) });
+  await email.refreshConnection();
+  const readiness = email.readiness();
+  assert.equal(readiness.readAvailable, true);
+  assert.equal(readiness.remedy, undefined);
+});

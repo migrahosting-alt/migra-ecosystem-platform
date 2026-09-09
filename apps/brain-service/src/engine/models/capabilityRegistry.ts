@@ -98,7 +98,31 @@ export interface CapabilityDescriptor {
    * defect this codebase has already shipped once.
    */
   unavailableReason?: string;
+  /**
+   * What the USER can do about it, as a machine-readable token.
+   *
+   * 🚨 EXISTS SO A CLIENT NEVER PARSES `unavailableReason` TO DECIDE WHETHER TO
+   * OFFER A BUTTON. Reading prose to infer a state is a keyword proxy for a
+   * semantic claim, and it breaks silently the first time the wording changes —
+   * a "Connect" control that vanishes because someone improved a sentence.
+   *
+   * Absent means there is nothing the user can do here: the remedy is to wait,
+   * or it belongs to an operator. That is a real and common case, and it must
+   * stay distinguishable from an actionable one — offering a button for a
+   * provider outage sends people to press something that cannot help.
+   */
+  remedy?: CapabilityRemedy;
 }
+
+/**
+ * The remedies a client knows how to offer. A closed set on purpose: a client
+ * can only render an action it has actually built.
+ */
+export type CapabilityRemedy =
+  /** Link an external account. The client opens its own connect flow. */
+  | 'connect-account'
+  /** The link exists but the grant died; the same flow, different words. */
+  | 'reconnect-account';
 
 /** Per-call execution context threaded from the tool boundary (Slice 2): lets a
  * handler correlate its store telemetry to the originating execution. */
@@ -127,7 +151,7 @@ interface RunnableCapability {
    * that reached the network here would put an outbound call on every render.
    * The provider layer keeps its own cached health and reports it from memory.
    */
-  readiness?: () => { ready: boolean; reason?: string };
+  readiness?: () => { ready: boolean; reason?: string; remedy?: CapabilityRemedy };
 }
 
 /** Grants held by the local engine deployment. The read/write/git grants make the
@@ -449,7 +473,13 @@ const TOOLS: RunnableCapability[] = [
       const readiness = migraEmail.readiness();
       return readiness.readAvailable
         ? { ready: true }
-        : { ready: false, ...(readiness.reason ? { reason: readiness.reason } : {}) };
+        : {
+            ready: false,
+            ...(readiness.reason ? { reason: readiness.reason } : {}),
+            // Forwarded, never derived: only the email authority knows whether
+            // the user is the one who can fix this.
+            ...(readiness.remedy ? { remedy: readiness.remedy } : {}),
+          };
     },
     handler: async () => {
       throw new Error('migra.email has no provider configured');
@@ -559,8 +589,19 @@ export class CapabilityRegistry {
      * and "you lack workspace.write" is scaffolding, not something a person
      * can act on.
      */
-    const reason = cap.readiness?.().reason;
-    return { ...cap.descriptor, available, ...(reason ? { unavailableReason: reason } : {}) };
+    const probe = cap.readiness?.();
+    return {
+      ...cap.descriptor,
+      available,
+      ...(probe?.reason ? { unavailableReason: probe.reason } : {}),
+      /*
+       * The remedy travels only when the capability is genuinely unavailable
+       * AND the probe named one. It is never synthesised here: this layer does
+       * not know whether an account can be connected, and guessing would put a
+       * button in front of a user for a state nobody checked.
+       */
+      ...(probe?.remedy ? { remedy: probe.remedy } : {}),
+    };
   }
 
   list(filter: CapabilityFilter = {}): CapabilityDescriptor[] {
