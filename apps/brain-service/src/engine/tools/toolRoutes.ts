@@ -30,7 +30,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { CapabilityRegistry } from '../models/capabilityRegistry.js';
+import { CapabilityRegistry, type ReadinessContext } from '../models/capabilityRegistry.js';
 import { ToolApprovalStore } from './toolApprovalStore.js';
 import { ToolAudit } from './toolAudit.js';
 import { executeToolCore } from './toolExecutor.js';
@@ -41,6 +41,19 @@ export interface ToolRoutesDeps {
   registry?: CapabilityRegistry;
   approvals?: ToolApprovalStore;
   audit?: ToolAudit;
+  /**
+   * Resolve per-request facts that a synchronous readiness probe cannot.
+   *
+   * 🚨 THE CAPABILITY LIST IS PER PRINCIPAL, and some of what decides it lives
+   * in the database. A connected mailbox belongs to one user; the registry is a
+   * process-wide singleton. Without this, "is email available?" would be
+   * answered from shared state — the same answer for everyone, reflecting
+   * whoever connected most recently.
+   *
+   * Absent means the deployment has no such facts to resolve, and every probe
+   * that needs one will report unavailable rather than assume.
+   */
+  readinessFor?(request: FastifyRequest): Promise<ReadinessContext>;
 }
 
 interface ExecuteBody {
@@ -63,11 +76,27 @@ export function registerToolExecutionRoutes(app: FastifyInstance, deps: ToolRout
 
   app.get('/api/ai/tools', async (request) => {
     const q = request.query as { category?: string; readOnly?: string; includeUnavailable?: string };
+    /*
+     * Resolved BEFORE the list, because readiness probes are synchronous by
+     * contract — drawing a menu must not be able to open a network call, and a
+     * probe that could await would eventually do exactly that.
+     *
+     * A failure to resolve is not a failure to answer: the catalog still
+     * renders, and the capability that needed the fact reports unavailable.
+     * Losing the whole hub because one lookup was slow would be worse than
+     * showing one row as temporarily unavailable.
+     */
+    let ctx: ReadinessContext | undefined;
+    try {
+      ctx = await deps.readinessFor?.(request);
+    } catch {
+      ctx = undefined;
+    }
     const tools = registry.list({
       category: q.category,
       readOnly: q.readOnly === undefined ? undefined : q.readOnly === 'true',
       includeUnavailable: q.includeUnavailable === 'true',
-    });
+    }, ctx);
     return { count: tools.length, tools };
   });
 

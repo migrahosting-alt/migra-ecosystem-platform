@@ -39,10 +39,24 @@ import type {
 } from './types.js';
 
 /** User-facing reasons. Engine-owned, free of provider vocabulary. */
-export const EMAIL_NOT_CONFIGURED = 'Email is not set up yet.';
-export const EMAIL_NOT_CONNECTED = 'Email is not connected yet.';
-export const EMAIL_RECONNECT = 'Your email account needs reconnecting.';
-export const EMAIL_UNAVAILABLE = 'Email is unavailable right now.';
+/*
+ * Re-exported, not redeclared. These sentences are also the ones the capability
+ * hub shows, and two copies would drift — the drift appearing as a hub row
+ * disagreeing with the screen it opens.
+ */
+export {
+  EMAIL_NOT_CONFIGURED,
+  EMAIL_NOT_CONNECTED,
+  EMAIL_RECONNECT,
+  EMAIL_UNAVAILABLE,
+} from './emailReadiness.js';
+import { emailReadinessFor } from './emailReadiness.js';
+import {
+  EMAIL_NOT_CONFIGURED,
+  EMAIL_NOT_CONNECTED,
+  EMAIL_RECONNECT,
+  EMAIL_UNAVAILABLE,
+} from './emailReadiness.js';
 
 export interface EmailAuthorityDeps {
   /** Absent until a provider exists. Absence is a state, not a failure. */
@@ -71,6 +85,19 @@ export interface EmailReadiness {
   remedy?: CapabilityRemedy;
 }
 
+/**
+ * A provider exists but its health has not been read yet.
+ *
+ * Deliberately NOT `not_configured`: the deployment is configured, we simply
+ * have not asked. Reporting it as unconfigured would tell an operator to go
+ * and set up something that is already set up.
+ */
+const NOT_YET_CHECKED: EmailConnection = Object.freeze({
+  state: 'not_connected',
+  scopes: { read: false, draft: false, send: false },
+  checkedAt: '',
+});
+
 export class MigraEmail {
   private readonly provider: EmailProvider | null;
   private readonly now: () => number;
@@ -93,61 +120,33 @@ export class MigraEmail {
    * Google account, so both must be representable.
    */
   readiness(): EmailReadiness {
-    if (!this.provider) {
-      return {
-        registered: true,
-        providerConfigured: false,
-        accountConnected: false,
-        readAvailable: false,
-        sendAvailable: false,
-        reason: EMAIL_NOT_CONFIGURED,
-      };
-    }
-    const connection = this.snapshot?.connection;
-    if (!connection || connection.state === 'not_connected') {
-      return {
-        registered: true,
-        providerConfigured: true,
-        accountConnected: false,
-        readAvailable: false,
-        sendAvailable: false,
-        reason: EMAIL_NOT_CONNECTED,
-        // They can fix this themselves, right here.
-        remedy: 'connect-account',
-      };
-    }
-    if (connection.state === 'authorization_expired') {
-      return {
-        registered: true,
-        providerConfigured: true,
-        // They DID connect. The remedy is reconnecting, not starting over.
-        accountConnected: true,
-        readAvailable: false,
-        sendAvailable: false,
-        reason: EMAIL_RECONNECT,
-        // The same flow, different words: the row records that they connected.
-        remedy: 'reconnect-account',
-      };
-    }
-    if (connection.state === 'provider_unavailable') {
-      return {
-        registered: true,
-        providerConfigured: true,
-        accountConnected: true,
-        readAvailable: false,
-        sendAvailable: false,
-        reason: EMAIL_UNAVAILABLE,
-      };
-    }
+    /*
+     * 🚨 THE REASON AND THE REMEDY COME FROM ONE MAPPING, shared with the
+     * capability hub. Two copies drifted apart the moment they existed, and the
+     * drift would show as a hub row disagreeing with the screen it opens.
+     *
+     * What stays here is only what this object knows and the mapping does not:
+     * the per-operation booleans, because read and send are separate
+     * capabilities and one flag would either hide working search or promise a
+     * send that fails at dispatch.
+     */
+    const connection = this.provider ? (this.snapshot?.connection ?? NOT_YET_CHECKED) : null;
+    const shared = emailReadinessFor(connection);
+
+    const connected =
+      connection !== null
+      && connection.state !== 'not_connected'
+      && connection.state !== 'not_configured';
+
     return {
       registered: true,
-      providerConfigured: true,
-      accountConnected: true,
-      readAvailable: connection.scopes.read,
-      sendAvailable: connection.scopes.send,
-      ...(connection.scopes.read
-        ? {}
-        : { reason: 'This account is connected without permission to read mail.' }),
+      providerConfigured: this.provider !== null,
+      accountConnected: connected,
+      readAvailable: shared.ready,
+      // Send is reported independently, and is NEVER implied by read.
+      sendAvailable: shared.ready && (connection?.scopes.send ?? false),
+      ...(shared.reason ? { reason: shared.reason } : {}),
+      ...(shared.remedy ? { remedy: shared.remedy } : {}),
     };
   }
 

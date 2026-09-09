@@ -31,6 +31,8 @@ import { registerInspectRoutes } from './engine/workspace/inspectRoutes.js';
 import { registerProjectRoutes } from './engine/projects/projectRoutes.js';
 import { registerMailConnectionRoutes } from './engine/email/mailConnectionRoutes.js';
 import { durableMailConnections, durableMailPending } from './engine/email/durableMailStores.js';
+import { connectionStatus } from './engine/email/connectionService.js';
+import type { MailConnectionStore } from './engine/email/connectionStore.js';
 import { hasMailConnections, hasMailPending } from './engine/persistence/types.js';
 import { oauthConfigFrom, configProblemMessage } from './engine/email/oauthConfig.js';
 import { sealKeyFrom, sealKeyProblemMessage } from './engine/email/tokenSealing.js';
@@ -885,7 +887,106 @@ async function main(): Promise<void> {
   // MigraAI Engine capability execution boundary (/api/ai/tools): the engine owns
   // tool validation, availability, dispatch, and the approval lifecycle. Additive
   // — the legacy /tools/* routes remain for compatibility.
-  const toolDeps = registerToolExecutionRoutes(app);
+  /*
+   * Resolved below, and read by the capability list.
+   *
+   * 🚨 The mail connection is PER PRINCIPAL and the capability registry is a
+   * process-wide singleton, so "is email available?" cannot be answered from
+   * shared state — it would report whoever connected most recently, to
+   * everyone. The route resolves it for the caller instead.
+   */
+  let mailConnections: MailConnectionStore | null = null;
+
+  /*
+   * ── connected mailboxes ───────────────────────────────────────────────────
+   *
+   * 🚨 Three separate reasons this can be off, and each is LOGGED with its own
+   * remedy rather than collapsed into "email is disabled":
+   *
+   *   • no OAuth client configured   — an operator has not created one yet
+   *   • no sealing key               — the store would have to hold a mailbox
+   *                                    credential in the clear, so it refuses
+   *   • the store cannot persist it  — refusing beats a connection that
+   *                                    vanishes on restart, which would make
+   *                                    users reconnect after every deploy and
+   *                                    teach them the product is broken
+   *
+   * There is deliberately no in-memory branch, for the reason the project
+   * binding exists to remember.
+   */
+  const mailOAuth = oauthConfigFrom(process.env);
+  const mailKey = sealKeyFrom(process.env);
+  // Narrowed to a value, not a boolean: a boolean would leave `durable`
+  // possibly-undefined at the construction site below and invite a non-null
+  // assertion, which is how a null store reaches a feature that refuses one.
+  const mailStore =
+    durable && hasMailConnections(durable) && hasMailPending(durable) ? durable : null;
+
+  if (!mailOAuth.ok) {
+    app.log.info(
+      { problems: configProblemMessage(mailOAuth.problems) },
+      'EMAIL CONNECT DISABLED — no OAuth client is configured. This is the ordinary state before '
+        + 'an operator creates one; the Brain is otherwise healthy.',
+    );
+  } else if (!mailKey.ok) {
+    app.log.warn(
+      { problem: sealKeyProblemMessage(mailKey.problem) },
+      'EMAIL CONNECT DISABLED — refusing to store a mailbox credential without a sealing key. '
+        + 'A refresh token opens the user\'s actual mailbox from anywhere and survives a password '
+        + 'change; a database dump must not be a permanent key to it.',
+    );
+  } else if (!mailStore) {
+    app.log.warn(
+      { persistence: selection.kind },
+      'EMAIL CONNECT DISABLED — the configured durable store has no mail repository. Refusing to '
+        + 'serve the feature from memory: a connection that vanishes on restart would make users '
+        + 'reconnect their mailbox after every deploy.',
+    );
+  } else {
+    const googleDeps = {
+      config: mailOAuth.config,
+      // Read at the call, never held on an object that could be logged.
+      clientSecret: () => process.env.MIGRAPILOT_GOOGLE_CLIENT_SECRET,
+    };
+    mailConnections = durableMailConnections(mailStore);
+    registerMailConnectionRoutes(app, {
+      provider: 'gmail',
+      scopeFrom: memoryScopeFrom,
+      service: {
+        config: mailOAuth.config,
+        key: mailKey.key,
+        connections: mailConnections,
+        pending: durableMailPending(mailStore),
+        exchange: (code) => exchangeCode(code, googleDeps),
+        identify: (accessToken) => identifyAccount(accessToken, googleDeps),
+        revoke: (refreshToken) => revokeGrant(refreshToken, googleDeps),
+        now: () => Date.now(),
+      },
+    });
+    app.log.info('Email connect enabled.');
+  }
+
+  const toolDeps = registerToolExecutionRoutes(app, {
+    /*
+     * Resolved per request, from the caller's own scope. A failure here leaves
+     * the context unresolved, and the email capability reports unavailable
+     * rather than guessing — losing one row beats reporting someone else's
+     * mailbox as connected.
+     */
+    readinessFor: async (request) => {
+      if (!mailConnections) return {};
+      const scope = memoryScopeFrom(request);
+      return {
+        mail: await connectionStatus({
+          scope,
+          provider: 'gmail',
+          providerConfigured: true,
+          connections: mailConnections,
+          now: () => Date.now(),
+        }),
+      };
+    },
+  });
 
   /*
    * The user-tool approval round-trip (propose → decline | dispatch).
@@ -1144,74 +1245,6 @@ async function main(): Promise<void> {
     bindings: projectBindings,
     scopeFrom: memoryScopeFrom,
   });
-  /*
-   * ── connected mailboxes ───────────────────────────────────────────────────
-   *
-   * 🚨 Three separate reasons this can be off, and each is LOGGED with its own
-   * remedy rather than collapsed into "email is disabled":
-   *
-   *   • no OAuth client configured   — an operator has not created one yet
-   *   • no sealing key               — the store would have to hold a mailbox
-   *                                    credential in the clear, so it refuses
-   *   • the store cannot persist it  — refusing beats a connection that
-   *                                    vanishes on restart, which would make
-   *                                    users reconnect after every deploy and
-   *                                    teach them the product is broken
-   *
-   * There is deliberately no in-memory branch, for the reason the project
-   * binding exists to remember.
-   */
-  const mailOAuth = oauthConfigFrom(process.env);
-  const mailKey = sealKeyFrom(process.env);
-  // Narrowed to a value, not a boolean: a boolean would leave `durable`
-  // possibly-undefined at the construction site below and invite a non-null
-  // assertion, which is how a null store reaches a feature that refuses one.
-  const mailStore =
-    durable && hasMailConnections(durable) && hasMailPending(durable) ? durable : null;
-
-  if (!mailOAuth.ok) {
-    app.log.info(
-      { problems: configProblemMessage(mailOAuth.problems) },
-      'EMAIL CONNECT DISABLED — no OAuth client is configured. This is the ordinary state before '
-        + 'an operator creates one; the Brain is otherwise healthy.',
-    );
-  } else if (!mailKey.ok) {
-    app.log.warn(
-      { problem: sealKeyProblemMessage(mailKey.problem) },
-      'EMAIL CONNECT DISABLED — refusing to store a mailbox credential without a sealing key. '
-        + 'A refresh token opens the user\'s actual mailbox from anywhere and survives a password '
-        + 'change; a database dump must not be a permanent key to it.',
-    );
-  } else if (!mailStore) {
-    app.log.warn(
-      { persistence: selection.kind },
-      'EMAIL CONNECT DISABLED — the configured durable store has no mail repository. Refusing to '
-        + 'serve the feature from memory: a connection that vanishes on restart would make users '
-        + 'reconnect their mailbox after every deploy.',
-    );
-  } else {
-    const googleDeps = {
-      config: mailOAuth.config,
-      // Read at the call, never held on an object that could be logged.
-      clientSecret: () => process.env.MIGRAPILOT_GOOGLE_CLIENT_SECRET,
-    };
-    registerMailConnectionRoutes(app, {
-      provider: 'gmail',
-      scopeFrom: memoryScopeFrom,
-      service: {
-        config: mailOAuth.config,
-        key: mailKey.key,
-        connections: durableMailConnections(mailStore),
-        pending: durableMailPending(mailStore),
-        exchange: (code) => exchangeCode(code, googleDeps),
-        identify: (accessToken) => identifyAccount(accessToken, googleDeps),
-        revoke: (refreshToken) => revokeGrant(refreshToken, googleDeps),
-        now: () => Date.now(),
-      },
-    });
-    app.log.info('Email connect enabled.');
-  }
-
   app.post<{ Body: TelemetryEventRequest }>('/telemetry/event', async (request, reply) => {
     if (env.enableTelemetry) {
       app.log.info({ telemetry: request.body }, 'Telemetry event received');

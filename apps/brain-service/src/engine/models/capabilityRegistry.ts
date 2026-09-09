@@ -20,6 +20,8 @@ import { z } from 'zod';
 import type { ZodType } from 'zod';
 
 import { migraSearch } from '../search/migraSearch.js';
+import type { EmailConnection } from '../email/types.js';
+import { emailReadinessFor } from '../email/emailReadiness.js';
 import { migraEmail } from '../email/migraEmail.js';
 import {
   WorkspaceSearchRequestSchema,
@@ -71,6 +73,27 @@ export type CapabilityCategory =
   | 'account';
 
 /** Client-facing capability metadata — safe to serialize; no implementation. */
+/**
+ * Facts a ROUTE resolved for THIS request, for readiness probes to consult.
+ *
+ * 🚨 EXISTS BECAUSE SOME CAPABILITIES ARE PER-PRINCIPAL AND THIS REGISTRY IS
+ * NOT. A connected mailbox belongs to one user; the registry is a process-wide
+ * singleton. Readiness computed from shared state answers "is email available?"
+ * for whoever connected most recently and hands that answer to everyone else —
+ * a display bug that sits one wiring mistake away from executing against
+ * somebody else's inbox.
+ *
+ * The route knows who is asking, resolves the fact (which may need a database
+ * read, and so cannot happen inside a synchronous probe), and passes it here.
+ *
+ * Absent means NOT RESOLVED, which is never treated as "fine": a probe that
+ * needs a fact it was not given must report unavailable rather than assume.
+ */
+export interface ReadinessContext {
+  /** This caller's mail connection. `null` = the deployment has no email. */
+  mail?: EmailConnection | null;
+}
+
 export interface CapabilityDescriptor {
   kind: CapabilityKind;
   id: string;
@@ -151,7 +174,7 @@ interface RunnableCapability {
    * that reached the network here would put an outbound call on every render.
    * The provider layer keeps its own cached health and reports it from memory.
    */
-  readiness?: () => { ready: boolean; reason?: string; remedy?: CapabilityRemedy };
+  readiness?: (ctx?: ReadinessContext) => { ready: boolean; reason?: string; remedy?: CapabilityRemedy };
 }
 
 /** Grants held by the local engine deployment. The read/write/git grants make the
@@ -454,7 +477,7 @@ const TOOLS: RunnableCapability[] = [
      *
      * So read is registered here as read-only and non-approval-gated, and send
      * lives in its own registration governed by consent and durable
-     * idempotency. Availability comes from `migraEmail.readiness()`, which is
+     * idempotency. Availability comes from the CALLER'S resolved connection —
      * per-operation for exactly this reason.
      *
      * Today no provider is configured, so this is registered, visible, and
@@ -469,18 +492,19 @@ const TOOLS: RunnableCapability[] = [
       { readOnly: true },
     ),
     inputSchema: EmailSearchRequestSchema,
-    readiness: () => {
-      const readiness = migraEmail.readiness();
-      return readiness.readAvailable
-        ? { ready: true }
-        : {
-            ready: false,
-            ...(readiness.reason ? { reason: readiness.reason } : {}),
-            // Forwarded, never derived: only the email authority knows whether
-            // the user is the one who can fix this.
-            ...(readiness.remedy ? { remedy: readiness.remedy } : {}),
-          };
-    },
+    /*
+     * 🚨 RESOLVED FROM THE CALLER'S OWN CONNECTION, never from shared state.
+     *
+     * A mailbox belongs to a principal and this registry is a singleton. Asking
+     * a cached provider would report whoever connected most recently — to
+     * everybody — and that answer is one wiring mistake away from executing
+     * against their inbox.
+     *
+     * `ctx.mail === undefined` means the route did not resolve it. That is
+     * treated as "no email here", NOT as available: a probe that needs a fact
+     * it was not given must refuse rather than assume.
+     */
+    readiness: (ctx) => emailReadinessFor(ctx?.mail ?? null),
     handler: async () => {
       throw new Error('migra.email has no provider configured');
     },
@@ -572,16 +596,16 @@ export class CapabilityRegistry {
     }
   }
 
-  private available(cap: RunnableCapability): boolean {
+  private available(cap: RunnableCapability, ctx?: ReadinessContext): boolean {
     if (!cap.descriptor.requiredCapabilities.every((c) => this.grants.has(c))) return false;
     // Grants first, then dynamic readiness. A capability whose grant is missing
     // is unavailable regardless of what a provider says, so the cheaper and
     // more fundamental check runs first.
-    return cap.readiness ? cap.readiness().ready === true : true;
+    return cap.readiness ? cap.readiness(ctx).ready === true : true;
   }
 
-  private describe(cap: RunnableCapability): CapabilityDescriptor {
-    const available = this.available(cap);
+  private describe(cap: RunnableCapability, ctx?: ReadinessContext): CapabilityDescriptor {
+    const available = this.available(cap, ctx);
     if (available) return { ...cap.descriptor, available };
     /*
      * The reason comes from the readiness probe when it has one. A missing
@@ -589,7 +613,7 @@ export class CapabilityRegistry {
      * and "you lack workspace.write" is scaffolding, not something a person
      * can act on.
      */
-    const probe = cap.readiness?.();
+    const probe = cap.readiness?.(ctx);
     return {
       ...cap.descriptor,
       available,
@@ -604,10 +628,10 @@ export class CapabilityRegistry {
     };
   }
 
-  list(filter: CapabilityFilter = {}): CapabilityDescriptor[] {
+  list(filter: CapabilityFilter = {}, ctx?: ReadinessContext): CapabilityDescriptor[] {
     const out: CapabilityDescriptor[] = [];
     for (const cap of this.byId.values()) {
-      const d = this.describe(cap);
+      const d = this.describe(cap, ctx);
       if (!filter.includeUnavailable && !d.available) continue;
       if (filter.category && d.category !== filter.category) continue;
       if (filter.kind && d.kind !== filter.kind) continue;
