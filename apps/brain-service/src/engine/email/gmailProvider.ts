@@ -214,7 +214,22 @@ function collectAttachments(part: GmailPart | undefined, into: EmailAttachment[]
  * metadata` response carries a snippet and no body, and labelling that complete
  * is precisely the failure the flag exists to prevent.
  */
-export function toCanonicalMessage(raw: GmailMessage, retrievedAt: string): EmailMessage | null {
+export function toCanonicalMessage(
+  raw: GmailMessage,
+  retrievedAt: string,
+  /**
+   * 🚨 DID THIS READ ACTUALLY INSPECT THE MIME TREE?
+   *
+   * Attachment ids live in `payload.parts`, which a `format=metadata` response
+   * does not carry. Defaulting this to true would let every search result claim
+   * "no attachments" for messages that have them — which is exactly what this
+   * product did until it was measured against a live mailbox.
+   *
+   * Defaults to FALSE, so a caller that forgets understates what it knows
+   * rather than asserting something untrue.
+   */
+  attachmentsKnown = false,
+): EmailMessage | null {
   if (!raw.id || !raw.threadId) return null;
 
   const textPart = findPart(raw.payload, 'text/plain');
@@ -247,6 +262,11 @@ export function toCanonicalMessage(raw: GmailMessage, retrievedAt: string): Emai
     ...(textBody ? { textBody } : {}),
     ...(htmlBody ? { htmlBody } : {}),
     bodyComplete: typeof textBody === 'string' && textBody.length > 0,
+    attachmentsKnown,
+    /*
+     * Collected either way, because a partial tree may still carry parts — but
+     * the LIST means nothing to a caller until the flag above says so.
+     */
     attachments: collectAttachments(raw.payload),
     labels: raw.labelIds ?? [],
     unread: (raw.labelIds ?? []).includes('UNREAD'),
@@ -492,7 +512,11 @@ export class GmailProvider implements EmailProvider {
     const raw = await this.#call<GmailMessage>(`/messages/${encodeURIComponent(id)}${query}`);
     if (!raw.ok) return raw;
 
-    const message = toCanonicalMessage(raw.value, new Date(this.#now()).toISOString());
+    // `full` inspected the MIME tree; `metadata` did not. That is the whole
+    // basis on which attachment presence may be claimed.
+    const message = toCanonicalMessage(
+      raw.value, new Date(this.#now()).toISOString(), format === 'full',
+    );
     if (!message) {
       // A payload without an id or a thread id is not a message we can cite.
       return { ok: false, failure: { kind: 'provider_unavailable', detail: UNAVAILABLE } };
@@ -588,7 +612,8 @@ export class GmailProvider implements EmailProvider {
 
     const retrievedAt = new Date(this.#now()).toISOString();
     const messages = (raw.value.messages ?? [])
-      .map((message) => toCanonicalMessage(message, retrievedAt))
+      // format=full above, so every message in a thread is authoritative.
+      .map((message) => toCanonicalMessage(message, retrievedAt, true))
       .filter((message): message is EmailMessage => message !== null)
       .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
 

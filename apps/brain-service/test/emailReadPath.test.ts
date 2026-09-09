@@ -36,6 +36,8 @@ const message = (over: Partial<EmailMessage> = {}): EmailMessage => ({
   sentAt: '2026-09-05T10:00:00.000Z',
   snippet: 'Your invoice is attached.',
   bodyComplete: false,
+  // Snippet-shaped fixture: presence was never determined.
+  attachmentsKnown: false,
   attachments: [],
   labels: ['INBOX'],
   unread: true,

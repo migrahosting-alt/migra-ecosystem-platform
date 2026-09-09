@@ -614,7 +614,14 @@ const TOOLS: RunnableCapability[] = [
           }
           const result = await executeEmailListAttachments(request.messageId, ctx);
           return result.ok
-            ? { ok: true, attachments: result.attachments }
+            /*
+             * 🚨 ALWAYS KNOWN. listAttachments reads the full MIME tree, so an
+             * empty list here is a PROVEN absence — unlike a search result,
+             * where the same empty array means nothing was ever inspected. The
+             * flag is stated rather than implied so a caller never has to know
+             * which op it came from to read the answer correctly.
+             */
+            ? { ok: true, attachmentsKnown: true, attachments: result.attachments }
             : { ok: false, failure: result.failure };
         }
         case 'fetchAttachment': {

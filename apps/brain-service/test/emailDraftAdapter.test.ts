@@ -42,6 +42,8 @@ const source = (over: Partial<EmailMessage> = {}): EmailMessage => ({
   sentAt: '2026-09-05T10:00:00.000Z',
   snippet: 's',
   bodyComplete: true,
+  // A fixture standing in for a FULL read.
+  attachmentsKnown: true,
   textBody: 'Body',
   attachments: [],
   labels: [],

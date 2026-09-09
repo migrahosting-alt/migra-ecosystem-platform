@@ -81,6 +81,33 @@ export interface EmailMessage {
    * becomes impossible to make.
    */
   bodyComplete: boolean;
+  /**
+   * 🚨 Whether ATTACHMENT PRESENCE WAS ACTUALLY DETERMINED.
+   *
+   * Attachment ids live in the provider's MIME tree, and a metadata read does
+   * not carry one — so a search result's `attachments` array is empty whether
+   * the message has none or has five. An empty array is a CLAIM, and that claim
+   * was false on every search this product has ever run.
+   *
+   * Three states, deliberately, because two cannot express the difference:
+   *
+   *   attachmentsKnown: false                  presence is UNKNOWN — say nothing
+   *   attachmentsKnown: true,  attachments: [] inspection PROVED none
+   *   attachmentsKnown: true,  attachments: [] inspection PROVED these
+   *
+   * Absence of the flag was rejected as the design: a missing field also means
+   * "old client", "serialisation bug" or "not requested", and the caller is
+   * left inferring semantics from field presence. `bodyComplete` already
+   * settled this argument for bodies — unknown must be EXPLICIT.
+   *
+   * 🚨 NOBODY MAY PROMOTE UNKNOWN TO EMPTY. Reading `attachments.length === 0`
+   * without checking this flag is the defect, not a shortcut around it.
+   */
+  attachmentsKnown: boolean;
+  /**
+   * What was found. Meaningless — NOT "none" — while `attachmentsKnown` is
+   * false; it is empty there only because there is nothing to report yet.
+   */
   attachments: EmailAttachment[];
   /** Provider labels/folders, passed through. Meaning varies by provider. */
   labels: string[];
