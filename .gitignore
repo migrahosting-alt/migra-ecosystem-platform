@@ -91,6 +91,11 @@
 !/docs/annoupale/hook-patch-*.md
 !/docs/migracms/
 !/docs/migracms/hook-patch-*.md
+# A grant's permit/deny suite is the evidence it was actually tested, and it is
+# the only artefact that can prove a removed grant is really gone. Same reasoning
+# as /docs/migrapilot/*.sh above: the executable half belongs with the document.
+!/docs/annoupale/hook-patch-*.sh
+!/docs/migracms/hook-patch-*.sh
 
 # Allow ONLY nginx infra tree
 !infra/
