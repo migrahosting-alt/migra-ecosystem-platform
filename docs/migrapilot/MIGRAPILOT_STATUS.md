@@ -15,6 +15,133 @@ _Last updated: 2026-09-09_
 
 ---
 
+## Lane 2026-09-09 (latest) — Migra Email: qualified as far as it is wired
+
+**Passed against the real QA mailbox**, through the full per-principal path:
+
+- **search / readMessage / readThread** — real content, correct addresses and dates
+- **Token refresh under a real expiry** — `expires_at` forced into the past; the read succeeded
+  transparently, `last_refresh_at` went null→set, expiry moved into the future, and the sealed token
+  **changed** (`c1a197…`→`cc9971…`). Still sealed, no plaintext.
+- **Cross-principal isolation** — a different owner, and the same owner in a different workspace, are
+  both denied. A foreign principal holding the **real provider message id** is still denied.
+- **Disconnect scoping** — a foreign principal naming the **real `provider_account_id`** gets 404 and
+  the row is untouched.
+- **Disconnect** — row gone, **revoked at Google**, status flips to `not_connected`, and an immediate
+  read fails even with a known real message id. Nothing was memoised.
+- **Telemetry** — zero addresses, subjects, bodies, `ya29.`/`1//` or `Bearer` in any log, while real
+  mail was being read.
+
+### 🚨 Three read-slice surfaces have no caller anywhere
+
+Grepping for callers across `apps/*/src` finds **none** for:
+
+| Surface | Reachable from |
+|---|---|
+| `routeEmail` (intent routing) | nothing |
+| `emailSummary` (grounded summarisation) | nothing |
+| `executeEmailListAttachments` / `executeEmailFetchAttachment` / `bridgeDownloadedAttachment` | nothing |
+
+`migra.email`'s schema admits only `op: search \| readMessage \| readThread` — there is no attachment
+op to call. So **attachment retrieval, canonical file ingestion, grounded summarisation and live
+intent routing cannot be qualified through the product at all.** This is the same defect class as the
+missing Gmail transport: built, mutation-tested, declared complete, reachable by nothing.
+
+Two of the three are **not** simple oversights:
+
+- The attachment bridge takes its `AttachmentPolicy` **by injection on purpose** — allowed types and
+  size limits belong to the consumer's file pipeline, and the bridge's own header says restating them
+  in the Brain would create a second source of truth that drifts. Exposing a `fetchAttachment` op
+  means deciding how the consumer's policy reaches the Brain. That is a design decision inside the
+  slice, not a qualification step, so it was not made unilaterally.
+- Live intent routing runs in the model turn, and **`agentRuntime` still carries no principal** — the
+  gap that must close through the governed identity boundary, not by bolting account state onto the
+  agent.
+
+### 🚨 The QA mailbox was never seeded
+
+Gmail's own `users.getProfile` reports **`messagesTotal=2`** — the two Google onboarding messages,
+zero attachments. `messages.list` with `q=''`, `q='in:anywhere'` (which covers Spam and Trash) and
+`q='has:attachment in:anywhere'` returned **2, 2 and 0** ids, `resultSizeEstimate` **2, 2 and 0**.
+
+Listed ids equalled returned messages, so the adapter's 404-skip was **not** hiding them. Nothing was
+delivered to that address. The sentinel and exact-XLSX assertions could not be run.
+
+### Next
+Bonex: seed the mailbox **and** reconnect (disconnect revoked the grant, so consent will be shown
+again — that was the test). Then the wiring decision for attachments/summarisation/routing. Production
+untouched: `chat-platform-rc-0908`, schema 26; migrations 27/28 still unapplied there.
+
+---
+
+## Lane 2026-09-09 (later) — Migra Email: a real mailbox, actually read
+
+**MigraPilot read a real Gmail inbox.** Search, full-message read and thread read all executed
+against the QA account through the whole per-principal path — capability gate, sealed tokens,
+refresh, scope check, provider construction, telemetry.
+
+Gate: brain **3050/3050**, 0 fail, 0 skipped (+25 Gmail transport tests, 3 mutations caught).
+
+### 🚨 The read slice was never connected to Gmail
+
+With a real consented connection, sealed tokens in Postgres, and readiness reporting
+`available: true`, **every search returned `not_configured`.**
+
+`GmailProvider` had **zero HTTP**. Every operation returned `unconfigured()` unconditionally —
+ignoring even a valid access token that was sitting right there in its own config. The parsing was
+complete and tested; nothing ever called it.
+
+**3016 tests passed over that**, because every layer above the adapter was tested against *fake*
+providers. A fake proves the shape of a contract. It cannot prove anyone implemented it.
+
+The note two sections down already said "the Gmail adapter has no HTTP seam". The slice was called
+complete anyway. Recording a gap is not the same as counting it.
+
+> **Lesson, standing:** a slice is complete when the *outermost real dependency* has been exercised,
+> not when every layer above it passes against a double. Fakes verify contracts; only the real
+> boundary verifies the product.
+
+### What the transport now decides
+
+A status code is not a failure kind, and the layers above act on which one it is:
+
+| Gmail says | We say | Because |
+|---|---|---|
+| 401 | `authorization_expired` | the token was minted moments earlier — this is the **grant** failing |
+| 403 `insufficientPermissions` | `insufficient_scope` | consent fixes it |
+| 403 anything else (rate limits) | `provider_unavailable` | "reconnect" would send a throttled user to grant **wider** access and overwrite a working grant |
+| 404 | `not_found` | |
+| 429, every 5xx, unrecognised 4xx | `provider_unavailable` | inferring expiry from an unfamiliar status throws away a working connection during someone else's outage |
+| no answer | `provider_timeout` | on **our** ceiling; the transport has none |
+| 200 that will not parse | `provider_unavailable` | **not** an empty mailbox |
+
+Also held: search uses `format=metadata`, so no result can claim a complete body (proven live —
+search `bodyComplete: false`, read `true` with a 4548-char body); a message that 404s mid-search is
+skipped, but one we *failed to read* fails the whole search rather than silently shrinking an inbox;
+`search({threadId})` routes to the thread, because Gmail's query grammar has no thread operator and
+dropping it would search everything and call it that conversation; an attachment's filename and type
+come from the **message**, never the caller. `createDraft`/`send` stay unimplemented on purpose —
+the refusal is the absence of code, and no mutating verb or path appears in the file.
+
+### Still unqualified
+
+The QA mailbox holds only Google's own two onboarding messages and **no attachments**, so attachment
+retrieval, the canonical file pipeline, grounded summarisation over real evidence, token refresh
+under a real expiry, and disconnect/reconnect are all still unproven.
+
+### Operational loss
+
+The Brain qualification Postgres was **removed mid-session** — no container, no volume — and the
+sealed connection went with it. Replaced by a named, non-ephemeral container `migrapilot-brainqual`
+(recorded in `/tmp/qual-brain-container.txt`); schema 28 reapplied.
+
+### Next
+Bonex: press **Connect email** once more, and seed the QA mailbox (including at least one
+attachment). Then attachments, summarisation and live routing. Production untouched:
+`chat-platform-rc-0908`, schema 26; migrations 27/28 still unapplied there.
+
+---
+
 ## Lane 2026-09-09 — Migra Email: the read slice, complete in code
 
 All six ordered items built, mutation-tested and committed, in the sequence Bonex set:

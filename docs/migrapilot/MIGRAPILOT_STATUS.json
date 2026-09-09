@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — Migra Email read slice complete",
+  "updatedBy": "Claude (Opus 5) — Gmail read qualified; THREE read-slice surfaces found unwired",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,11 +2503,11 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "READ SLICE COMPLETE (code) — all six ordered items built and mutation-tested. BLOCKED on Bonex: press Create in Google Cloud, set four env vars, name a test user. Then real Gmail qualification, then the RC freeze.",
+    "status": "GMAIL READ QUALIFIED against the real QA mailbox: search, readMessage, readThread, token refresh under a real expiry, cross-principal isolation, disconnect (revoked at Google, no stale provider), sealed storage. BLOCKED, and NOT by code quality: (1) the QA mailbox was never seeded — Gmail's own profile reports messagesTotal=2, both Google onboarding mail, zero attachments; (2) THREE read-slice surfaces have NO CALLER ANYWHERE, so attachment retrieval, canonical file ingestion, grounded summarisation and live intent routing cannot be qualified through the product at all.",
     "suiteGate": {
-      "brain": "3016/3016 pass, 0 fail, 0 skipped",
-      "consumer": "1171/1171 pass, 0 fail, 0 skipped",
-      "build": "consumer `npm run build` exit 0",
+      "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
+      "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
+      "build": "brain `tsc -b` exit 0",
       "readVia": "docs/migrapilot/suite-gate.sh"
     },
     "built": [
@@ -2519,11 +2519,12 @@
       "Attachment bridge: parses nothing, hands off the same canonical file object an upload produces, policy INJECTED so limits have one authority, provenance survives.",
       "Intent routing: an ACTION over the mailbox is required; a bare mention is not an intent.",
       "Draft: local composition only; a forward does NOT inherit the thread; reply-all excludes the sender.",
-      "Gmail adapter shell: unconfigured and honest; parsing complete against SYNTHETIC fixtures only.",
       "Telemetry: shapes not content; the event type has no field that could carry an address or subject.",
-      "Capability + hub: migra.email registered, read-only, reporting 'Email is not set up yet.'"
+      "Capability + hub: migra.email registered, read-only, reporting 'Email is not set up yet.'",
+      "Gmail adapter TRANSPORT: search/readMessage/readThread/listAttachments/readAttachment call the real Gmail API. Injected fetch + our own timeout ceiling. createDraft/send remain unimplemented ON PURPOSE — the refusal is the absence of code, not a flag, and no mutating verb or path appears in the file (asserted against the source)."
     ],
     "defectsFoundInOwnWork": [
+      "🚨 THE READ SLICE WAS NEVER CONNECTED TO GMAIL. Every layer above the adapter was built, mutation-tested and reported COMPLETE while GmailProvider had ZERO HTTP: every operation returned unconfigured() unconditionally, ignoring even a valid access token. With a real consented connection, sealed tokens and readiness reporting available:true, every search returned not_configured. 3016 tests passed over it, because the whole read path was tested against FAKE providers. A fake proves the shape of a contract; it cannot prove anyone implemented it. The status file even recorded \"adapter shell\" — and the slice was still called complete.",
       "🚨 CREDENTIAL LEAK: JSON.stringify(GmailProvider) serialised the access token, because TypeScript's `private` is compile-time only and the field stayed an enumerable own property. Any logger or error report carrying the provider would have carried the token. Now an ES #private field with an explicit toJSON.",
       "Address parsing split '\"Okafor, James\" <j@x>' inside the quoted display name, producing a recipient called 'James' and losing the real one.",
       "🚨 ROUTING: 'My inbox is a disaster, anyway — what is the capital of Peru?' routed into a mailbox SEARCH. A bare state word was sufficient, so a noun being present was enough to open private correspondence to answer a geography question.",
@@ -2601,6 +2602,55 @@
       "Planner gaps, both failing CLOSED: \"summarise the emails about X\" and \"send an email to X\" classify as no_email. Widening either is a product decision; behaviour is pinned in a test rather than changed.",
       "conversation_project (migration 25) still has no RLS.",
       "Single-flight refresh is per-process."
-    ]
+    ],
+    "gmailTransport": {
+      "file": "apps/brain-service/src/engine/email/gmailProvider.ts",
+      "tests": "apps/brain-service/test/emailGmailTransport.test.ts — 25 tests",
+      "statusMapping": {
+        "401": "authorization_expired — the token was minted by resolveAuthorization moments before, so this is the GRANT failing, and reconnecting is the remedy",
+        "403 insufficientPermissions/accessNotConfigured": "insufficient_scope",
+        "403 anything else (rate limits)": "provider_unavailable — NEVER reconnect: that sends a rate-limited user to grant WIDER access and overwrites a working grant",
+        "404": "not_found",
+        "429 + every 5xx + unrecognised 4xx": "provider_unavailable — inferring expiry from an unfamiliar status throws away a working connection during someone else's outage",
+        "network refused": "provider_unavailable",
+        "no answer": "provider_timeout, on OUR ceiling — the transport has none",
+        "200 that will not parse": "provider_unavailable, NOT an empty mailbox"
+      },
+      "searchIsPreviewsOnly": "search uses format=metadata, so no result can claim bodyComplete. Only readMessage asks for format=full. Proven live: search bodyComplete=false, readMessage bodyComplete=true with a 4548-char body.",
+      "partialResults": "A message that 404s between the list and the get is SKIPPED (genuinely gone). Any other per-message failure fails the WHOLE search — dropping a message we failed to READ would under-report an inbox with nothing saying so.",
+      "threadIdIsNotAQuery": "Gmail's q grammar has no thread operator. search({threadId}) routes to the thread rather than silently searching the whole mailbox and presenting it as that conversation.",
+      "attachmentIdentity": "filename and mimeType come from the MESSAGE, never the caller — the attachment endpoint returns only bytes, so a caller-supplied name would let a prompt decide what a downloaded file claims to be.",
+      "mutationsCaught": "3/3: collapsing the 403 split, reporting an unparseable 200 as an empty mailbox, and making search fetch full bodies."
+    },
+    "liveQualification": {
+      "account": "migrapilot.qa.test@gmail.com, gmail.readonly only",
+      "passed": [
+        "search — real messages, correct addresses/subjects/dates, bodyComplete=false",
+        "readMessage — bodyComplete=true, 4548-char text body, 60176-char html body",
+        "readThread — chronological, subject from the first message",
+        "sealed storage — access + refresh both ciphertext, no ya29./1// anywhere in the row",
+        "TOKEN REFRESH under a real expiry — expires_at forced into the past; the read succeeded transparently, last_refresh_at went null->set, expires_at moved into the future, and the sealed access token CHANGED (md5 c1a197->cc9971). Still sealed, no plaintext.",
+        "CROSS-PRINCIPAL ISOLATION — a different owner, and the same owner in a different workspace, are both denied; a foreign principal holding the REAL provider message id is still denied; no principal at all is denied.",
+        "DISCONNECT SCOPING — a foreign principal naming the REAL provider_account_id gets 404 and the row is untouched.",
+        "DISCONNECT — removed=true, row gone, revoked at Google (no mayRemainAtProvider warning), status flips to not_connected, and an immediate read FAILS even with a known real message id (nothing memoised).",
+        "telemetry — stage/outcome/provider/durationMs/count only; zero addresses, subjects, bodies, ya29./1// or Bearer in any Brain log while real mail was being read"
+      ],
+      "blockedOnSeeding": [
+        "attachment retrieval and canonical file-pipeline ingestion (also blocked on wiring)",
+        "grounded summarisation over real evidence (also blocked on wiring)",
+        "the sentinel and exact XLSX value assertions Bonex asked for"
+      ],
+      "mailboxEvidence": "Gmail users.getProfile: emailAddress=migrapilot.qa.test@gmail.com, messagesTotal=2, threadsTotal=2. messages.list with q='' , q='in:anywhere' (covers Spam and Trash) and q='has:attachment in:anywhere' returned 2, 2 and 0 ids with resultSizeEstimate 2, 2 and 0. Listed ids equalled returned messages, so the adapter's 404-skip was NOT hiding anything."
+    },
+    "operationalLossThisSession": "The Brain qualification Postgres (127.0.0.1:32790, db migrapilot_test) was REMOVED mid-session — no container, no volume, no record of it. The sealed Gmail connection went with it. Replaced by a NAMED, non-ephemeral container `migrapilot-brainqual` recorded in /tmp/qual-brain-container.txt; schema 28 reapplied, mail_connection back to 0 rows. Cost: one more Connect email click.",
+    "unwiredSurfaces": {
+      "_finding": "Same defect class as the missing Gmail transport: built, mutation-tested, declared complete, and reachable by nothing. Found by grepping for callers across apps/*/src.",
+      "routeEmail": "apps/brain-service/src/engine/email/emailRouting.ts — ZERO callers. A user typing \"summarize the emails about X\" never reaches the email capability.",
+      "emailSummary": "summaryContextFrom / summaryMaterial / summaryInstructions / renderSummary — ZERO callers. (The only renderSummary hit in the repo is an unrelated one in engine/memory/contextBuilder.ts.)",
+      "attachmentExecution": "executeEmailListAttachments / executeEmailFetchAttachment / bridgeDownloadedAttachment — ZERO callers. migra.email's schema only admits op: search | readMessage | readThread, so there is no attachment op to call.",
+      "whyNotJustWiredNow": "The attachment bridge takes its AttachmentPolicy by injection ON PURPOSE — allowed types and size limits belong to the consumer's file pipeline (MAX_UPLOAD_MB=256 in features/attachments/capability), and the bridge's own header says restating them in the Brain would create a second source of truth that drifts. So exposing a fetchAttachment op requires deciding how the consumer's policy reaches the Brain. That is a design decision inside the slice, not a qualification step.",
+      "routingBlockedBy": "Live intent routing runs in the model turn, and agentRuntime still carries no principal — the gap Bonex ruled must be closed through the governed identity boundary, not by bolting account state onto the agent."
+    },
+    "reconnectRequired": "Disconnect REVOKED the grant at Google, so reconnecting needs a full consent screen again. That was the point of the test and Bonex authorised it by naming disconnect/reconnect. The mailbox also has to be seeded before anything further can be qualified, so both actions fall in one round."
   }
 }
