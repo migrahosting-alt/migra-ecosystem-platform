@@ -377,6 +377,200 @@ letsencrypt_public_read() {
 # established, are kept in docs/migracms/hook-patch-migracms-authority-env.md
 # and its .controls.sh if they are ever needed again.
 
+# -- PART H, TEMPORARY -- MigraCMS release deploy.
+#
+# Authorized by Bonex, 2026-09-09, in writing, to deploy commit f8c5cce as a NEW
+# release beside the running one and repoint the symlink. Rollback stays a
+# symlink flip back to 20260816T061926Z-cms-auth plus a restart, so the old
+# release must survive this grant completely untouched.
+#
+# The release directory name is BOUND at install time to exactly:
+#   20260909T222737Z-consumer-chain-f8c5cce
+# There is no wildcard under /opt/migracms/releases. A later release needs a
+# fresh grant carrying its own name; matching the parent directory is not
+# enough. REMOVE once the deploy is accepted or rolled back.
+migracms_release_deploy() {
+  local c="$1"
+  local rel="/opt/migracms/releases/20260909T222737Z-consumer-chain-f8c5cce"
+  local cur="/opt/migracms/current"
+  local src="/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/_release-migracms-f8c5cce/apps/web/.next/standalone"
+  local old="20260816T061926Z-cms-auth"
+
+  # 0. THE EXACT ROLLBACK -- one whole literal, judged before the scoped scans.
+  local rb
+  rb="$(printf '%s' "$c" | tr -s '[:space:]' ' ' | sed -E 's#^ ##; s# $##')"
+  [ "$rb" = "ssh migracms-core '${ELEV} ln -sfn /opt/migracms/releases/20260816T061926Z-cms-auth /opt/migracms/current'" ] && return 0
+
+  # 1. HOST -- migracms-core only, and no second host.
+  local bare
+  bare="$(printf '%s' "$c" | sed -E 's#[a-zA-Z][a-zA-Z0-9+.-]*://[^[:space:]"'"'"'\\]*##g')"
+  case "$bare" in *"ssh "*|*"rsync"*) : ;; *) return 1 ;; esac
+  case "$bare" in *"migracms-core"*|*"10.10.0.16"*) : ;; *) return 1 ;; esac
+  local _h="${bare//migracms-core/CMS}"; _h="${_h//10.10.0.16/CMS}"
+  case "$_h" in *"-core"*|*"pct exec"*|*"qm guest exec"*|*"@10."*|*"@100."*) return 1 ;; esac
+  edge_target "$c" && return 1
+
+  # 2. HARD DENY. Nothing here may install packages, touch the network, reach
+  #    the authority env, or delete anything at all -- including the candidate,
+  #    which is preserved as evidence if the deploy fails.
+  case "$c" in
+    *"apt "*|*"apt-get"*|*"dpkg"*|*"snap "*|*"pip "*|*"npm i"*|*"pnpm add"*|    *"ufw "*|*"iptables"*|*"nft "*|*"/etc/ssh"*|*"sshd"*|*"authorized_keys"*|    *"visudo"*|*"reboot"*|*"shutdown"*|*"passwd "*|*"usermod"*|*"gpasswd"*|    *"/etc/migracms"*|*"curl"*|*"wget"*|*"mkfs"*|*" dd "*|*"chown"*|*"chmod"*|    *" rm "*|*"rmdir"*|*"unlink"*|*"shred"*|*"truncate"*|*"--delete"*|    *"--remove-source-files"*) return 1 ;;
+  esac
+
+  # 3. THE OLD RELEASE IS READ-ONLY. It is the rollback target, so any write
+  #    verb that so much as names it is refused.
+  if [[ "$c" == *"$old"* ]]; then
+    case "$c" in
+      *"mkdir"*|*"install "*|*"rsync"*|*"ln "*|*"tee "*|*" > "*|*" >> "*|*"mv "*|*"cp "*)
+        return 1 ;;
+    esac
+  fi
+
+  # 4. WRITE SCOPE. A write verb may name the bound release directory, and the
+  #    `current` symlink, and nothing else.
+  local iswrite=0
+  case "$c" in
+    *"mkdir"*|*"install "*|*"rsync"*|*"ln "*|*"tee "*|*" > "*|*" >> "*) iswrite=1 ;;
+  esac
+  if [ "$iswrite" = 1 ]; then
+    local p
+    while read -r p; do
+      [ -n "$p" ] || continue
+      case "$p" in
+        "$rel"|"$rel"/*) continue ;;
+        "$cur") continue ;;
+        "$src"|"$src"/*) continue ;;
+        /dev/null) continue ;;
+        *) return 1 ;;
+      esac
+    done < <(printf '%s\n' "$bare" \
+      | grep -oE '(^|[^A-Za-z0-9_.~-])/[A-Za-z0-9_./-]+' \
+      | sed -E 's#^[^/]*##' \
+      | grep -vE '^/(usr/)?(bin|sbin)/(mkdir|install|rsync|ln|tee|stat|ls|wc|find|du|readlink|sha256sum|test|sort|grep)$' || true)
+  fi
+
+  # 5. SYMLINK FLIPS point INTO /opt/migracms/releases and nowhere else. `ln -sfn`
+  #    replaces the link atomically; without -n it would write through the
+  #    existing symlink into the old release's contents.
+  if [[ "$c" == *"ln "* ]]; then
+    [[ "$c" =~ ln[[:space:]]+-sfn[[:space:]] ]] || return 1
+    case "$c" in *"/opt/migracms/releases/"*) : ;; *) return 1 ;; esac
+  fi
+
+  # 6. READS may range over /opt/migracms -- verifying the old release is
+  #    byte-untouched requires reading it -- but never outside.
+  local q
+  while read -r q; do
+    [ -n "$q" ] || continue
+    case "$q" in
+      /opt/migracms|/opt/migracms/*|/dev/null) continue ;;
+      "$src"|"$src"/*) continue ;;
+      *) return 1 ;;
+    esac
+  done < <(printf '%s\n' "$bare" \
+    | grep -oE '(^|[^A-Za-z0-9_.~-])/[A-Za-z0-9_./-]+' \
+    | sed -E 's#^[^/]*##' \
+    | grep -vE '^/(usr/)?(bin|sbin)/(mkdir|install|rsync|ln|tee|stat|ls|wc|find|du|readlink|sha256sum|test|sort|grep)$' || true)
+
+  # 7. ELEVATED VERBS.
+  local v
+  while read -r v; do
+    [ -n "$v" ] || continue
+    case "$v" in
+      -n|--) continue ;;
+      mkdir|install|rsync|ln|systemctl|stat|ls|wc|find|du|readlink|sha256sum|test) continue ;;
+      *) return 1 ;;
+    esac
+  done < <(printf '%s\n' "$c" | grep -oE "${ELEV} +(-[A-Za-z-]+ +)*[A-Za-z0-9_./-]+" | awk '{print $NF}' || true)
+
+  # 8. SYSTEMD -- the migracms unit only, and never a destructive verb.
+  if [[ "$c" == *"systemctl"* ]]; then
+    [[ "$c" =~ systemctl[[:space:]]+(restart|status|is-active)[[:space:]]+migracms([[:space:]]|\'|\"|$) ]] || return 1
+    case "${c,,}" in *"disable"*|*"mask"*|*"stop "*|*"--property"*|*" -p "*) return 1 ;; esac
+  fi
+
+  return 0
+}
+
+# -- PART I, TEMPORARY -- MigraCMS shared upload storage.
+#
+# Authorized by Bonex, 2026-09-09, in writing. The failed deploy exposed a
+# release-architecture defect: mutable tenant media lived INSIDE an immutable
+# release directory, so every atomic release switch orphaned it. The invariant
+# being established is:
+#
+#   code releases          immutable / disposable
+#   tenant uploads         persistent / shared
+#   current symlink        points only at a code release
+#   systemd writable path  points only at persistent data
+#
+# Scope is /opt/migracms/shared/uploads and the ReadWritePaths line of
+# /etc/systemd/system/migracms.service, and nothing broader. REMOVE once the
+# migration is proven through the old release.
+migracms_shared_uploads() {
+  local c="$1" n
+  local OLDR="/opt/migracms/releases/20260816T061926Z-cms-auth"
+  local CANDR="/opt/migracms/releases/20260909T222737Z-consumer-chain-f8c5cce"
+  local SH="/opt/migracms/shared/uploads"
+  local UNIT="/etc/systemd/system/migracms.service"
+
+  # HOST -- migracms-core only, and never a second host.
+  case "$c" in *"migracms-core"*) : ;; *) return 1 ;; esac
+  local _h="${c//migracms-core/CMS}"
+  case "$_h" in *"-core"*|*"pct exec"*|*"qm guest exec"*|*"@10."*|*"@100."*) return 1 ;; esac
+  edge_target "$c" && return 1
+
+  n="$(printf '%s' "$c" \
+    | sed -E 's#^[[:space:]]*timeout[[:space:]]+[0-9]+[[:space:]]+##' \
+    | sed -E 's#-o[[:space:]]+[A-Za-z]+=[A-Za-z0-9]+[[:space:]]+##g' \
+    | tr -s '[:space:]' ' ' | sed -E 's#^ ##; s# $##')"
+
+  # ---- the mutating commands, each permitted only as a whole literal ----
+  [ "$n" = "ssh migracms-core '${ELEV} mkdir -p $SH'" ] && return 0
+  [ "$n" = "ssh migracms-core '${ELEV} cp -a $OLDR/apps/web/public/uploads/. $SH/'" ] && return 0
+  [ "$n" = "ssh migracms-core '${ELEV} mv $OLDR/apps/web/public/uploads $OLDR/apps/web/public/uploads.pre-shared'" ] && return 0
+  [ "$n" = "ssh migracms-core '${ELEV} ln -sfn $SH $OLDR/apps/web/public/uploads'" ] && return 0
+  [ "$n" = "ssh migracms-core '${ELEV} ln -sfn $SH $CANDR/apps/web/public/uploads'" ] && return 0
+  [ "$n" = "ssh migracms-core '${ELEV} sed -i -e \"s#^ReadWritePaths=/opt/migracms/current/apps/web/public/uploads#ReadWritePaths=$SH#\" $UNIT'" ] && return 0
+  [ "$n" = "ssh migracms-core '${ELEV} systemctl daemon-reload'" ] && return 0
+  # Removes ONLY the aside-renamed original, and only after the shared path is
+  # proven. It is not a release deletion: the release itself is untouched.
+  [ "$n" = "ssh migracms-core '${ELEV} rm -r $OLDR/apps/web/public/uploads.pre-shared'" ] && return 0
+
+  # ---- reads, scoped ----
+  case "$c" in
+    *"mkdir"*|*"install "*|*"rsync"*|*"ln "*|*"tee "*|*" > "*|*" >> "*|*"mv "*|*"cp "*|\
+    *"sed -i"*|*" rm "*|*"rmdir"*|*"chown"*|*"chmod"*|*"truncate"*|*"shred"*|\
+    *"apt "*|*"apt-get"*|*"dpkg"*|*"ufw "*|*"iptables"*|*"nft "*|*"curl"*|*"wget"*|\
+    *"/etc/migracms"*|*"/etc/ssh"*|*"sshd"*|*"visudo"*|*"reboot"*|*"shutdown"*|\
+    *"passwd "*|*"usermod"*|*"systemctl"*) return 1 ;;
+  esac
+  local p
+  while read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+      /opt/migracms|/opt/migracms/*|"$UNIT"|/dev/null) continue ;;
+      *) return 1 ;;
+    esac
+  done < <(printf '%s\n' "$c" \
+    | grep -oE '(^|[^A-Za-z0-9_.~-])/[A-Za-z0-9_./-]+' \
+    | sed -E 's#^[^/]*##' \
+    | grep -vE '^/(usr/)?(bin|sbin)/(find|sha256sum|du|stat|ls|readlink|test|wc|grep|sort|sed)$' || true)
+  local v
+  while read -r v; do
+    [ -n "$v" ] || continue
+    case "$v" in
+      -n|--) continue ;;
+      find|sha256sum|du|stat|ls|readlink|test|wc|grep) continue ;;
+      *) return 1 ;;
+    esac
+  done < <(printf '%s\n' "$c" | grep -oE "${ELEV} +(-[A-Za-z-]+ +)*[A-Za-z0-9_./-]+" | awk '{print $NF}' || true)
+  if [[ "$c" == *"grep"* ]]; then
+    [[ "$c" =~ grep[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-?[A-Za-z]*[cq] ]] || return 1
+  fi
+  return 0
+}
+
 # Always-blocked patterns. Kept separated by a blank line: this header was
 # silently consumed once, because a NOTE left directly above it made a
 # comment-bounded edit run straight through into this section.
@@ -409,6 +603,10 @@ if [[ "$CMD" == *"${ELEV} "* ]]; then
     : # permitted: VM111 MigraPilot provisioning, per Bonex 2026-08-15
   elif dbcore_brain_postgres_provisioning "$CMD"; then
     : # permitted: db-core Brain PostgreSQL provisioning, per Bonex 2026-08-22
+  elif migracms_release_deploy "$CMD"; then
+    : # permitted: MigraCMS release deploy, per Bonex 2026-09-09 (TEMPORARY)
+  elif migracms_shared_uploads "$CMD"; then
+    : # permitted: MigraCMS shared upload storage, per Bonex 2026-09-09 (TEMPORARY)
   # NOTE: a MigraCMS commercial-authority env grant (migracms_authority_env) was
   # DRAFTED here on 2026-09-09 but is deliberately NOT dispatched: Bonex has not
   # authorized it in writing, and every other exception in this file was. The
