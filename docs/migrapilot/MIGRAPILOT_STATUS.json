@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — summary is canonical orchestration; routeEmail deleted",
+  "updatedBy": "Claude (Opus 5) — live qualification: everything the seeded mailbox can support",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "ALL SURFACES NOW PRODUCT-REACHABLE OR DELETED. migra.email carries search, readMessage, readThread, listAttachments, fetchAttachment and summarize. routeEmail and plan.ts were DELETED (zero consumers on every export). Remaining work is LIVE QUALIFICATION ONLY: the QA mailbox has never been seeded (users.getProfile reports messagesTotal=2) and the grant was revoked by the disconnect test.",
+    "status": "LIVE-QUALIFIED for connect, search, unread, full read, thread read, attachment OPS, grounded summarisation (complete AND partial), cross-principal isolation and telemetry — all against the real QA mailbox. STILL BLOCKED on mailbox CONTENT, not code: the sentinel, a PDF, an XLSX and a multi-message thread were never delivered, so attachment retrieval, canonical file ingestion, exact-value assertions and thread ORDERING have nothing to run against.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2679,6 +2679,29 @@
       "notImplemented": "CLAIM-LEVEL attribution per sentence. Grounding is enforced at the SOURCE level: a summary can only cite messages that were retrieved, and a thread summary only its own thread. The repo claim verifier was NOT reused — it is built on paths, line spans and repo terms, and applying those heuristics to email prose would be wrong."
     },
     "ownDefectFound": "My own test was vacuous first: `if (!r.ok && 'failure' in r) assert(...)` SKIPS silently when the outcome shape differs, so removing the empty-mailbox guard turned the result into a refusal and the test still passed. Caught by mutation, not by review. Every conditional shape check now asserts the shape unconditionally before reading into it.",
-    "buildGotcha": "Deleting a source file leaves its COMPILED output in dist/. `tsc -b` does not remove orphans, so the suite kept running emailRouting.test.js against code that no longer existed and the gate failed on a test for a deleted module. Remove dist/ counterparts when deleting sources, or clean before the gate."
+    "buildGotcha": "Deleting a source file leaves its COMPILED output in dist/. `tsc -b` does not remove orphans, so the suite kept running emailRouting.test.js against code that no longer existed and the gate failed on a test for a deleted module. Remove dist/ counterparts when deleting sources, or clean before the gate.",
+    "liveQualification2026_09_09": {
+      "connection": "EXACTLY ONE mail_connection (inserts=2 deletes=1 live=1). Sealed both tokens, no plaintext, not revoked, scopes {gmail.readonly}. Settings route reports connected / read:true / draft:false / send:false.",
+      "passed": [
+        "search — 3 real messages",
+        "unread status — is:unread returns 1, is:read returns 2, and the unread flag is correct on every result in both directions",
+        "snippet vs complete — search bodyComplete=false with no textBody; readMessage bodyComplete=true with a 217-char body",
+        "readThread — subject from the first message, chronological, complete bodies",
+        "listAttachments — live op returns ok with 0 attachments on a real message",
+        "fetchAttachment with an id that is not on the message — not_found, so evidence really is derived server-side",
+        "grounded summary, COMPLETE path — complete=true, NO partiality caveat, accurate to the real body, provenance carries evidenceId + providerMessageId",
+        "grounded summary, PARTIAL path — complete=false, all 3 sources snippet, disclosure attached EXACTLY ONCE, provenance for all three",
+        "cross-principal isolation — different owner, same owner in another workspace, a foreign principal holding the REAL message id, and no principal: all CAPABILITY_DENIED while the owner control succeeds",
+        "telemetry — stage/outcome/provider/durationMs/count only; zero addresses, subjects, bodies, names, ya29./1// or Bearer in any log line while real mail was read and summarised"
+      ],
+      "blockedOnContent": [
+        "MIGRA_EMAIL_SENTINEL_0909 — absent from every message body and HTML; targeted search returns 0",
+        "PDF attachment — has:attachment and filename:pdf both return 0",
+        "XLSX exact values (48273.55 / 7319.42 / 91504.08) — filename:xlsx returns 0",
+        "canonical file ingestion — needs an attachment to ingest",
+        "thread ORDERING — all 3 messages are single-message threads; readThread works but ordering is untested"
+      ],
+      "mailboxEvidence": "3 messages, 3 distinct threads, 0 attachments, checked with q=in:anywhere which covers Spam and Trash. One new arrival: \"MigraTeck System Test\" from migrateck@gmail.com, unread, plain body with a signature block and no sentinel."
+    }
   }
 }
