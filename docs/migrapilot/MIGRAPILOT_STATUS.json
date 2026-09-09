@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
-  "updated": "2026-09-08",
-  "updatedBy": "Claude (Opus 5) — Migra Email read slice, part 1",
+  "updated": "2026-09-09",
+  "updatedBy": "Claude (Opus 5) — Migra Email read slice complete",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,10 +2503,10 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "READ SLICE IN PROGRESS — Google Cloud configured up to the Create button (Bonex presses it). Hub connect surface, per-caller readiness and execution wiring built and mutation-tested.",
+    "status": "READ SLICE COMPLETE (code) — all six ordered items built and mutation-tested. BLOCKED on Bonex: press Create in Google Cloud, set four env vars, name a test user. Then real Gmail qualification, then the RC freeze.",
     "suiteGate": {
-      "brain": "2963/2963 pass, 0 fail, 0 skipped",
-      "consumer": "1158/1158 pass, 0 fail, 0 skipped",
+      "brain": "3016/3016 pass, 0 fail, 0 skipped",
+      "consumer": "1171/1171 pass, 0 fail, 0 skipped",
       "build": "consumer `npm run build` exit 0",
       "readVia": "docs/migrapilot/suite-gate.sh"
     },
@@ -2541,10 +2541,10 @@
     ],
     "notBuilt": "Send orchestration is still not wired into the tool-framework routes. Summarisation prose is not built. No UI control calls the new connection routes yet — the routes exist and are tested, but nothing in the interface has been pointed at them.",
     "blockers": {
-      "credentials": "Google Cloud project, OAuth client, sealing key and a controlled test account. Bonex creates them; the agent must never create, request, read back or store them. Exact values and steps: docs/migrapilot/email-google-cloud-setup.md",
-      "schemaChange": "Migrations 27 and 28 have NOT been applied to production. Applying them is a schema change and needs its own approval. Production remains at schema 26."
+      "bonex": "1) Press Create on the filled OAuth client form. 2) Put client id/secret into the Brain env. 3) Generate MIGRAPILOT_MAIL_TOKEN_KEY with `openssl rand -base64 32` and back it up. 4) Name/create the controlled test Gmail account and add it under Test users. Details: docs/migrapilot/email-google-cloud-setup.md",
+      "schemaChange": "Migrations 27/28 NOT applied to production, by owner decision: ship schema + backend + UI as ONE candidate."
     },
-    "productionState": "UNCHANGED — chat-platform-rc-0908, schema 26. Migrations 27/28 NOT applied by owner decision: no user-reachable UI yet, so schema + backend + UI ship as ONE candidate.",
+    "productionState": "UNCHANGED — chat-platform-rc-0908, schema 26. Nothing staged, nothing deployed.",
     "oauthPathBuilt": {
       "1_configContract": "Redirect URI derived from deployment config and asserted exactly. googleConsoleSetup() GENERATES the two console values so the console is configured from the code, not the code from the console. http://localhost accepted OUTSIDE production only.",
       "2_callbackFlow": "state minted per attempt, bound to the principal, taken-not-read, expiring. The principal check runs BEFORE the exchange, so a forged callback costs nothing. Three forged-callback refusals share one sentence — distinguishing them is a probing oracle.",
@@ -2576,11 +2576,16 @@
       "correction": "googleConsoleSetup() emitted an authorized JavaScript origin. Wrong for a server-side flow — the browser never calls a Google endpoint — and caught at the console with the value typed. Removed; the test now asserts the KEY SET so adding a field fails loudly."
     },
     "readSliceBuilt": {
-      "remedyContract": "A capability that cannot run now says whether the USER can fix it, as a token. Reading `unavailableReason` for the word \"connect\" is a keyword proxy that breaks the moment someone improves the copy.",
-      "connectControl": "A remediable hub row is clickable and runs the REMEDY, never the row's own action. A row with a reason and no remedy stays inert. A failed START does not navigate.",
-      "callbackUI": "Outcome travels as a token in ?mail=, never a message — a query string is logged, kept in history and forwarded in a Referer. Unknown token renders nothing; the param is cleared once read.",
-      "perCallerReadiness": "ReadinessContext resolved by the route; the registry answers per principal.",
-      "execution": "Handler resolves a provider from the caller's connection; refuses without a principal."
+      "1_remedyContract": "The engine says whether the USER can fix an unavailable capability, as a token. Reading the reason text for the word \"connect\" is a keyword proxy.",
+      "2_connectControl": "A remediable hub row is clickable and runs the REMEDY. A failed start never navigates.",
+      "3_perCallerReadiness": "ReadinessContext resolved by the route; one registry answers per principal.",
+      "4_execution": "Handler resolves the caller's connection; refuses without a principal.",
+      "5_disconnect": "Own settings card, separate from sign-in methods. Client never names an account. Card re-reads after acting. Revoke-then-delete. No stale provider survives.",
+      "6_readThread": "search / readMessage / readThread as one capability with an op discriminator, each resolving FRESH — nothing memoised between calls.",
+      "7_attachments": "Inherit the caller's connection. Declared oversize refused before download; the bytes that ARRIVE are re-judged.",
+      "8_summarization": "The partiality disclosure is ATTACHED, not requested of the model. Completeness re-derived from sources, not trusted from the flag. Model reads statable facts only.",
+      "9_routing": "Decides WHAT to invoke and cannot read mail — no provider, no store, no principal. Carries no identity. Draft/send refused plainly.",
+      "10_observability": "Shapes not content; outcome vocabulary IS the failure vocabulary; guarded sink proven in both directions."
     },
     "readSliceRemaining": [
       "Disconnect control in the UI (the route exists and is tested; nothing renders it).",
@@ -2589,6 +2594,13 @@
       "Attachment bridge wired into the canonical file pipeline.",
       "Intent routing wired to the live capability.",
       "Read-only observability wired to the execution path."
+    ],
+    "openFindings": [
+      "🚨 agentRuntime carries NO principal, so connected-account capabilities are denied inside the model's autonomous tool loop. Fail-closed and correct, but email works only through the identity-carrying tools route, not an agent run. Threading a principal through agent runs touches the governed-coding surface — recorded, not attempted.",
+      "🚨 The Gmail adapter still has NO HTTP seam. Nothing downstream of a successful provider read is exercised by tests; the live provider path will first be proven by real qualification against the controlled test account.",
+      "Planner gaps, both failing CLOSED: \"summarise the emails about X\" and \"send an email to X\" classify as no_email. Widening either is a product decision; behaviour is pinned in a test rather than changed.",
+      "conversation_project (migration 25) still has no RLS.",
+      "Single-flight refresh is per-process."
     ]
   }
 }

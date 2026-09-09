@@ -7,11 +7,50 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-08_
+_Last updated: 2026-09-09_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Lane 2026-09-09 — Migra Email: the read slice, complete in code
+
+All six ordered items built, mutation-tested and committed, in the sequence Bonex set:
+**disconnect → read/thread → attachment → summarization → intent routing → observability.**
+
+Gate: brain **3016/3016**, consumer **1171/1171**, 0 fail, 0 skipped; consumer build exit 0.
+
+**Two defects of a single class, found before any real credential existed:**
+
+1. **Per-user readiness lived in a process-wide singleton.** It would have reported one user's
+   mailbox state to everyone, one wiring mistake from executing against their inbox.
+2. **`migra.email` could never have executed.** The availability gate ran with no caller context,
+   so a capability whose readiness depends on the caller was denied for *everyone* — which reads
+   as "not available", never as a bug. Found only by executing through the real executor.
+
+These produced the standing invariant: *a capability may be globally registered, but any readiness
+or execution decision depending on user-owned state must be evaluated per request from the
+authenticated principal.*
+
+**Decisions worth keeping:**
+
+- A **remedy is a token**, not prose to be parsed. `/connect/i` over the reason text passed the
+  entire test file until two cases were written to separate them.
+- The **partiality disclosure is attached, not requested**. Asking a model to disclose fails
+  silently on the answer nobody reads.
+- **Nothing is memoised** between calls. Caching a resolved provider broke nine tests, including
+  the post-disconnect guarantee — the shape of the failure it models.
+- Attachments are judged by **the bytes that arrived**, not the listing's claims.
+
+**Open, recorded, not attempted:** `agentRuntime` carries no principal, so email cannot run inside
+the model's autonomous tool loop (fail-closed); the Gmail adapter has no HTTP seam, so the live
+provider path is unproven until real qualification.
+
+### Next
+Bonex presses Create, sets four env vars, names a test account. Then real Gmail qualification, then
+the read-only RC freeze. Production untouched: `chat-platform-rc-0908`, schema 26.
 
 ---
 
