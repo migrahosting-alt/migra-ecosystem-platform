@@ -2500,5 +2500,45 @@
       "worseStill": "MigraPanel-Core reports mem_swapped_out=3.3GB \u2014 that guest is already swapping INTERNALLY, so it is memory-pressured, not idle.",
       "separateFinding": "`balloon` is UNSET on every guest except one. Worth configuring on its own merits for elasticity, but it is not a way to fit a search VM on this node."
     }
+  },
+  "migraEmailProgress": {
+    "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
+    "status": "READY FOR GMAIL CREDENTIAL INTEGRATION \u2014 every code path built and mutation-tested; no credentials exist",
+    "suiteGate": {
+      "brain": "2783/2783",
+      "consumer": "1111/1111",
+      "readVia": "docs/migrapilot/suite-gate.sh"
+    },
+    "built": [
+      "Contract: connection/authorization/health as THREE axes, read and send as separate capabilities, bodyComplete on every message.",
+      "Send governance: propose -> approve -> RECHECK AUTHORIZATION -> durable claim -> dispatch. Uncertainty settles to outcome_unknown and is terminal.",
+      "Recipients: ambiguity REFUSED, never resolved by recency \u2014 'usually right' is what trains a user to stop reading the recipient.",
+      "Read path: only a provider that answered with an empty list reaches no_results; threads sorted chronologically; membership never inferred from subject.",
+      "Evidence: bodyComplete ENFORCED \u2014 completeness is derived, not trusted, and one snippet makes a whole summary partial.",
+      "Attachment bridge: parses nothing, hands off the same canonical file object an upload produces, policy INJECTED so limits have one authority, provenance survives.",
+      "Intent routing: an ACTION over the mailbox is required; a bare mention is not an intent.",
+      "Draft: local composition only; a forward does NOT inherit the thread; reply-all excludes the sender.",
+      "Gmail adapter shell: unconfigured and honest; parsing complete against SYNTHETIC fixtures only.",
+      "Telemetry: shapes not content; the event type has no field that could carry an address or subject.",
+      "Capability + hub: migra.email registered, read-only, reporting 'Email is not set up yet.'"
+    ],
+    "defectsFoundInOwnWork": [
+      "\ud83d\udea8 CREDENTIAL LEAK: JSON.stringify(GmailProvider) serialised the access token, because TypeScript's `private` is compile-time only and the field stayed an enumerable own property. Any logger or error report carrying the provider would have carried the token. Now an ES #private field with an explicit toJSON.",
+      "Address parsing split '\"Okafor, James\" <j@x>' inside the quoted display name, producing a recipient called 'James' and losing the real one.",
+      "\ud83d\udea8 ROUTING: 'My inbox is a disaster, anyway \u2014 what is the capital of Peru?' routed into a mailbox SEARCH. A bare state word was sufficient, so a noun being present was enough to open private correspondence to answer a geography question.",
+      "'Make this email shorter' fell through to an incidental mention because the rewrite pattern required adjacency.",
+      "The email address validator allowed only one dot in the domain and rejected first.last+tag@sub.example.com."
+    ],
+    "mutationsCaught": "31 across binding, governance, read path, evidence, attachment bridge, planner, draft, adapter and telemetry. Two initially escaped and were resolved: retrying outcome_unknown was an INVALID mutation (mayDispatch held as a second layer), and the changedFields guard was a REAL gap because the harness looked approvals up by fingerprint and never reached it.",
+    "structuralGuardsMadePermanent": [
+      "Comments do not satisfy provider-leak checks \u2014 the guard reads comment-stripped source, after it caught its own documentation.",
+      "EVERY engine-executed catalog row must be registry-backed, not just `web`."
+    ],
+    "notBuilt": "Send orchestration is not yet wired into the tool-framework routes; the governed authority exists and is tested, but no route calls it. Summarisation prose generation is not built \u2014 the evidence model that constrains it is.",
+    "blockers": {
+      "credentials": "Google Cloud project, OAuth client and a controlled test account. Bonex creates them; the agent must never create, request, read back or store them.",
+      "designReady": "docs/migrapilot/email-oauth-boundary.md \u2014 token storage, account ownership, refresh, revoked semantics and scope separation, DESIGNED and not provisioned."
+    },
+    "productionState": "UNCHANGED \u2014 chat-platform-rc-0908. Nothing staged or deployed."
   }
 }
