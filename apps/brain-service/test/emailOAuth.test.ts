@@ -16,6 +16,7 @@ import {
   ENV,
   configProblemMessage,
   expectedRedirectUri,
+  googleConsoleSetup,
   oauthConfigFrom,
   scopesFor,
 } from '../src/engine/email/oauthConfig.js';
@@ -66,6 +67,43 @@ test('no production hostname is hardcoded in app logic', () => {
   // A hardcoded host would make staging redirect users into production, and
   // make the value unchangeable without a code release.
   assert.equal(expectedRedirectUri('https://staging.example.org'), 'https://staging.example.org/api/account/mail/callback');
+});
+
+test('🚨 the Google Cloud console values are GENERATED, and asserted exactly', () => {
+  /*
+   * These two strings are what a human types into the console. Generating them
+   * from the same constant the callback route uses is what stops the console
+   * becoming the source of truth and the code a copy of it — a drift whose
+   * first symptom is a user's sign-in bouncing with redirect_uri_mismatch.
+   */
+  assert.deepEqual(googleConsoleSetup('https://chat.example.com'), {
+    authorizedRedirectUri: 'https://chat.example.com/api/account/mail/callback',
+    authorizedJavaScriptOrigin: 'https://chat.example.com',
+  });
+  // Google rejects a JavaScript origin carrying a path or a trailing slash.
+  assert.ok(!googleConsoleSetup('https://chat.example.com').authorizedJavaScriptOrigin.endsWith('/'));
+  // And the redirect the running server would actually receive matches it.
+  assert.equal(
+    googleConsoleSetup('https://chat.example.com').authorizedRedirectUri,
+    config().redirectUri,
+  );
+});
+
+test('🚨 http on LOCALHOST is refused in production, and allowed outside it', () => {
+  /*
+   * Google accepts http://localhost for a web client, so local development
+   * genuinely needs it. A production deployment that fell back to it would
+   * send every user's consent redirect to their own machine, where nothing is
+   * listening — and it would look like Google rejecting the app rather than a
+   * misconfiguration.
+   */
+  const local = { ...ENVIRONMENT, [ENV.publicOrigin]: 'http://localhost:3000' };
+  assert.equal(oauthConfigFrom({ ...local, NODE_ENV: 'development' }).ok, true);
+  assert.equal(oauthConfigFrom({ ...local, NODE_ENV: 'production' }).ok, false, 'localhost was accepted in production');
+  // The exception is localhost ONLY — not any http host, in either mode.
+  assert.equal(oauthConfigFrom({ ...ENVIRONMENT, [ENV.publicOrigin]: 'http://chat.example.com', NODE_ENV: 'development' }).ok, false);
+  // And an unset NODE_ENV is not production, so a dev shell still works.
+  assert.equal(oauthConfigFrom(local).ok, true);
 });
 
 test('🚨 a non-HTTPS origin is refused at CONFIG time', () => {

@@ -80,6 +80,16 @@ export type ConfigProblem =
   | { kind: 'invalid_origin'; detail: string };
 
 /**
+ * Hosts Google accepts over plain HTTP for a web client.
+ *
+ * 🚨 Permitted OUTSIDE production only. A production deployment whose public
+ * origin fell back to localhost would send every user's consent redirect to
+ * their own machine, where nothing is listening — and the failure would look
+ * like Google rejecting the app rather than like a misconfiguration.
+ */
+const HTTP_ALLOWED_HOSTS: readonly string[] = Object.freeze(['localhost', '127.0.0.1', '[::1]']);
+
+/**
  * Build the config, or say precisely what is missing.
  *
  * Returns problems rather than throwing so the capability can report "not set
@@ -117,8 +127,23 @@ export function oauthConfigFrom(
      * separately and would not match. Rejecting it here turns a
      * redirect_uri_mismatch at a user's sign-in into a startup-time complaint.
      */
-    if (parsed.protocol !== 'https:') {
-      problems.push({ kind: 'invalid_origin', detail: 'the public origin must be https' });
+    /*
+     * 🚨 HTTPS, except localhost outside production.
+     *
+     * Google refuses non-HTTPS redirect URIs for web clients other than
+     * localhost, so local development genuinely needs the exception — and
+     * production must not have it, which is why the check reads NODE_ENV
+     * rather than trusting the caller to pass the right flag.
+     */
+    const production = (env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+    const httpAllowedHere = !production && HTTP_ALLOWED_HOSTS.includes(parsed.hostname);
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && httpAllowedHere)) {
+      problems.push({
+        kind: 'invalid_origin',
+        detail: production
+          ? 'the public origin must be https in production'
+          : 'the public origin must be https, or http on localhost',
+      });
     }
     if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
       problems.push({ kind: 'invalid_origin', detail: 'the public origin must be an origin, with no path' });
@@ -146,6 +171,27 @@ export function expectedRedirectUri(publicOrigin: string): string {
  * Narrow by default and additive by intent: asking for send before send works
  * requests the irreversible permission on the strength of a promise.
  */
+/**
+ * Exactly what an operator enters in the Google Cloud console.
+ *
+ * 🚨 GENERATED, NOT TRANSCRIBED FROM A DOCUMENT. A value written down in prose
+ * drifts from the code the first time either changes, and the drift is
+ * discovered by a user whose sign-in bounces with `redirect_uri_mismatch`.
+ * The console is configured from THIS output, and the output is asserted
+ * exactly in test — so changing it is a deliberate act with a visible diff.
+ */
+export function googleConsoleSetup(publicOrigin: string): {
+  authorizedRedirectUri: string;
+  authorizedJavaScriptOrigin: string;
+} {
+  const origin = new URL(publicOrigin).origin;
+  return {
+    authorizedRedirectUri: `${origin}${CALLBACK_PATH}`,
+    // Google requires the origin with no trailing slash and no path.
+    authorizedJavaScriptOrigin: origin,
+  };
+}
+
 export function scopesFor(grants: readonly GrantKind[]): string[] {
   // Deduplicated and ordered so two equivalent requests produce one consent
   // screen rather than two that look different to Google.

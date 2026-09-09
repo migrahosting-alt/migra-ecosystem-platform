@@ -92,6 +92,38 @@ Other decisions this settled:
 `conversation_project` (migration 25) has no row-level security, unlike every
 other scoped table. It is outside this work and needs its own migration.
 
+## 1b. The redirect URI — GENERATED, not transcribed from here
+
+Do **not** copy a URI out of this document into the Google Cloud console. This
+document would then be the source of truth and the code a copy of it, and the
+first drift would be found by a user whose sign-in bounced with
+`redirect_uri_mismatch`.
+
+`googleConsoleSetup(publicOrigin)` in `oauthConfig.ts` returns the two exact
+values the console needs — the authorized redirect URI and the authorized
+JavaScript origin — built from the same `CALLBACK_PATH` constant the callback
+route serves, and asserted exactly in test. Run it against the deployment's
+`MIGRAPILOT_PUBLIC_ORIGIN` and enter what it prints.
+
+`http://localhost` is accepted **outside production only**. A production
+deployment that fell back to it would send every user's consent redirect to
+their own machine, where nothing is listening — and the symptom would look like
+Google rejecting the app rather than a misconfiguration.
+
+## 1c. Provider construction
+
+`providerFor()` takes a scope, a provider name, and its dependencies. It takes
+**no access token and no account address** — a factory that accepted one would
+behave identically for a legitimate caller and for a request that carried one,
+and the difference would live in whether every route remembered not to pass it
+through. Removing the parameter removes the question.
+
+When a principal has several mailboxes, the server enumerates the ones that
+principal owns and the user picks. A picked value is matched against that list
+rather than used to look anything up — and an unrecognised one resolves as
+though nothing was named, because "that account is not yours" confirms the
+account exists.
+
 ## 2. Account ownership
 
 A connection record binds:
