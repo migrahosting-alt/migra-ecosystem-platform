@@ -34,7 +34,7 @@ import type { MailConnectionStore } from './connectionStore.js';
 import { mailProviderFor, type ProviderFactoryDeps } from './providerFactory.js';
 import type { RefreshOutcome } from './tokenRefresh.js';
 import type { SealKey } from './tokenSealing.js';
-import type { EmailFailure, EmailMessage, EmailQuery } from './types.js';
+import type { EmailFailure, EmailMessage, EmailProvider, EmailQuery, EmailThread } from './types.js';
 
 export interface EmailExecutionBinding {
   connections: MailConnectionStore;
@@ -76,16 +76,18 @@ const NO_PRINCIPAL: EmailFailure = {
 };
 
 /**
- * Search the caller's mailbox.
+ * Resolve a provider for the caller, or say why not.
  *
- * Every failure path returns before a provider exists or after the provider
- * itself answered — there is no state in which this holds a credential for
- * someone other than the caller.
+ * 🚨 EVERY OPERATION GOES THROUGH HERE, and every operation resolves FRESH.
+ * Nothing is memoised between calls — not the connection, not the account, not
+ * the provider. A read that reused a previously resolved provider would keep
+ * working after the user disconnected, which is the one thing disconnecting is
+ * for.
  */
-export async function executeEmailSearch(
-  query: EmailQuery,
+async function resolveForCaller(
   ctx: ToolHandlerContext | undefined,
-): Promise<EmailExecutionResult> {
+  what: string,
+): Promise<{ ok: true; provider: EmailProvider } | { ok: false; failure: EmailFailure }> {
   if (!binding) return { ok: false, failure: NOT_CONFIGURED };
 
   const principal = ctx?.principal;
@@ -117,10 +119,59 @@ export async function executeEmailSearch(
      */
     return {
       ok: false,
-      failure: { kind: 'refused', reason: 'Choose which connected email account to search.' },
+      failure: { kind: 'refused', reason: `Choose which connected email account to ${what}.` },
     };
   }
+  return { ok: true, provider: resolved.provider };
+}
+
+/** Search the caller's mailbox. */
+export async function executeEmailSearch(
+  query: EmailQuery,
+  ctx: ToolHandlerContext | undefined,
+): Promise<EmailExecutionResult> {
+  const resolved = await resolveForCaller(ctx, 'search');
+  if (!resolved.ok) return { ok: false, failure: resolved.failure };
 
   const outcome = await resolved.provider.search(query);
   return outcome.ok ? { ok: true, messages: outcome.value } : { ok: false, failure: outcome.failure };
+}
+
+export type EmailMessageResult =
+  | { ok: true; message: EmailMessage }
+  | { ok: false; failure: EmailFailure };
+
+/**
+ * Read one message.
+ *
+ * 🚨 The id comes from the CLIENT, and that is safe only because the provider
+ * is the caller's own. A message id is meaningless across mailboxes: resolved
+ * against someone else's connection it would be `not_found`, never a read of
+ * their mail. The boundary is the connection, not the identifier.
+ */
+export async function executeEmailReadMessage(
+  providerMessageId: string,
+  ctx: ToolHandlerContext | undefined,
+): Promise<EmailMessageResult> {
+  const resolved = await resolveForCaller(ctx, 'read');
+  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+
+  const outcome = await resolved.provider.readMessage(providerMessageId);
+  return outcome.ok ? { ok: true, message: outcome.value } : { ok: false, failure: outcome.failure };
+}
+
+export type EmailThreadResult =
+  | { ok: true; thread: EmailThread }
+  | { ok: false; failure: EmailFailure };
+
+/** Read a whole thread, in order. */
+export async function executeEmailReadThread(
+  providerThreadId: string,
+  ctx: ToolHandlerContext | undefined,
+): Promise<EmailThreadResult> {
+  const resolved = await resolveForCaller(ctx, 'read');
+  if (!resolved.ok) return { ok: false, failure: resolved.failure };
+
+  const outcome = await resolved.provider.readThread(providerThreadId);
+  return outcome.ok ? { ok: true, thread: outcome.value } : { ok: false, failure: outcome.failure };
 }

@@ -22,7 +22,11 @@ import type { ZodType } from 'zod';
 import { migraSearch } from '../search/migraSearch.js';
 import type { EmailConnection } from '../email/types.js';
 import { emailReadinessFor } from '../email/emailReadiness.js';
-import { executeEmailSearch } from '../email/emailExecution.js';
+import {
+  executeEmailReadMessage,
+  executeEmailReadThread,
+  executeEmailSearch,
+} from '../email/emailExecution.js';
 import { migraEmail } from '../email/migraEmail.js';
 import {
   WorkspaceSearchRequestSchema,
@@ -213,8 +217,21 @@ export const LOCAL_GRANTS: ReadonlySet<string> = new Set([
   'email.read',
 ]);
 
-/** Input for `migra.email`. Search criteria, structured rather than a query string. */
+/**
+ * Input for `migra.email`.
+ *
+ * 🚨 ONE CAPABILITY, THREE OPERATIONS. Search, read-a-message and read-a-thread
+ * are the same authority over the same mailbox with the same scope requirement,
+ * so they are one registered capability with an `op` discriminator rather than
+ * three rows in a hub that would each need connecting separately.
+ *
+ * `op` is optional and defaults to `search`, so a caller written before reads
+ * existed keeps working.
+ */
 export const EmailSearchRequestSchema = z.object({
+  op: z.enum(['search', 'readMessage', 'readThread']).optional(),
+  /** Required by readMessage. Meaningless across mailboxes — see the executor. */
+  messageId: z.string().min(1).max(200).optional(),
   from: z.string().max(200).optional(),
   to: z.string().max(200).optional(),
   subjectContains: z.string().max(300).optional(),
@@ -526,13 +543,33 @@ const TOOLS: RunnableCapability[] = [
      * happened to reach.
      */
     handler: async (input, ctx) => {
-      const query = input as { limit?: number } & Record<string, unknown>;
-      const result = await executeEmailSearch(
-        { ...query, limit: query.limit ?? 20 } as never,
-        ctx,
-      );
-      if (!result.ok) return { ok: false, failure: result.failure };
-      return { ok: true, messages: result.messages };
+      const request = input as {
+        op?: 'search' | 'readMessage' | 'readThread';
+        messageId?: string;
+        threadId?: string;
+        limit?: number;
+      } & Record<string, unknown>;
+
+      switch (request.op ?? 'search') {
+        case 'readMessage': {
+          if (!request.messageId) {
+            return { ok: false, failure: { kind: 'refused', reason: 'No message was named to read.' } };
+          }
+          const result = await executeEmailReadMessage(request.messageId, ctx);
+          return result.ok ? { ok: true, message: result.message } : { ok: false, failure: result.failure };
+        }
+        case 'readThread': {
+          if (!request.threadId) {
+            return { ok: false, failure: { kind: 'refused', reason: 'No conversation was named to read.' } };
+          }
+          const result = await executeEmailReadThread(request.threadId, ctx);
+          return result.ok ? { ok: true, thread: result.thread } : { ok: false, failure: result.failure };
+        }
+        default: {
+          const result = await executeEmailSearch({ ...request, limit: request.limit ?? 20 } as never, ctx);
+          return result.ok ? { ok: true, messages: result.messages } : { ok: false, failure: result.failure };
+        }
+      }
     },
   },
 ];

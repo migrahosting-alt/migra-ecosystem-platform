@@ -71,7 +71,16 @@ function storeOf(records: MailConnectionRecord[]) {
     put: async () => {},
     recordRefresh: async () => {},
     markAuthorizationRevoked: async () => {},
-    disconnect: async () => true,
+    /* A REAL removal, so a post-disconnect read genuinely finds nothing. */
+    disconnect: async (scope, provider, id) => {
+      const before = records.length;
+      for (let i = records.length - 1; i >= 0; i -= 1) {
+        const r = records[i]!;
+        if (r.ownerScope === scope.owner && r.workspaceScope === scope.workspace
+          && r.provider === provider && r.providerAccountId === id) records.splice(i, 1);
+      }
+      return records.length < before;
+    },
   };
   return { store, lookups };
 }
@@ -294,4 +303,93 @@ test('🚨 the principal survives the trip from the executor to the handler', as
     /did not identify whose email/i,
     'a call with no principal was allowed to proceed',
   );
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Message and thread reads
+ * ------------------------------------------------------------------ */
+
+test('🚨 a message read resolves the connection FRESH, and refuses without a principal', async () => {
+  const { executeEmailReadMessage } = await import('../src/engine/email/emailExecution.js');
+  const { lookups } = bind([record(ALICE, 'alice-1')]);
+
+  const noPrincipal = await executeEmailReadMessage('msg-1', undefined);
+  assert.equal(noPrincipal.ok, false);
+  if (!noPrincipal.ok) assert.equal(noPrincipal.failure.kind, 'refused');
+  assert.equal(lookups.length, 0, 'a message was read with no principal');
+
+  await executeEmailReadMessage('msg-1', ctxFor(ALICE));
+  assert.ok(lookups.length > 0, 'the connection was not resolved for the read');
+  for (const lookup of lookups) {
+    assert.ok(lookup.endsWith(ALICE.owner), `a read crossed a principal boundary: ${lookup}`);
+  }
+});
+
+test('🚨 a thread read resolves the connection FRESH, per call', async () => {
+  const { executeEmailReadThread } = await import('../src/engine/email/emailExecution.js');
+  const { lookups } = bind([record(ALICE, 'alice-1')]);
+
+  await executeEmailReadThread('thread-1', ctxFor(ALICE));
+  const first = lookups.length;
+  assert.ok(first > 0, 'the first read resolved nothing');
+
+  lookups.length = 0;
+  __resetInFlightForTest();
+  await executeEmailReadThread('thread-1', ctxFor(ALICE));
+  assert.ok(lookups.length > 0,
+    'a second read reused a memoised connection — a disconnect would not stop it');
+});
+
+test('🚨 a client-supplied id cannot reach another principal’s mailbox', async () => {
+  /*
+   * The id comes from the client, and that is safe only because the provider is
+   * the caller's own. A message id is meaningless across mailboxes: resolved
+   * against a connection the caller does not have, it cannot be read at all.
+   * The boundary is the CONNECTION, not the identifier.
+   */
+  const { executeEmailReadMessage } = await import('../src/engine/email/emailExecution.js');
+  const { lookups } = bind([record(ALICE, 'alice-1'), record(BOB, 'bob-1')]);
+
+  const result = await executeEmailReadMessage('a-message-in-alices-mailbox', ctxFor(BOB));
+  for (const lookup of lookups) {
+    assert.ok(lookup.endsWith(BOB.owner), `bob's read touched ${lookup}`);
+  }
+  // Bob has his own connection, so this resolves — against BOB's mailbox, where
+  // that id simply is not found. It never becomes a read of alice's mail.
+  assert.equal(result.ok, false);
+});
+
+test('reads refuse when the grant lacks read permission', async () => {
+  const { executeEmailReadThread } = await import('../src/engine/email/emailExecution.js');
+  bind([record(ALICE, 'alice-1', { grantedScopes: [GOOGLE_SCOPES.send] })]);
+  const result = await executeEmailReadThread('t-1', ctxFor(ALICE));
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.failure.kind, 'insufficient_scope');
+});
+
+test('🚨 a read after DISCONNECT finds nothing to resolve', async () => {
+  // The same guarantee the lifecycle suite proves for search, asserted for the
+  // read path: nothing is memoised that would outlive the row.
+  const { executeEmailReadMessage } = await import('../src/engine/email/emailExecution.js');
+  const store = storeOf([record(ALICE, 'alice-1')]);
+  bindEmailExecution({
+    connections: store.store,
+    key,
+    refresh: async () => ({ kind: 'refreshed', accessToken: 'fresh', expiresAt: NOW + 3_600_000 }),
+    now: () => NOW,
+  });
+
+  const before = await executeEmailReadMessage('msg-1', ctxFor(ALICE));
+  assert.equal(before.ok, false);
+  if (!before.ok) assert.notEqual(before.failure.kind, 'not_connected');
+
+  await store.store.disconnect(ALICE, 'gmail', 'alice-1');
+  __resetInFlightForTest();
+
+  const after = await executeEmailReadMessage('msg-1', ctxFor(ALICE));
+  assert.equal(after.ok, false);
+  if (!after.ok) {
+    assert.equal(after.failure.kind, 'not_connected',
+      'a message was still readable after the mailbox was disconnected');
+  }
 });
