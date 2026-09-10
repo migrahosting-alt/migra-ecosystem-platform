@@ -205,9 +205,16 @@ export function capabilityContext(outcome: ChatCapabilityOutcome): string {
         + 'do not fill the gap from your own knowledge.';
   }
 
+  /*
+   * 🚨 NO EVIDENCE IDS IN THE TEXT. They were prefixed as `[email_1]` and the
+   * model echoed one straight into an answer — "I've retrieved the message from
+   * [email_1]…". An internal handle is meaningless to a reader, and this route
+   * has no verifier downstream to rewrite citations out of the prose, so
+   * whatever goes in comes out. The human-readable description is the citation.
+   */
   const lines = items.map((item) => {
     const adapter = adapterFor(item);
-    return `[${item.id}] ${adapter.describe(item as never)}:\n${item.text}`;
+    return `${adapter.describe(item as never)}:\n${item.text}`;
   });
 
   const limits = result.ledger.limitations();

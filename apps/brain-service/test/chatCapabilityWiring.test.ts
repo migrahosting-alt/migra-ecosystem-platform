@@ -209,3 +209,24 @@ test('🚨 "that email" in a LATER chat turn resolves against the same conversat
   assert.deepEqual(calls, ['search', 'readMessage']);
   assert.equal(second!.turn.reference?.kind, 'email');
 });
+
+test('🚨 no internal evidence id reaches the context the model reads', async () => {
+  /*
+   * 🚨 REGRESSION FROM A LIVE ANSWER. Items were labelled `[email_1]` and the
+   * model wrote "I've retrieved the message from [email_1]…" to the user. This
+   * route has no verifier downstream to rewrite citations out of prose, so
+   * anything put in front of the model can appear verbatim in the answer.
+   */
+  install({ connectedFor: [ALICE.owner], calls: [] });
+  const result = await runChatCapabilities({
+    prompt: 'search my inbox for the September invoice',
+    scope: ALICE, conversationId: 'c1', turnId: 't1', requestId: 'r1',
+  });
+
+  const context = capabilityContext(result!);
+  const id = result!.turn.ledger.all()[0]!.id;
+  assert.ok(id.length > 0);
+  assert.equal(context.includes(id), false, `the internal id ${id} was handed to the model`);
+  // The citation a reader can actually use is still there.
+  assert.match(context, /message "Invoice 2026-09" from billing@hetzner\.com/);
+});

@@ -20,6 +20,8 @@ import { retrieveContext } from './retrieval/retrieve.js';
 import { decideRoute } from './router/policy.js';
 import { registerToolRoutes } from './tools/index.js';
 import { registerAiRoutes } from './engine/chat/aiRoutes.js';
+import { bindChatCapabilities } from './engine/chat/chatCapabilities.js';
+import { MemoryConversationEvidence } from './engine/chat/conversationEvidence.js';
 import {
   readTailnetIdentity,
   decideTailnetAccess,
@@ -1088,6 +1090,31 @@ async function main(): Promise<void> {
    * exactly that, instead of implying a richer check than exists. When a real
    * role or entitlement model arrives, this resolver is where it lands.
    */
+  /*
+   * ── Capabilities in normal chat ──────────────────────────────────────────
+   *
+   * 🚨 BOUND HERE BECAUSE THIS IS WHERE THE PIECES EXIST. `registerAiRoutes`
+   * runs earlier and `toolDeps` is built above; passing it in would mean
+   * reordering startup to satisfy a signature. Until this call, chat has no
+   * capabilities — which is the correct state for a deployment that has not
+   * wired them, not a degraded one.
+   *
+   * 🚨 THE SAME `toolDeps` THE HTTP TOOLS ROUTE USES. One execution path, one
+   * readiness resolver, one audit trail. A second set built for chat would be a
+   * second place where "may this caller read that mailbox" is answered.
+   */
+  bindChatCapabilities({
+    toolDeps,
+    /*
+     * In-memory today, and that is a real limit: a restart forgets what "that
+     * email" pointed at, so the next turn asks rather than resolving. It fails
+     * in the safe direction — the alternative, a durable store of evidence
+     * pointers, is a persistence decision that needs its own retention rules
+     * before it holds anything about a user's mail.
+     */
+    evidence: new MemoryConversationEvidence(),
+  });
+
   registerToolConsentRoutes(app, {
     approvals: toolDeps.approvals,
     conversations: memoryStore,

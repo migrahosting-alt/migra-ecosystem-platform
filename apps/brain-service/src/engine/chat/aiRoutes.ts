@@ -42,6 +42,7 @@ import { ConversationStore, PersistenceUnavailableError, type Scope } from '../m
 import { buildContext, type ContextDiagnostics } from '../memory/contextBuilder.js';
 import { redactSecrets } from '../memory/redaction.js';
 import { scopeFrom } from '../memory/memoryRoutes.js';
+import { capabilityContext, runChatCapabilities } from './chatCapabilities.js';
 import { engineCorrelationId } from '../tools/toolRoutes.js';
 import { BrainTurnTrace } from '../observability/turnTrace.js';
 
@@ -797,6 +798,36 @@ export function registerAiRoutes(
     // ── Semantic RAG: only an APPROVED index for this workspace backs production
     // chat (fail-closed — no approved index ⇒ no RAG). Retrieved chunks are cited
     // and the model is told to distinguish evidence from inference. ──
+    /*
+     * ── The capability half of the turn ──────────────────────────────────
+     *
+     * 🚨 BEFORE REPOSITORY PLANNING, WHICH IS THE WHOLE POINT OF THE ORDER.
+     *
+     * A mailbox question that pre-loads source files hands the model
+     * repository evidence to answer from, and it will: the retrieved code is
+     * right there and the mailbox is not. So the capability decision runs
+     * first and can say "do not plan repository evidence for this turn".
+     *
+     * Everything capability-specific lives behind this one call. The route
+     * learns a plan, some evidence and a caveat — never an operation, a
+     * provider, or a message id.
+     */
+    const capabilityTurn = userPrompt
+      ? await runChatCapabilities({
+        prompt: userPrompt,
+        scope,
+        conversationId: conv?.id ?? body.conversationId ?? requestId,
+        turnId: requestId,
+        requestId,
+      })
+      : null;
+    if (capabilityTurn) {
+      const context = capabilityContext(capabilityTurn);
+      // Prepended, so it sits closest to the question it answers.
+      if (context) effectiveSummary = `${context}\n\n${effectiveSummary}`;
+      trace.mark('capabilities');
+    }
+
     let ragChunks: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }> | undefined;
     let grounding: GroundingDecision | undefined;
     /*
@@ -810,7 +841,14 @@ export function registerAiRoutes(
     const scopedFiles = Array.isArray(body.groundingFiles)
       ? body.groundingFiles.filter((f): f is string => typeof f === 'string' && f.trim().length > 0)
       : [];
-    if (indexService && userPrompt && policy.retrieve !== false) {
+    /*
+     * 🚨 `repoPlanning === false` MEANS THE REQUEST WAS ABOUT SOMETHING ELSE.
+     * It is set only when a capability was actually selected, so a repository
+     * question — or any turn with no capabilities wired — reaches the index
+     * exactly as it always has.
+     */
+    const planRepoEvidence = capabilityTurn?.turn.repoPlanning !== false;
+    if (indexService && userPrompt && policy.retrieve !== false && planRepoEvidence) {
       grounding = await decideGrounding(
         {
           mode: body.groundingMode ?? modeFromLegacy(body.requireApproved),
