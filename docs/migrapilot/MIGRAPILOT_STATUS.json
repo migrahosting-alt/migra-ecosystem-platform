@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — thread ordering + thread summary qualified live; attachments still absent",
+  "updatedBy": "Claude (Opus 5) — selector committed; handoff for the product-path slice",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "LIVE-QUALIFIED for connect, search, unread, full read, thread read, attachment OPS, grounded summarisation (complete AND partial), cross-principal isolation and telemetry — all against the real QA mailbox. STILL BLOCKED on mailbox CONTENT, not code: the sentinel, a PDF, an XLSX and a multi-message thread were never delivered, so attachment retrieval, canonical file ingestion, exact-value assertions and thread ORDERING have nothing to run against.",
+    "status": "SUBSTRATE AND SELECTOR COMPLETE, PRODUCT PATH NOT WIRED. Normal chatTurn still cannot execute a capability, so owner product acceptance would fail exactly as it did before. NOT ready for acceptance. No RC, no deploy, connection alive.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2704,6 +2704,53 @@
       ],
       "mailboxEvidence": "4 messages, 3 threads, 0 attachments (q=in:anywhere, which covers Spam and Trash). The fixture that arrived was a FORWARD of the existing test message, which created the 2-message thread. No attachment ever reached the mailbox."
     },
-    "searchAttachmentCaveat": "FINDING, not yet fixed. Search uses format=metadata, which carries no MIME tree, so every search result reports attachments: [] regardless of reality — an empty array is a CLAIM about the message. The same class of problem bodyComplete already solves for bodies. Gmail-side filtering (has:attachment) is unaffected because it is evaluated by Google, and listAttachments/readMessage (format=full) are correct. A caller that reads message.attachments.length off a SEARCH result would wrongly conclude a message has none. Raised for a decision: omit the field on metadata reads, or carry an explicit attachmentsKnown flag."
+    "searchAttachmentCaveat": "FINDING, not yet fixed. Search uses format=metadata, which carries no MIME tree, so every search result reports attachments: [] regardless of reality — an empty array is a CLAIM about the message. The same class of problem bodyComplete already solves for bodies. Gmail-side filtering (has:attachment) is unaffected because it is evaluated by Google, and listAttachments/readMessage (format=full) are correct. A caller that reads message.attachments.length off a SEARCH result would wrongly conclude a message has none. Raised for a decision: omit the field on metadata reads, or carry an explicit attachmentsKnown flag.",
+    "commitTrail2026_09_09": {
+      "_note": "Enumerated by SHA rather than counted. An earlier report described this stretch as \"six commits\", which was wrong — these are the actual boundaries, and RC evidence must cite SHAs.",
+      "code": [
+        "e78a9bea  the Gmail adapter learns to talk to Gmail",
+        "fde2defa  one policy implementation, two callers",
+        "5931048f  the autonomous loop learns who it is acting as",
+        "0de85e61  summary is orchestration over evidence; the second router is gone",
+        "d56719c6  connect asked Google for a mailbox but never for a name",
+        "950454ba  unknown attachment state is stated, not implied",
+        "464f948c  the provider's attachment id is not an identifier",
+        "270813f2  one executor for the HTTP path and the model's tool loop",
+        "b83bdf14  evidence becomes typed, so a source need not be a line range",
+        "f59e2c1f  the verifier judges every kind of source by the same rules",
+        "0a4be13b  mailbox results become evidence, and a summary cannot outrank its sources",
+        "03f29f87  decide what a request is about before planning any evidence"
+      ],
+      "status": [
+        "cd240712",
+        "14b45bd2",
+        "4013c39e",
+        "c7369c18"
+      ],
+      "gate": "brain 3114/3114, consumer 1173/1173, 0 fail, 0 skipped"
+    },
+    "nextSlice": {
+      "_authority": "Bonex handoff, 2026-09-09. Continue from 03f29f87.",
+      "goal": "Make normal chatTurn execute selected capabilities end to end.",
+      "flow": "chatTurn -> capability selection -> canonical executeToolCore -> result-to-EvidenceItem production -> TypedEvidenceLedger -> synthesis -> shared verifyAnswer -> persisted conversation result",
+      "doNotReopen": "transport, OAuth, file policy, attachment identity, verifier architecture, selection — unless the wiring exposes a concrete defect",
+      "constraints": [
+        "no second capability executor",
+        "no Email-specific execution branch in Chat",
+        "no repo preloading when mailbox intent alone is selected",
+        "mixed repo + capability requests deliberately plan both",
+        "server-derived ExecutionIdentity only",
+        "no browser/model principal, workspace, account or provider identity",
+        "no send/draft capability or scope",
+        "foreign evidence fails closed",
+        "unavailable capability remains distinguishable from unrequested capability",
+        "all final factual output goes through the typed verifier"
+      ],
+      "case3": "\"What are the values in the XLSX attached to that email?\" — conversation reference -> prior Email evidence -> stable attachment ref -> canonical file pipeline -> extracted FileEvidence -> exact values -> shared verifier. NO raw Gmail attachment id may persist into conversation state; it is regenerated per read and names nothing later.",
+      "case9": "A response synthesised from Email + repo evidence must still have an unsupported claim removed. Mixed evidence cannot weaken verification.",
+      "case10": "\"that email\" resolves through PERSISTED CONVERSATION STATE — conversation turn -> evidenceId -> scoped canonical EmailEvidence — never a Gmail message id in browser state. Re-authorize and re-resolve before any new provider operation. This is the shared substrate for \"the spreadsheet attached to it\", \"summarize the thread\", \"compare it with this file\".",
+      "doneAtSelectionLayer": "cases 1, 2, 4, 5, 6, 7, 8 pass in capabilitySelection.test.ts",
+      "unfinished": "cases 3, 9, 10 — all need the wiring"
+    }
   }
 }
