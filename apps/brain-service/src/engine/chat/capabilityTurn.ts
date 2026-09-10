@@ -33,7 +33,7 @@ import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
 import { principalScopeOf, type ExecutionIdentity } from '../identity/executionIdentity.js';
 import { RETRIEVAL_VERBS, selectCapabilities, type CapabilityPlan, type SelectableCapability } from '../models/capabilitySelection.js';
 import { TypedEvidenceLedger } from '../grounding/typedEvidenceLedger.js';
-import { significantTerms, type EvidenceItem } from '../grounding/evidenceTypes.js';
+import { adapterFor, significantTerms, tokensOf, type EvidenceItem } from '../grounding/evidenceTypes.js';
 import {
   evidenceFromAttachment, evidenceFromMessage, evidenceFromSearch, evidenceFromThread,
 } from '../email/emailEvidenceProduction.js';
@@ -126,6 +126,34 @@ export interface CapabilityTurnResult {
    * to the caller so a person can say which one.
    */
   ambiguousAttachment: { candidates: string[] } | null;
+  /**
+   * The provider matched this message on something our evidence does not contain.
+   *
+   * ---------------------------------------------------------------------
+   * 🚨 "GMAIL RETURNED THIS MESSAGE FOR THE QUERY" IS NOT "THE MESSAGE SAYS THIS"
+   *
+   * Found in owner acceptance. Asked to find the email containing a sentinel
+   * string, Gmail returned exactly one message — because Gmail indexes
+   * ATTACHMENT CONTENT. The sentinel was in a spreadsheet; it was in neither the
+   * snippet, the subject, nor the full body. Every claim that the message
+   * contained it was therefore unsupported, and the gate — correctly — removed
+   * all of them. The user was told nothing was found, about a search that had
+   * found exactly the right message.
+   *
+   * A provider's match is real information and it is NOT evidence of content.
+   * So the turn goes and looks: it opens the attachments through the canonical
+   * file pipeline and stops as soon as the term is actually in front of it.
+   * Only then can an answer say where the term was found — and it says it about
+   * a FILE it has read, not about a body it has not.
+   */
+  providerMatchBeyondEvidence: {
+    /** The terms the provider matched on that our message evidence lacks. */
+    terms: string[];
+    /** Attachments actually fetched and extracted while looking for them. */
+    inspected: string[];
+    /** True once the terms were found in something this turn really read. */
+    located: boolean;
+  } | null;
   executed: ExecutedCapability[];
   /** Whether the caller should still plan repository evidence. */
   repoPlanning: boolean;
@@ -169,6 +197,7 @@ export async function runCapabilityTurn(
       reference: null,
       unresolvedReference: null,
       ambiguousAttachment: null,
+      providerMatchBeyondEvidence: null,
       executed: [],
       // An unidentified turn plans repository evidence like any other, because
       // nothing capability-shaped was, or could have been, chosen.
@@ -239,12 +268,14 @@ export async function runCapabilityTurn(
       reference: null,
       unresolvedReference: { phrase },
       ambiguousAttachment: null,
+      providerMatchBeyondEvidence: null,
       executed: [],
       repoPlanning: plan.repoPlanning,
     };
   }
 
   let ambiguousAttachment: { candidates: string[] } | null = null;
+  let providerMatchBeyondEvidence: CapabilityTurnResult['providerMatchBeyondEvidence'] = null;
   /** Evidence id → the capability that produced it, for the turns that follow. */
   const producedBy: Record<string, string> = {};
 
@@ -286,6 +317,86 @@ export async function runCapabilityTurn(
       // a bug rather than a condition — the ledger is the second gate.
       ledger.add(item);
       producedBy[item.id] = chosen.capabilityId;
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * 🚨 THE PROVIDER MATCHED SOMETHING WE CANNOT SEE — SO GO AND LOOK.
+     *
+     * A mail provider indexes attachment content. A search can therefore return
+     * exactly the right message while the snippet, the subject and even the full
+     * body contain nothing of what was asked for. Answering from that message is
+     * then guaranteed to fail the gate, and the user is told nothing was found
+     * about a search that found precisely what they wanted.
+     *
+     * The distinction is real and worth keeping sharp: "the provider returned
+     * this message for the query" is a fact about the SEARCH, and "the message
+     * says this" is a claim about CONTENT. This bridges them the only honest way
+     * — by opening the attachments and reading them, so that whatever is said
+     * afterwards is said about a document this turn actually has.
+     *
+     * 🚨 NARROW ON PURPOSE. One result only, and only when the terms are
+     * genuinely absent from what was retrieved. A search whose terms are right
+     * there in the body — the ordinary case — costs nothing extra. Fetching
+     * stops the moment the terms are found, so the common shape is one extra
+     * read, not a sweep of every attachment.
+     */
+    const searched = Array.isArray(result.messages) ? (result.messages as EmailMessage[]) : null;
+    if (searched?.length === 1 && !reference) {
+      const wanted = subjectTermsOf(input.prompt, chosen.nouns);
+      const message = searched[0]!;
+      if (wanted.length > 0 && !coveredBy(ledger.all(), wanted)) {
+        const inspected: string[] = [];
+
+        /*
+         * 🚨 READ THE MESSAGE BEFORE CONCLUDING THE MESSAGE DOES NOT SAY IT.
+         *
+         * A search returns a SNIPPET. Absence from a snippet is not absence
+         * from the message — most of a body is missing from its own preview —
+         * so escalating straight to attachments would download files to look
+         * for something that was in the body all along, and would do it on
+         * ordinary searches, constantly.
+         *
+         * Reading the one result first turns "unknown" into "proven absent",
+         * which is the only ground on which opening an attachment is justified.
+         * It also just makes the answer better: the full body instead of a
+         * hundred-character preview.
+         */
+        const read = await run({ op: 'readMessage', messageId: message.providerMessageId });
+        if (read) {
+          for (const item of await evidenceFrom(read, reference, scope, ledger)) {
+            ledger.add(item);
+            producedBy[item.id] = chosen.capabilityId;
+          }
+        }
+
+        if (coveredBy(ledger.all(), wanted)) continue;
+
+        const listing = await run({ op: 'listAttachments', messageId: message.providerMessageId });
+        const attachments = listing ? attachmentsOf(listing) ?? [] : [];
+
+        for (const attachment of attachments.slice(0, MAX_ATTACHMENTS_INSPECTED)) {
+          const fetched = await run({
+            op: 'fetchAttachment',
+            messageId: message.providerMessageId,
+            attachmentId: attachment.ref,
+          });
+          if (!fetched) continue;
+          inspected.push(attachment.filename);
+          for (const item of await evidenceFrom(fetched, reference, scope, ledger)) {
+            ledger.add(item);
+            producedBy[item.id] = chosen.capabilityId;
+          }
+          // Found it. Reading the rest would cost a round trip to prove nothing.
+          if (coveredBy(ledger.all(), wanted)) break;
+        }
+
+        providerMatchBeyondEvidence = {
+          terms: wanted,
+          inspected,
+          located: coveredBy(ledger.all(), wanted),
+        };
+      }
     }
 
     /*
@@ -361,6 +472,7 @@ export async function runCapabilityTurn(
     plan, identified: true, ledger, reference,
     unresolvedReference: null,
     ambiguousAttachment,
+    providerMatchBeyondEvidence,
     executed,
     repoPlanning: plan.repoPlanning,
   };
@@ -401,6 +513,32 @@ function operationFor(
     return { op: 'readMessage', messageId: reference.item.locator.providerMessageId };
   }
   return { op: 'search', keywords: searchTermsFor(prompt, nouns), limit: 20 };
+}
+
+/**
+ * The most attachments worth opening to find a term the provider matched on.
+ *
+ * A bound rather than a preference: a message can carry a dozen files, and
+ * "look everywhere" turns one question into a dozen downloads of the user's own
+ * mail. Three is enough to cover the shapes that actually occur — a document
+ * and its spreadsheet, a scan and its transcript — and the search result names
+ * what was not opened when it is not.
+ */
+const MAX_ATTACHMENTS_INSPECTED = 3;
+
+/**
+ * Is every one of these terms in something this turn actually retrieved?
+ *
+ * 🚨 THE SAME TOKEN RULE THE VERIFIER USES, so this cannot decide a term is
+ * present and then have the gate decide it is absent. Whole tokens, never
+ * substrings.
+ */
+function coveredBy(items: readonly EvidenceItem[], wanted: readonly string[]): boolean {
+  const haystack = new Set<string>();
+  for (const item of items) {
+    for (const token of tokensOf(adapterFor(item).haystack(item as never))) haystack.add(token);
+  }
+  return wanted.every((t) => haystack.has(t));
 }
 
 /**

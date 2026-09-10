@@ -160,7 +160,13 @@ function deps(o: {
 /** Turn 1: Alice finds the message, so a later turn has something to point at. */
 async function findTheMessage(d: ReturnType<typeof deps>) {
   return runCapabilityTurn({
-    prompt: 'find the email from Hetzner about the September invoice',
+    /*
+     * 🚨 TERMS THE FIXTURE ACTUALLY CONTAINS. These tests are about the
+     * REFERENCE continuation; a seeding search whose terms are absent from the
+     * message would trip the provider-match bridge and add reads that have
+     * nothing to do with what is being tested.
+     */
+    prompt: 'find the email about the September invoice',
     identity: executionIdentityFrom(ALICE),
     conversationId: 'c1', turnId: 'turn-1', requestId: 'r1',
   }, d);

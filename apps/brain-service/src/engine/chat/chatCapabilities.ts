@@ -217,8 +217,37 @@ export function capabilityContext(outcome: ChatCapabilityOutcome): string {
     return `${adapter.describe(item as never)}:\n${item.text}`;
   });
 
+  /*
+   * 🚨 WHAT THE PROVIDER MATCHED IS NOT WHAT THE MESSAGE SAYS.
+   *
+   * A mail provider indexes attachment content, so a search can return exactly
+   * the right message while nothing in the body mentions the term. Left unsaid,
+   * the model writes the obvious sentence — "the email contains X" — the gate
+   * removes it as unsupported, and the user is told nothing was found about a
+   * search that found the right message.
+   *
+   * So the difference is stated, and the attachment evidence below is where the
+   * term actually is. What the model may say afterwards is about a FILE this
+   * turn opened, never about a body it did not.
+   */
+  const match = result.providerMatchBeyondEvidence;
+  const provenance = match
+    ? [
+      `The mail provider returned this message for ${match.terms.map((t) => `"${t}"`).join(', ')}, `
+      + 'but those words are NOT in the message text — providers also match on attachment contents. '
+      + (match.inspected.length > 0
+        ? `The attachment(s) ${match.inspected.map((f) => `"${f}"`).join(', ')} were opened and read; their contents are below.`
+        : 'No attachment could be opened to check.')
+      + (match.located
+        ? ' Say where the term was found, and attribute it to that file rather than to the message body.'
+        : ' The term was not found in anything that could be read. Say that the provider matched the message '
+          + 'but the term was not located in what could be opened — do NOT say the message contains it.'),
+    ]
+    : [];
+
   const limits = result.ledger.limitations();
   return [
+    ...provenance,
     'Retrieved from the user\'s own connected sources for THIS request. State facts about them '
     + 'only where these say so, and quote values exactly as they appear:',
     ...lines,

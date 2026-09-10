@@ -106,8 +106,15 @@ test('🚨 10a. a real turn retrieves evidence and PERSISTS it, scoped', async (
   assert.equal(result.plan.selected.length, 1, 'the mailbox capability was not selected');
   assert.equal(result.repoPlanning, false, 'repository planning ran for a mailbox request');
   assert.equal(result.ledger.isEmpty(), false, 'no evidence was produced');
-  assert.deepEqual(calls.map((c) => c.op), ['search']);
-  assert.equal(calls[0]!.principal, ALICE.owner, 'the capability ran as someone else');
+  /*
+   * 🚨 THE FIRST CALL IS THE SEARCH, and every call runs as Alice. The exact
+   * sequence is deliberately NOT pinned here: this prompt names a term the
+   * fixture message does not contain, so the provider-match bridge correctly
+   * reads further to find out where it is. That behaviour has its own suite;
+   * pinning it here would make this test fail for a reason it is not about.
+   */
+  assert.equal(calls[0]!.op, 'search');
+  assert.ok(calls.every((c) => c.principal === ALICE.owner), 'a capability ran as someone else');
 
   // Persisted for the NEXT turn, under Alice's scope.
   assert.equal((await store.recent('c1', { principalId: ALICE.owner, workspaceId: ALICE.workspace }, 10)).length, 1);
@@ -123,7 +130,7 @@ test('🚨 10b. "summarize that email" resolves the antecedent and RE-READS it',
   const d = deps({ connectedFor: [ALICE.owner], calls, store });
   const identity = executionIdentityFrom(ALICE);
 
-  await runCapabilityTurn({ prompt: 'find the email about invoices', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, d);
+  await runCapabilityTurn({ prompt: 'find the email about invoice pm-1', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, d);
   const second = await runCapabilityTurn({ prompt: 'summarize that email', identity, conversationId: 'c1', turnId: 't2', requestId: 'r2' }, d);
 
   assert.ok(second.reference, 'the antecedent did not resolve');
@@ -142,7 +149,7 @@ test('"summarize the thread" re-reads the THREAD, not the message', async () => 
   const d = deps({ connectedFor: [ALICE.owner], calls, store });
   const identity = executionIdentityFrom(ALICE);
 
-  await runCapabilityTurn({ prompt: 'find the email about invoices', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, d);
+  await runCapabilityTurn({ prompt: 'find the email about invoice pm-1', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, d);
   await runCapabilityTurn({ prompt: 'summarize the thread', identity, conversationId: 'c1', turnId: 't2', requestId: 'r2' }, d);
   assert.deepEqual(calls.map((c) => c.op), ['search', 'readThread']);
 });
@@ -162,7 +169,7 @@ test('🚨 10c. a disconnect between turns makes the reference FAIL, not replay'
   const identity = executionIdentityFrom(ALICE);
 
   const connected = deps({ connectedFor: [ALICE.owner], calls, store });
-  const first = await runCapabilityTurn({ prompt: 'find the email about invoices', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, connected);
+  const first = await runCapabilityTurn({ prompt: 'find the email about invoice pm-1', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, connected);
   assert.equal(first.ledger.isEmpty(), false);
 
   // Same conversation, same stored evidence — but the mailbox is now gone.
@@ -185,7 +192,7 @@ test('🚨 10d. another principal in the same conversation resolves NOTHING', as
   const d = deps({ connectedFor: [ALICE.owner, BOB.owner], calls, store });
 
   await runCapabilityTurn({
-    prompt: 'find the email about invoices', identity: executionIdentityFrom(ALICE),
+    prompt: 'find the email about invoice pm-1', identity: executionIdentityFrom(ALICE),
     conversationId: 'c1', turnId: 't1', requestId: 'r1',
   }, d);
 
@@ -342,7 +349,8 @@ test('🚨 "tell me who sent it" on a FRESH request searches — it does not ref
   }, d);
 
   assert.equal(result.unresolvedReference, null, 'a fresh request was read as pointing backward');
-  assert.deepEqual(calls.map((c) => c.op), ['search']);
+  // It SEARCHED — which is the point — with the asking stripped out of the query.
+  assert.equal(calls[0]!.op, 'search');
   assert.equal(calls[0]!.keywords, 'test file');
 });
 

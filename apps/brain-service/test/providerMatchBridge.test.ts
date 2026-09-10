@@ -68,6 +68,8 @@ function deps(o: {
   calls: Call[];
   attachments?: Array<{ ref: string; filename: string; carriesSentinel?: boolean }>;
   results?: number;
+  /** The full body carries the term even though the snippet does not. */
+  bodyHasSentinel?: boolean;
 }) {
   const listed = o.attachments ?? [
     { ref: 'ref-pdf', filename: 'migrapilot_email_fixture.pdf' },
@@ -85,6 +87,18 @@ function deps(o: {
           const op = String(req.op ?? 'search');
           o.calls.push({ op, attachmentId: req.attachmentId, keywords: req.keywords });
 
+          if (op === 'readMessage') {
+            return {
+              ok: true,
+              message: {
+                ...message(),
+                bodyComplete: true,
+                textBody: o.bodyHasSentinel
+                  ? `here s the test files ${SENTINEL}`
+                  : 'here s the test files -- 4957 Coconut Creek Pkwy',
+              },
+            };
+          }
           if (op === 'listAttachments') {
             return {
               ok: true, attachmentsKnown: true,
@@ -152,10 +166,13 @@ test(`🚨 the exact acceptance prompt now finds where ${SENTINEL} really is`, a
 
   const result = await ask(`Find the email about containing ${SENTINEL}`, d);
 
-  // The provider matched; our message evidence did not carry the term; the turn
-  // went and opened the attachments rather than answering from a body that
-  // never mentioned it.
-  assert.deepEqual(calls.map((c) => c.op), ['search', 'listAttachments', 'fetchAttachment', 'fetchAttachment']);
+  /*
+   * The provider matched; the SNIPPET did not carry the term, so the message was
+   * read in full first — absence from a preview is not absence from a message —
+   * and only then were the attachments opened.
+   */
+  assert.deepEqual(calls.map((c) => c.op),
+    ['search', 'readMessage', 'listAttachments', 'fetchAttachment', 'fetchAttachment']);
   assert.equal(calls[0]!.keywords, SENTINEL.toLowerCase());
 
   const match = result.providerMatchBeyondEvidence;
@@ -183,6 +200,8 @@ test('🚨 it stops as soon as the term is in front of it', async () => {
 
   assert.equal(calls.filter((c) => c.op === 'fetchAttachment').length, 1,
     'a second attachment was downloaded after the term had already been found');
+  assert.equal(calls.filter((c) => c.op === 'readMessage').length, 1,
+    'the full message was not read before attachments were opened');
 });
 
 /* ------------------------------------------------------------------ *
@@ -210,6 +229,24 @@ test('🚨 more than one result does NOT trigger a sweep', async () => {
   // the user's mail.
   assert.deepEqual(calls.map((c) => c.op), ['search']);
   assert.equal(result.providerMatchBeyondEvidence, null);
+});
+
+test('🚨 the full message is read FIRST, and that alone can settle it', async () => {
+  /*
+   * 🚨 ABSENCE FROM A SNIPPET IS NOT ABSENCE FROM A MESSAGE. Most of a body is
+   * missing from its own preview, so escalating straight to attachments would
+   * download files looking for something that was in the body all along — and
+   * would do it on ordinary searches, constantly.
+   */
+  const calls: Call[] = [];
+  const d = deps({ calls, bodyHasSentinel: true });
+
+  const result = await ask(`Find the email about containing ${SENTINEL}`, d);
+
+  assert.deepEqual(calls.map((c) => c.op), ['search', 'readMessage'],
+    'attachments were opened for a term the message body actually contained');
+  assert.equal(result.providerMatchBeyondEvidence, null,
+    'the term was in the message after all, so nothing lay beyond the evidence');
 });
 
 test('🚨 when nothing readable holds the term, it says so rather than guessing', async () => {
