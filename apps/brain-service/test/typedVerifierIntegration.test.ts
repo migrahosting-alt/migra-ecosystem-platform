@@ -491,3 +491,98 @@ test('🚨 9h. naming the FILE is part of quoting it', () => {
   assert.equal(wrong.answer.includes('budget.xlsx'), false,
     'a claim named a document that was never retrieved');
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Naming a part of a source is not a claim about it
+ * ------------------------------------------------------------------ */
+
+test('🚨 11. a true claim that DESCRIBES a message survives', () => {
+  /*
+   * 🚨 REGRESSION FROM A LIVE FAILURE. Asked who sent an email and what its
+   * subject line was, the model answered correctly and the gate deleted the
+   * whole sentence — `email`, `sent`, `subject` and `line` are not inside the
+   * message. The every-term rule had met a kind of evidence it was not written
+   * for: a repository claim quotes identifiers that really are in the code, a
+   * message claim mostly DESCRIBES a message.
+   */
+  const verified = verifyAnswer(
+    'The email was sent by billing@hetzner.com, and the subject line is "Invoice 2026-09".',
+    { repo: new EvidenceLedger(), other: withMail(mail()) },
+  );
+
+  assert.equal(verified.refused, false, `a true description was refused: ${verified.answer}`);
+  assert.ok(verified.answer.includes('billing@hetzner.com'), 'the sender claim was removed');
+  assert.ok(verified.answer.includes('Invoice 2026-09'), 'the subject claim was removed');
+});
+
+test('🚨 11b. and a FALSE claim about the same parts still dies', () => {
+  /*
+   * The structural words are the vocabulary for POINTING at a part, never a
+   * claim about what the part says — which is exactly why permitting them
+   * costs no discrimination. The value still has to be there.
+   */
+  const verified = verifyAnswer(
+    'The subject line is "Invoice 9999" and it was sent by payroll@example.com.',
+    { repo: new EvidenceLedger(), other: withMail(mail()) },
+  );
+
+  assert.equal(verified.answer.includes('9999'), false, 'a fabricated subject survived');
+  assert.equal(verified.answer.includes('payroll@example.com'), false, 'a fabricated sender survived');
+});
+
+test('🚨 11c. structural vocabulary ALONE grounds nothing', () => {
+  /*
+   * This is the boundary that makes the permission safe. The words for
+   * pointing at a part of a message are no longer required to be inside it —
+   * but a sentence built only from them, plus one word that IS a claim, still
+   * has to find that word. "Updated" is nowhere in the message.
+   *
+   * (Repository claims are unaffected for a different reason: a repo span has
+   * no sender or subject line, so this vocabulary belongs to a kind they never
+   * reach.)
+   */
+  const verified = verifyAnswer('The message body was updated on Tuesday.', {
+    repo: new EvidenceLedger(), other: withMail(mail()),
+  });
+
+  assert.equal(verified.answer.includes('updated on Tuesday'), false,
+    'a claim made entirely of structural words was grounded');
+});
+
+test('🚨 12. a caveat is owed only by the evidence a claim RESTED on', () => {
+  /*
+   * 🚨 REGRESSION FROM A LIVE ANSWER. A turn listed a message's attachments,
+   * opened the spreadsheet, and answered from the COMPLETE workbook — and the
+   * answer carried "based on message previews, not the full messages", because
+   * the listing item is deliberately incomplete and was still in the ledger.
+   * Every figure was exact and the disclosure told the reader to discount them.
+   *
+   * A false caveat is a false statement, in the direction that looks careful.
+   */
+  const scope = ALICE;
+  const listing = mail({
+    id: 'email_listing',
+    text: 'regions.xlsx',              // a filename is not contents
+    complete: false,
+  });
+  const opened = sheet();               // the workbook itself, read in full
+
+  const verified = verifyAnswer('South revenue is $156500.', {
+    repo: new EvidenceLedger(),
+    other: typed(scope, listing, opened),
+  });
+
+  assert.ok(verified.answer.includes('156500'), 'the supported claim was removed');
+  assert.equal(/previews/i.test(verified.answer), false,
+    `a complete source was labelled partial: ${verified.answer}`);
+});
+
+test('and the caveat IS attached when the claim rests on the partial item', () => {
+  const preview = mail({ id: 'email_preview', text: 'Your September invoice…', complete: false });
+
+  const verified = verifyAnswer('There is a September invoice from billing@hetzner.com.', {
+    repo: new EvidenceLedger(), other: typed(ALICE, preview),
+  });
+
+  assert.match(verified.answer, /previews/i, 'a preview-sourced claim lost its disclosure');
+});

@@ -297,6 +297,21 @@ export const repoAdapter: EvidenceAdapter<RepoEvidence> = {
 };
 
 /**
+ * The words that NAME the parts of a message, rather than say anything about
+ * them. Deliberately short: every word here is one the gate stops checking, so
+ * it holds only the vocabulary of pointing — never a word that could carry a
+ * fact about content.
+ */
+const MESSAGE_STRUCTURE = [
+  'email', 'mail', 'message', 'thread', 'inbox',
+  'subject', 'line', 'title',
+  'sender', 'sent', 'sends', 'from', 'received', 'receive',
+  'recipient', 'addressed',
+  'date', 'dated', 'time', 'timestamp',
+  'body', 'content', 'contents', 'text',
+].join(' ');
+
+/**
  * The email adapter.
  *
  * Attribution is a MESSAGE, not a line range, and the limitation is the one the
@@ -322,13 +337,43 @@ export const emailAdapter: EvidenceAdapter<EmailEvidence> = {
    * opening it. A claim naming the sender or the subject is sourced by the
    * message itself — requiring those words in the BODY would reject "the
    * invoice came from billing@example.com", which is exactly true.
+   *
+   * ---------------------------------------------------------------------
+   * 🚨 AND THE WORDS THAT NAME THE PARTS OF A MESSAGE.
+   *
+   * Found live. Asked who sent an email and what its subject line was, the
+   * model answered correctly — "sent by migrateck@gmail.com, and the subject
+   * line is 'test file'" — and the gate deleted the whole sentence, because
+   * `email`, `sent`, `subject` and `line` do not appear INSIDE the message.
+   *
+   * That is the every-term rule meeting a kind of evidence it was not written
+   * for. A repository claim quotes identifiers that really are in the code; a
+   * message claim mostly DESCRIBES a message, using words for its parts. Those
+   * words are structure, not content, and demanding them in the body rejects
+   * exactly the true sentences a person asks for.
+   *
+   * 🚨 IT COSTS NO DISCRIMINATION, which is why it is safe. "The subject is
+   * Invoice 9999" still has to find `9999`; all this permits is the vocabulary
+   * for POINTING at a part, never a claim about what the part says. And it is
+   * per kind — a repository span has no sender, so nothing here reaches it.
    */
-  haystack: (item) => `${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`,
+  haystack: (item) => [
+    item.text, item.subject, item.from, item.sentAt,
+    MESSAGE_STRUCTURE,
+  ].join('\n'),
   locate: (item) => item.locator.providerMessageId,
   limitation: (item) => (item.complete
     ? null
     : 'This is based on message previews, not the full messages.'),
 };
+
+/** The vocabulary for pointing at part of a document. See MESSAGE_STRUCTURE. */
+const FILE_STRUCTURE = [
+  'file', 'filename', 'document', 'attachment', 'attached',
+  'spreadsheet', 'workbook', 'sheet', 'tab',
+  'row', 'rows', 'column', 'columns', 'cell', 'cells', 'header', 'headers',
+  'page', 'pages', 'section', 'contents', 'content', 'text', 'value', 'values',
+].join(' ');
 
 /**
  * The file adapter.
@@ -355,8 +400,12 @@ export const fileAdapter: EvidenceAdapter<FileEvidence> = {
    * 48273.55" names the document and quotes it, and only one of those facts is
    * inside the bytes. Leaving the name out would strike out the sentence that
    * says which file was read — the one sentence a reader most needs.
+   *
+   * The structural vocabulary is here for the same reason it is on a message:
+   * a sentence about a document mostly names its parts, and those words are
+   * pointing, not claiming. A figure or a name still has to be in the bytes.
    */
-  haystack: (item) => `${item.text}\n${item.locator.filename}`,
+  haystack: (item) => [item.text, item.locator.filename, FILE_STRUCTURE].join('\n'),
   /*
    * 🚨 THE DIGEST, not the filename. It is the only handle that still names
    * these exact bytes after someone attaches a second `budget.xlsx`.

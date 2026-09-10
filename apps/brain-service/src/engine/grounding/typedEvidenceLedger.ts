@@ -105,8 +105,34 @@ export class TypedEvidenceLedger {
    * caveat twice reads as a fault in the product.
    */
   limitations(): string[] {
+    return this.limitationsFor();
+  }
+
+  /**
+   * The caveats owed by SPECIFIC items — the ones a claim actually rested on.
+   *
+   * ---------------------------------------------------------------------
+   * 🚨 A FALSE CAVEAT IS A FALSE STATEMENT
+   *
+   * Found live. A turn listed a message's attachments, opened the spreadsheet,
+   * and answered from the COMPLETE workbook — and the answer carried "this is
+   * based on message previews, not the full messages", because an attachment
+   * listing is deliberately incomplete evidence and it was still sitting in
+   * the ledger. Every figure was exact and the disclosure said not to trust
+   * them.
+   *
+   * Partiality has always been meant to attach only where a claim rests on the
+   * partial evidence — the note beside the caller says exactly that. It was
+   * implemented one level too coarse: "was any non-repo evidence used" decided
+   * whether to attach the caveats of ALL of it.
+   *
+   * @param used ids that actually sourced a surviving claim; every item when
+   *   omitted, which is what a caller wants when describing a whole ledger.
+   */
+  limitationsFor(used?: ReadonlySet<string>): string[] {
     const out: string[] = [];
     for (const item of this.items) {
+      if (used && !used.has(item.id)) continue;
       const limitation = adapterFor(item).limitation(item as never);
       if (limitation && !out.includes(limitation)) out.push(limitation);
     }

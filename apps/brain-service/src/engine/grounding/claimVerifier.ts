@@ -898,8 +898,18 @@ export function verifyAnswer(
    * Only when a claim actually rests on the partial evidence — an answer that
    * used none of it should not apologise for it.
    */
-  const usedOther = claims.some((c) => (c.otherSources?.length ?? 0) > 0);
-  const limitations = usedOther && other ? other.limitations() : [];
+  /*
+   * 🚨 THE ITEMS THAT ACTUALLY CARRIED A SURVIVING CLAIM, not every item that
+   * happened to be retrieved. An attachment listing is incomplete evidence by
+   * design; when the turn goes on to open the file and answer from the whole
+   * of it, the listing's caveat describes nothing the answer rests on — and
+   * "based on message previews" over a set of exact figures tells the reader
+   * to discount them.
+   */
+  const usedOtherIds = new Set(
+    claims.flatMap((c) => (c.otherSources ?? []).map((s) => s.evidenceId)),
+  );
+  const limitations = usedOtherIds.size > 0 && other ? other.limitationsFor(usedOtherIds) : [];
   const partiality = limitations
     .filter((l) => !(body ?? '').includes(l))
     .map((l) => `\n\n${l}`)
