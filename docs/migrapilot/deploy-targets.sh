@@ -104,12 +104,47 @@ deploy_target() {
 # cannot name the artifact it tested proves nothing about the artifact later
 # promoted — a truthful harness once "passed" while production served
 # three-day-old code.
+#
+# 🚨 AND GIT METADATA IS NOT AN ARTIFACT IDENTITY.
+#
+# A commit says what the SOURCE was. It does not say what was BUILT: workspace
+# dependencies are npm-hoisted locally and resolve differently in a clean
+# checkout, and Next emits a build id that changes independently of any commit.
+# Two deploys of one commit can therefore run different code, which is exactly
+# the stale-runtime problem this project has already been bitten by.
+#
+# So the record binds to CONTENT — a digest over the built closure — with the
+# Git fields kept as provenance rather than as identity.
+deploy_content_digest() {
+  local dir="${1:?built directory}"
+  # Every file's path and bytes, order-stable, hashed once. Not mtimes: a
+  # rebuild that changes nothing must produce the same digest, or the digest
+  # cannot answer "is this the same artifact".
+  ( cd "$dir" && find . -type f ! -name RELEASE.json -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 sha256sum \
+      | sha256sum | cut -d" " -f1 )
+}
+
+# The acceptance record. Every field is something a later promotion decision
+# needs, and nothing here is inferred at read time.
 deploy_fingerprint() {
   local repo="${1:?repo path}" target="${2:?target}" release="${3:?release}"
-  printf 'target=%s\nrelease=%s\ncommit=%s\nshort=%s\nbranch=%s\ndirty=%s\n' \
-    "$target" "$release" \
-    "$(git -C "$repo" rev-parse HEAD)" \
-    "$(git -C "$repo" rev-parse --short HEAD)" \
-    "$(git -C "$repo" rev-parse --abbrev-ref HEAD)" \
-    "$(test -n "$(git -C "$repo" status --porcelain)" && echo yes || echo no)"
+  local brain_dist="${4:-}" consumer_dist="${5:-}" schema="${6:-unknown}"
+
+  printf 'target=%s\n'              "$target"
+  printf 'release=%s\n'             "$release"
+  printf 'commit=%s\n'              "$(git -C "$repo" rev-parse HEAD)"
+  printf 'short=%s\n'               "$(git -C "$repo" rev-parse --short HEAD)"
+  printf 'branch=%s\n'              "$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
+  printf 'dirty=%s\n'               "$(test -n "$(git -C "$repo" status --porcelain)" && echo yes || echo no)"
+  printf 'schemaVersion=%s\n'       "$schema"
+  printf 'brainBuildId=%s\n'        "$([ -n "$brain_dist" ] && [ -d "$brain_dist" ] && deploy_content_digest "$brain_dist" || echo unbuilt)"
+  printf 'consumerBuildId=%s\n'     "$([ -n "$consumer_dist" ] && [ -d "$consumer_dist" ] && deploy_content_digest "$consumer_dist" || echo unbuilt)"
+  # The runtime authority this build will answer to — the half a commit cannot
+  # express, and the half that decides which database it opens.
+  printf 'configFingerprint=%s\n'   "$(printf '%s|%s|%s|%s|%s' \
+      "$DEPLOY_HOST" "$DEPLOY_ENV_FILE" "$DEPLOY_CONSUMER_ENV_FILE" \
+      "$DEPLOY_DB_AUTHORITY" "$DEPLOY_PUBLIC_HOST" | sha256sum | cut -d" " -f1)"
+  printf 'deployedAt=%s\n'          "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

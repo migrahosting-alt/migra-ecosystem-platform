@@ -55,11 +55,27 @@ for var in DEPLOY_HOST DEPLOY_BRAIN_ROOT DEPLOY_BRAIN_UNIT DEPLOY_CONSUMER_ROOT 
 done
 
 # 5 — the fingerprint must name the artifact before acceptance can start.
-fp=$(bash -c '. ./deploy-targets.sh; deploy_fingerprint "$(cd ../.. && pwd)" staging rc-control')
-for field in target= release= commit= short= branch= dirty=; do
+REPO="$(cd ../.. && pwd)"
+fp=$(bash -c ". ./deploy-targets.sh; deploy_target staging >/dev/null; deploy_fingerprint '$REPO' staging rc-control '$REPO/apps/brain-service/dist' '' 28")
+for field in target= release= commit= short= branch= dirty= schemaVersion= brainBuildId= consumerBuildId= configFingerprint= deployedAt=; do
   if printf '%s' "$fp" | grep -q "$field"; then ok "fingerprint carries $field"
   else bad "fingerprint is missing $field"; fi
 done
+
+# 6 — the build identity must be CONTENT, not git metadata. A rebuild that
+#     changes nothing must produce the same digest, or the digest cannot answer
+#     "is this the same artifact" — which is the whole point of recording it.
+d1=$(bash -c ". ./deploy-targets.sh; deploy_content_digest '$REPO/apps/brain-service/dist'")
+d2=$(bash -c ". ./deploy-targets.sh; deploy_content_digest '$REPO/apps/brain-service/dist'")
+if [ -n "$d1" ] && [ "$d1" = "$d2" ]; then ok "content digest is stable across runs"
+else bad "content digest is unstable ($d1 vs $d2)"; fi
+
+# 7 — the config fingerprint must DIFFER between targets, or an acceptance
+#     record could not tell which runtime authority it tested.
+c_prod=$(bash -c ". ./deploy-targets.sh; deploy_target production >/dev/null; deploy_fingerprint '$REPO' production r '' '' 26" | grep '^configFingerprint=')
+c_stag=$(bash -c ". ./deploy-targets.sh; deploy_target staging   >/dev/null; deploy_fingerprint '$REPO' staging   r '' '' 28" | grep '^configFingerprint=')
+if [ "$c_prod" != "$c_stag" ]; then ok "config fingerprint differs between targets"
+else bad "config fingerprint is IDENTICAL across targets"; fi
 
 printf '\n'
 if [ "$fails" -eq 0 ]; then echo "DEPLOY TARGET CONTROLS PASSED"; else
