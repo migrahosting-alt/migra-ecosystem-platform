@@ -31,7 +31,7 @@
  */
 
 /** The kinds of source that can ground a claim. Extended, never widened in place. */
-export type EvidenceKind = 'repo' | 'email';
+export type EvidenceKind = 'repo' | 'email' | 'file';
 
 /**
  * Whose evidence this is.
@@ -59,6 +59,35 @@ interface EvidenceCommon {
    */
   complete: boolean;
   scope: EvidenceScope;
+  /**
+   * Produced by something that already checked its own sources — a grounded
+   * summariser, for instance.
+   *
+   * 🚨 STILL VERIFIED. Pre-grounded means the TEXT is trustworthy as evidence,
+   * not that an answer quoting it may claim anything. The outer gate still
+   * confirms the final wording only says what this text supports — otherwise
+   * "the summariser said so" becomes a laundering step.
+   */
+  preGrounded?: boolean;
+  /**
+   * The evidence this item was DERIVED from — set on summaries.
+   *
+   * 🚨 A SUMMARY MUST NOT OUTRANK ITS SOURCES. Prose is lossy in one direction
+   * and confident in the other: a summary of two previews reads exactly like a
+   * summary of two full messages, and a summary of one thread reads exactly
+   * like a summary of a mailbox. Left unconstrained, summarising would LAUNDER
+   * partial, narrowly-scoped evidence into a source that appears to support
+   * more than anything actually retrieved.
+   *
+   * So a derived item may support a claim only where one of these ids also
+   * supports it. Enforced in the verifier, which is the only place that sees
+   * the whole ledger — an adapter sees one item and could not check it.
+   *
+   * 🚨 ON THE COMMON BASE, NOT ON ONE KIND. It lived on email evidence while
+   * email was the only kind that summarised. Every kind can be summarised, and
+   * a rule that only reaches one of them is a rule with a hole in it.
+   */
+  derivedFrom?: readonly string[];
 }
 
 /** A range of lines in a file. The original evidence type, unchanged in meaning. */
@@ -86,33 +115,55 @@ export interface EmailEvidence extends EvidenceCommon {
   subject: string;
   from: string;
   sentAt: string;
-  /**
-   * Produced by the grounded summariser, which already checked its own sources.
-   *
-   * 🚨 STILL VERIFIED. Pre-grounded means the TEXT is trustworthy as evidence,
-   * not that an answer quoting it may claim anything. The outer gate still
-   * confirms the final wording only says what this text supports — otherwise
-   * "the summariser said so" becomes a laundering step.
-   */
-  preGrounded?: boolean;
-  /**
-   * The evidence this item was DERIVED from — set on summaries.
-   *
-   * 🚨 A SUMMARY MUST NOT OUTRANK ITS SOURCES. Prose is lossy in one direction
-   * and confident in the other: a summary of two previews reads exactly like a
-   * summary of two full messages, and a summary of one thread reads exactly
-   * like a summary of a mailbox. Left unconstrained, summarising would LAUNDER
-   * partial, narrowly-scoped evidence into a source that appears to support
-   * more than anything actually retrieved.
-   *
-   * So a derived item may support a claim only where one of these ids also
-   * supports it. Enforced in the verifier, which is the only place that sees
-   * the whole ledger — an adapter sees one item and could not check it.
-   */
-  derivedFrom?: readonly string[];
 }
 
-export type EvidenceItem = RepoEvidence | EmailEvidence;
+/**
+ * A FILE — the bytes themselves, after the canonical file pipeline took them.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 WHY AN ATTACHMENT STOPS BEING EMAIL EVIDENCE HERE
+ *
+ * A spreadsheet that arrived by mail and the same spreadsheet uploaded from a
+ * desktop are the same document, and an answer about them must be verified the
+ * same way. Keeping the attachment as email evidence would mean its extracted
+ * contents were judged by rules written for message bodies — and would leave
+ * the upload path with no evidence type at all, so the first upload question
+ * would arrive and find the whole ladder built for mail.
+ *
+ * The message is not lost: it becomes {@link origin}, which is PROVENANCE. A
+ * reader still gets "the spreadsheet attached to Invoice 4471".
+ *
+ * 🚨 THE DIGEST IS THE IDENTITY, not the filename and not any provider handle.
+ * Two people attach `budget.xlsx`; one document has one sha256.
+ */
+export interface FileEvidence extends EvidenceCommon {
+  kind: 'file';
+  locator: {
+    /** sha256 of the exact bytes the pipeline accepted. */
+    sha256: string;
+    filename: string;
+    mimeType: string;
+  };
+  /**
+   * Where the bytes came from.
+   *
+   * 🚨 NO PROVIDER ATTACHMENT ID. Gmail regenerates it on every read, so
+   * recording it would produce provenance that names nothing an hour later —
+   * and, worse, a re-fetch handle that has to be believed rather than checked.
+   * `attachmentRef` is ours, derived from the attachment's own properties, and
+   * still resolves against a fresh read of the message.
+   */
+  origin:
+    | { source: 'upload' }
+    | {
+        source: 'email-attachment';
+        providerMessageId: string;
+        providerThreadId: string;
+        attachmentRef: string;
+      };
+}
+
+export type EvidenceItem = RepoEvidence | EmailEvidence | FileEvidence;
 
 /* ------------------------------------------------------------------ *
  * 🚨 One verifier interface, type-specific adapters
@@ -142,6 +193,30 @@ export interface EvidenceAdapter<E extends EvidenceItem = EvidenceItem> {
    * So this answers only: is this item a plausible source to hand the verifier?
    */
   couldSource(claim: string, item: E): boolean;
+  /**
+   * EVERYTHING a claim about this item may legitimately quote.
+   *
+   * 🚨 THE SHAPE, NOT THE STANDARD. The verifier's every-term rule runs against
+   * this text for every kind alike; what differs is only which parts of a
+   * source a reader can see. A message's sender and subject belong in here —
+   * "the invoice came from billing@example.com" is exactly true and its words
+   * are nowhere in the body. A file's filename belongs in here for the same
+   * reason.
+   *
+   * It exists because the verifier used to build this string ITSELF, from
+   * `subject`/`from`/`sentAt` — fields only email has. Any new kind was
+   * therefore unquotable by construction: candidates were offered and then
+   * dropped, and every true sentence about them was struck out as unsupported.
+   * A capability whose evidence cannot ground anything looks exactly like a
+   * capability that retrieved nothing.
+   */
+  haystack(item: E): string;
+  /**
+   * The handle a reader follows to open this source. Opaque, and meaningful
+   * only alongside {@link kind} — a message id and a content digest are not
+   * interchangeable and must never be read as though they were.
+   */
+  locate(item: E): string;
   /** The caveat this item forces onto any answer using it, if any. */
   limitation(item: E): string | null;
 }
@@ -212,6 +287,10 @@ export const repoAdapter: EvidenceAdapter<RepoEvidence> = {
     if (terms.length === 0) return false;
     return terms.some((t) => haystack.has(t));
   },
+  // Unused by the repository path, which has its own long-qualified matching
+  // and keeps it. Stated so the adapter is a complete description of the kind.
+  haystack: (item) => item.code ?? item.text,
+  locate: (item) => `${item.locator.path}:${item.locator.startLine}`,
   limitation: (item) => (item.complete
     ? null
     : 'This is based on part of the file, not the whole file.'),
@@ -233,25 +312,65 @@ export const emailAdapter: EvidenceAdapter<EmailEvidence> = {
     return `${where} from ${item.from}`;
   },
   couldSource(claim, item) {
-    /*
-     * The message's own text, plus the header facts a reader can see without
-     * opening it. A claim naming the sender or the subject is sourced by the
-     * message itself — requiring those words in the BODY would reject "the
-     * invoice came from billing@example.com", which is exactly true.
-     */
-    const haystack = tokensOf(`${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`);
+    const haystack = tokensOf(emailAdapter.haystack(item));
     const terms = significantTerms(claim);
     if (terms.length === 0) return false;
     return terms.some((t) => haystack.has(t));
   },
+  /*
+   * The message's own text, plus the header facts a reader can see without
+   * opening it. A claim naming the sender or the subject is sourced by the
+   * message itself — requiring those words in the BODY would reject "the
+   * invoice came from billing@example.com", which is exactly true.
+   */
+  haystack: (item) => `${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`,
+  locate: (item) => item.locator.providerMessageId,
   limitation: (item) => (item.complete
     ? null
     : 'This is based on message previews, not the full messages.'),
 };
 
+/**
+ * The file adapter.
+ *
+ * Attribution is a DOCUMENT — a name a person recognises, plus where it came
+ * from when that was not their own upload.
+ */
+export const fileAdapter: EvidenceAdapter<FileEvidence> = {
+  kind: 'file',
+  describe(item) {
+    const name = `"${item.locator.filename}"`;
+    return item.origin.source === 'email-attachment'
+      ? `${name} attached to a message`
+      : name;
+  },
+  couldSource(claim, item) {
+    const haystack = tokensOf(fileAdapter.haystack(item));
+    const terms = significantTerms(claim);
+    if (terms.length === 0) return false;
+    return terms.some((t) => haystack.has(t));
+  },
+  /*
+   * 🚨 THE FILENAME IS PART OF THE SOURCE. "The budget spreadsheet lists
+   * 48273.55" names the document and quotes it, and only one of those facts is
+   * inside the bytes. Leaving the name out would strike out the sentence that
+   * says which file was read — the one sentence a reader most needs.
+   */
+  haystack: (item) => `${item.text}\n${item.locator.filename}`,
+  /*
+   * 🚨 THE DIGEST, not the filename. It is the only handle that still names
+   * these exact bytes after someone attaches a second `budget.xlsx`.
+   */
+  locate: (item) => item.locator.sha256,
+  limitation: (item) => (item.complete
+    ? null
+    : 'This is based on part of the file, not all of it.'),
+};
+
 const ADAPTERS: Record<EvidenceKind, EvidenceAdapter<never>> = {
   repo: repoAdapter as EvidenceAdapter<never>,
   email: emailAdapter as EvidenceAdapter<never>,
+  file: fileAdapter as EvidenceAdapter<never>,
 };
 
 /**

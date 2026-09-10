@@ -26,6 +26,7 @@ import { verifyAnswer } from '../src/engine/grounding/claimVerifier.js';
 import {
   TypedEvidenceLedger, emailEvidence,
 } from '../src/engine/grounding/typedEvidenceLedger.js';
+import type { EvidenceItem, EvidenceScope, FileEvidence } from '../src/engine/grounding/evidenceTypes.js';
 
 const ALICE = { principalId: 'user:alice', workspaceId: 'personal:alice' };
 const BOB = { principalId: 'user:bob', workspaceId: 'personal:bob' };
@@ -53,8 +54,32 @@ const mail = (over: Partial<Parameters<typeof emailEvidence>[0]> = {}) => emailE
   ...over,
 });
 
+/**
+ * A spreadsheet that arrived as an attachment and went through the canonical
+ * file pipeline. Its text is what the workbook reader produced.
+ */
+const sheet = (over: Partial<FileEvidence> = {}): FileEvidence => ({
+  kind: 'file',
+  id: 'file_1',
+  scope: ALICE,
+  text: '## Sales\nRegion\tRevenue\nSouth\t$156500\nNorth\t$100000',
+  complete: true,
+  locator: { sha256: 'a'.repeat(64), filename: 'regions.xlsx', mimeType: 'application/vnd.ms-excel' },
+  origin: {
+    source: 'email-attachment',
+    providerMessageId: 'pm-1', providerThreadId: 'pt-1', attachmentRef: 'ref-abc',
+  },
+  ...over,
+});
+
 function withMail(...items: ReturnType<typeof mail>[]): TypedEvidenceLedger {
   const ledger = new TypedEvidenceLedger(ALICE);
+  for (const item of items) ledger.add(item);
+  return ledger;
+}
+
+function typed(scope: EvidenceScope, ...items: EvidenceItem[]): TypedEvidenceLedger {
+  const ledger = new TypedEvidenceLedger(scope);
   for (const item of items) ledger.add(item);
   return ledger;
 }
@@ -97,7 +122,8 @@ test('🚨 2. a SUPPORTED email claim survives, cited as a message', () => {
   const cited = result.claims.flatMap((c) => c.otherSources ?? []);
   assert.equal(cited.length, 1);
   assert.equal(cited[0]!.kind, 'email');
-  assert.equal(cited[0]!.providerMessageId, 'pm-1');
+  // The handle a reader follows; for email evidence that is the message id.
+  assert.equal(cited[0]!.locator, 'pm-1');
   assert.match(cited[0]!.cite, /message "Invoice 2026-09" from billing@hetzner\.com/);
 });
 
@@ -291,4 +317,177 @@ test('the same sentence WITHOUT a citation is grounded by the message', () => {
     repo: repoLedger(), other: withMail(mail()),
   });
   assert.equal(result.claims.some((c) => (c.otherSources?.length ?? 0) > 0), true);
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 CASE 9 — THREE KINDS IN ONE LEDGER
+ *
+ * The two-kind matrix above proved the rules are shared between repo and
+ * email. A third kind is where a design either holds or turns out to have been
+ * a special case: the file adapter must earn its claims the same way, and
+ * neither of the other two may lend it support it has not earned.
+ * ------------------------------------------------------------------ */
+
+test('🚨 9a. repo, email and FILE evidence each carry their own claim in one answer', () => {
+  const answer = [
+    'The throttle function in src/rateLimiter.ts:1-3 returns requests <= MAX_PER_MINUTE.',
+    'The September invoice from billing@hetzner.com totals 48273.55.',
+    'South revenue is $156500.',
+  ].join(' ');
+
+  const verified = verifyAnswer(answer, {
+    repo: repoLedger(),
+    other: typed(ALICE, mail(), sheet()),
+  });
+
+  assert.equal(verified.refused, false, `everything was removed: ${verified.answer}`);
+  assert.ok(verified.answer.includes('MAX_PER_MINUTE'), 'the repository claim was removed');
+  assert.ok(verified.answer.includes('48273.55'), 'the message claim was removed');
+  assert.ok(verified.answer.includes('156500'), 'the spreadsheet claim was removed');
+
+  // 🚨 Each claim cited to the source that actually carries it.
+  const kinds = verified.claims.flatMap((c) => (c.otherSources ?? []).map((o) => o.kind));
+  assert.deepEqual([...new Set(kinds)].sort(), ['email', 'file']);
+  assert.ok(verified.claims.some((c) => c.sources.some((src) => src.path === REPO_PATH)),
+    'the repository claim was not anchored to its file');
+});
+
+test('🚨 9b. an unsupported claim is removed even while its NEIGHBOURS are supported', () => {
+  const answer = [
+    'South revenue is $156500.',
+    'West revenue is $61250.',
+  ].join(' ');
+
+  const verified = verifyAnswer(answer, { repo: repoLedger(), other: typed(ALICE, mail(), sheet()) });
+
+  // The sheet fixture holds South and North. West is a real-looking number that
+  // is nowhere in any of the three sources.
+  assert.ok(verified.answer.includes('156500'), 'a supported claim was removed with the unsupported one');
+  assert.equal(verified.answer.includes('61250'), false, 'a value in none of the sources survived');
+});
+
+test('🚨 9c. NO CROSS-TYPE RESCUE — a claim must be carried by ONE source, whole', () => {
+  /*
+   * Every term of this sentence appears SOMEWHERE: "invoice" and "48273.55" in
+   * the message, "revenue" and "$156500" in the spreadsheet. No single source
+   * carries all of them.
+   *
+   * 🚨 A UNION OF SOURCES IS NOT A SOURCE. Grounding a sentence against the
+   * pooled vocabulary of everything retrieved is how a fabricated connection
+   * between two real documents survives — the most convincing kind of wrong
+   * answer, because every piece of it checks out separately.
+   */
+  const answer = 'The invoice totalling 48273.55 explains the $156500 revenue.';
+
+  const verified = verifyAnswer(answer, { repo: new EvidenceLedger(), other: typed(ALICE, mail(), sheet()) });
+
+  assert.equal(verified.answer.includes('48273.55'), false,
+    'a claim spanning two sources was grounded by neither of them alone');
+});
+
+test('🚨 9d. a WRONG repository citation is not rescued by a file that shares its words', () => {
+  /*
+   * The sentence cites a span that does not support it — the cited code says
+   * nothing about ceilings or quarters. A file happens to contain every word of
+   * it, including the number.
+   *
+   * 🚨 IT MUST STILL BE REMOVED. A wrong citation is a wrong reference, and a
+   * gate that re-attributed it to whatever else matched would be silently
+   * correcting the model instead of catching it — leaving a confident sentence
+   * on screen pointing at the wrong place.
+   */
+  const ceiling = sheet({
+    id: 'file_ceiling',
+    text: 'The quarterly ceiling is $156500.',
+  });
+  const cited = 'The quarterly ceiling described in src/rateLimiter.ts:1-3 is $156500.';
+
+  const wrongCitation = verifyAnswer(cited, { repo: repoLedger(), other: typed(ALICE, ceiling) });
+  assert.equal(wrongCitation.answer.includes('156500'), false,
+    'a wrong repository citation was rescued by a file');
+
+  /*
+   * And the same sentence WITHOUT the citation is grounded by that same file —
+   * which is what proves the removal above came from the citation guard and not
+   * from the evidence simply being unusable.
+   */
+  const uncited = verifyAnswer('The quarterly ceiling is $156500.', {
+    repo: repoLedger(), other: typed(ALICE, ceiling),
+  });
+  assert.ok(uncited.answer.includes('156500'), 'the file could not ground the claim at all');
+  assert.equal(uncited.claims[0]?.otherSources?.[0]?.kind, 'file');
+});
+
+test('🚨 9e. FILE evidence from another principal REFUSES the answer', () => {
+  /*
+   * Not filtered out — refused. A ledger holding someone else's evidence is a
+   * wiring fault, and quietly dropping the item would let the run continue and
+   * produce a confident answer built from whatever was left.
+   */
+  const verified = verifyAnswer('South revenue is $156500.', {
+    repo: new EvidenceLedger(),
+    other: typed(BOB, sheet({ scope: BOB })),
+  }, { scope: ALICE });
+
+  assert.equal(verified.refused, true, 'another principal\'s file evidence answered a question');
+});
+
+test('🚨 9f. a TRUNCATED spreadsheet makes the answer say so', () => {
+  const verified = verifyAnswer('South revenue is $156500.', {
+    repo: new EvidenceLedger(),
+    other: typed(ALICE, sheet({ complete: false })),
+  });
+
+  assert.equal(verified.refused, false, `the claim was removed: ${verified.answer}`);
+  // "The spreadsheet lists three suppliers" is a different sentence when there
+  // were four and the reader stopped at three.
+  assert.match(verified.answer, /part of the file/i);
+});
+
+test('🚨 9g. a summary of a FILE may not outrank the file — derivedFrom is not email-only', () => {
+  /*
+   * `derivedFrom` lived on email evidence while email was the only kind that
+   * summarised. It is on the common base now, and this is what that has to
+   * mean: a summary item claiming something ITS OWN SOURCE does not say is
+   * still laundering, whatever kind it is.
+   */
+  const source = sheet();
+  const summary = sheet({
+    id: 'file_summary',
+    text: 'South revenue is $156500 and West revenue is $61250.',
+    preGrounded: true,
+    derivedFrom: [source.id],
+  });
+
+  const verified = verifyAnswer('West revenue is $61250.', {
+    repo: new EvidenceLedger(),
+    other: typed(ALICE, source, summary),
+  });
+
+  assert.equal(verified.answer.includes('61250'), false,
+    'a summary supported a claim its own source does not');
+});
+
+test('🚨 9h. naming the FILE is part of quoting it', () => {
+  /*
+   * "South revenue in regions.xlsx is $156500" says two things, and only one of
+   * them is inside the bytes. If the filename were not part of what the file
+   * can be quoted on, the sentence identifying WHICH document was read — the
+   * one a reader most needs — would be the sentence the gate removes.
+   */
+  const verified = verifyAnswer('South revenue in regions.xlsx is $156500.', {
+    repo: new EvidenceLedger(),
+    other: typed(ALICE, sheet()),
+  });
+
+  assert.ok(verified.answer.includes('regions.xlsx'),
+    'a claim naming the file it read was removed as unsupported');
+
+  // And a file it did NOT read still cannot be named.
+  const wrong = verifyAnswer('South revenue in budget.xlsx is $156500.', {
+    repo: new EvidenceLedger(),
+    other: typed(ALICE, sheet()),
+  });
+  assert.equal(wrong.answer.includes('budget.xlsx'), false,
+    'a claim named a document that was never retrieved');
 });

@@ -30,7 +30,7 @@
  * PURE: no fs, no fetch, no model. © MigraTeck LLC.
  */
 
-import { adapterFor, significantTerms, tokensOf, type EvidenceScope } from './evidenceTypes.js';
+import { adapterFor, significantTerms, tokensOf, type EvidenceItem, type EvidenceKind, type EvidenceScope } from './evidenceTypes.js';
 import type { TypedEvidenceLedger } from './typedEvidenceLedger.js';
 import {
   EvidenceLedger,
@@ -70,11 +70,19 @@ export interface ClaimSource {
  * reader who followed it would find nothing.
  */
 export interface OtherClaimSource {
-  kind: 'email';
+  /** Which kind of source this is. {@link locator} means nothing without it. */
+  kind: Exclude<EvidenceKind, 'repo'>;
   /** How the source names itself to a reader. */
   cite: string;
   evidenceId: string;
-  providerMessageId: string;
+  /**
+   * The handle for going and opening it — a message id, a content digest.
+   *
+   * 🚨 OPAQUE, AND READ ONLY WITH {@link kind}. It was `providerMessageId`
+   * while email was the only non-repo kind, which made every consumer that
+   * touched it email-specific before a second kind existed.
+   */
+  locator: string;
 }
 
 /** A claim that survived verification. Mirrors the branch's grounding contract. */
@@ -680,8 +688,20 @@ function groundInOther(
     : significantTerms(sentence);
   if (wanted.length === 0) return null;
 
-  const carries = (item: { text: string; subject: string; from: string; sentAt: string }): boolean => {
-    const haystack = tokensOf(`${item.text}\n${item.subject}\n${item.from}\n${item.sentAt}`);
+  /*
+   * 🚨 THE ITEM'S OWN SEARCHABLE SURFACE, ASKED OF ITS ADAPTER.
+   *
+   * This used to assemble `text/subject/from/sentAt` inline — fields only a
+   * message has. Any other kind then reached the every-term test with a
+   * haystack that could not be built, so its true sentences were struck out as
+   * unsupported and the capability looked like it had retrieved nothing.
+   *
+   * The STANDARD below is unchanged and stays shared: every term, for every
+   * kind. Only the question "what can this source legitimately be quoted on"
+   * moved to the adapter, which is the one thing that genuinely differs.
+   */
+  const carries = (item: EvidenceItem): boolean => {
+    const haystack = tokensOf(adapterFor(item).haystack(item as never));
     // EVERY term, exactly as rule 3 demands of a cited file.
     return wanted.every((t) => haystack.has(t));
   };
@@ -691,7 +711,8 @@ function groundInOther(
   const sources: OtherClaimSource[] = [];
   for (const candidate of candidates) {
     const item = candidate.item;
-    if (item.kind !== 'email') continue;
+    // Repo evidence has already had its own, stricter turn above.
+    if (item.kind === 'repo') continue;
     if (!carries(item)) continue;
 
     /*
@@ -709,15 +730,16 @@ function groundInOther(
     if (item.derivedFrom && item.derivedFrom.length > 0) {
       const backed = item.derivedFrom.some((id) => {
         const source = byId.get(id);
-        return source !== undefined && source.kind === 'email' && carries(source);
+        return source !== undefined && carries(source);
       });
       if (!backed) continue;
     }
+    const adapter = adapterFor(item);
     sources.push({
-      kind: 'email',
-      cite: adapterFor(item).describe(item as never),
+      kind: item.kind,
+      cite: adapter.describe(item as never),
       evidenceId: item.id,
-      providerMessageId: item.locator.providerMessageId,
+      locator: adapter.locate(item as never),
     });
   }
   return sources.length > 0 ? sources : null;
@@ -791,7 +813,6 @@ export function verifyAnswer(
     // `find` listing is not evidence, so it never becomes the subject.
     const retrievedHere = [...new Set([...block.namedPaths, ...block.citations.map((c) => c.path)])].filter((p) => ledger.spansFor(p).length > 0);
     if (retrievedHere.length) carriedPaths = retrievedHere;
-    const anchors: Anchors = { citations: block.citations, derivedPaths: carriedPaths };
 
     const keptLines: string[] = [];
     for (const line of block.lines) {
@@ -801,6 +822,29 @@ export function verifyAnswer(
       if (looksLikeRefusal(body)) sawRefusal = true;
       const kept: string[] = [];
       for (const sentence of toSentences(body)) {
+        /*
+         * 🚨 A CITATION BELONGS TO THE SENTENCE THAT WROTE IT, NOT TO THE
+         * PARAGRAPH IT SITS IN.
+         *
+         * These used to be the whole block's citations, which made every
+         * sentence in a paragraph "cited" as soon as ONE of them wrote
+         * `path:line`. The consequence was invisible until a second kind of
+         * evidence existed: rules 3 and 4 rescue a sentence from an INHERITED
+         * anchor — that is what the note beside them describes, a sentence
+         * about a message that happens to follow one about code — and the
+         * rescue is gated on `anchor === 'derived'` so a WRONG citation can
+         * never be quietly re-attributed. With block-level citations the two
+         * cases were indistinguishable, so one repository citation anywhere in
+         * a paragraph made every non-repo claim in it unsupported.
+         *
+         * 🚨 REPOSITORY VERDICTS ARE UNCHANGED, and that is load-bearing. The
+         * paths a block named still travel in `carriedPaths`, so a following
+         * sentence still resolves against the same spans and is still judged by
+         * rule 3 against them; a repo-only run has an empty `other` ledger and
+         * the rescue returns null immediately. What changes is only that such a
+         * sentence now reports the anchor it actually has — derived, not cited.
+         */
+        const anchors: Anchors = { citations: extractCitations(sentence), derivedPaths: carriedPaths };
         const verdict = verifySentence(sentence, ledger, anchors, other);
         if (verdict.kind === 'narrative') {
           kept.push(sentence);
