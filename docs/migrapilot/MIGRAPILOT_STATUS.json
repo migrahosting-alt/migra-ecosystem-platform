@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — infrastructure audit; staging provisioning STOPPED pending decision",
+  "updatedBy": "Claude (Opus 5) — CT101 retired, staging DB created; blocked on staging role credential",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2835,5 +2835,36 @@
     "alternativeConsidered": "The VM111 canary lane is already shaped exactly like staging — separate units, env, release roots, ports — and needs no provisioning. Rejected as the primary option because it shares CPU, RAM and disk with production: a staging build under acceptance load would contend with the service it is meant to protect, on a host already at 71% disk.",
     "notRecommended": "A third VM. The node has 0 MB available.",
     "decisionNeeded": "Owner call between CT101 (real isolation, tight resources, requires retiring an untraced app) and the VM111 canary lane (free, proven, but co-located with production)."
+  },
+  "stagingWorkPackage2026_09_10": {
+    "_authority": "Bonex, 2026-09-09: bounded autonomous work package.",
+    "trackB_CT101": {
+      "state": "DONE",
+      "archiveGate": "sha256 3324f2b555a9cdbcd443dc38b6625033496450b3710cb5653715c84643f908b9 VERIFIED before any mutation; 984 entries; includes the one CT101-only file (route.ts.bak-prefabfix).",
+      "provenance": "Source recovered: /opt/migrapilot is apps/pilot-web, version-controlled at 2872c861. Deployed build older than HEAD (88 vs 107 ts/tsx). Only CT101-only file is an ad-hoc .bak of a file that IS in the repo. Retiring destroyed no unrecoverable source.",
+      "actions": "migrapilot.service stopped + disabled. ollama.service stopped + disabled (a loaded model would exhaust a 2 GB container). /opt/migrapilot PRESERVED at 123 MB, per instruction.",
+      "measured": "RAM after: 32 MB of 2048. Listening reduced to ssh and local postfix only. Disk unchanged 4.1/12 GB, 7.1 GB free."
+    },
+    "trackC_stagingDb": {
+      "state": "PARTIAL — structure done, schema BLOCKED",
+      "created": "db-core: database migrapilot_brain_stage, role migrapilot_brain_stage_app (LOGIN, NO PASSWORD SET).",
+      "naming": "Named within the hook's approved db-core scope, which permits migrapilot_brain* and denies other migrapilot* names. Also matches the existing convention (auth_migrateck_stage, migracms_phasea_stage).",
+      "leastPrivilege": "PUBLIC revoked on the staging database; stage role holds CONNECT + TEMPORARY, plus USAGE/CREATE on schema public. Final ACL: postgres=CTc/postgres | migrapilot_brain_stage_app=Tc/postgres.",
+      "isolationVerified": "🚨 MEASURED, NOT ASSUMED. Production migrapilot_brain already carries an explicit ACL (migrapilot_brain=CTc/migrapilot_brain) — PUBLIC has no CONNECT, so the staging role cannot reach production data. NO production mutation was needed or made.",
+      "blocked": "Schema 28 not applied. The Brain applies migrations programmatically at boot from a DSN, which requires the stage role to have a password."
+    },
+    "trackH_assistantSecret": {
+      "state": "DONE — classified, not rotated",
+      "classification": "APPARENTLY OBSOLETE",
+      "basis": "MIGRAPILOT_ASSISTANT_SECRET is read only by apps/pilot-web (lib/pilot/assistant-auth.ts, the /api/pilot/assistant bearer gate, and its verify/eval scripts) — the workload just retired. No /etc/migrapilot/*.env on VM111 production references it.",
+      "caveat": "NOT confirmed dead. An internal caller on vmbr10 could have used :3399; that endpoint is now down. Value never read or printed. NOT rotated — owner is away."
+    },
+    "trackA_chatTurn": "NOT STARTED. No work performed; the recorded state at 03f29f87 stands.",
+    "blocker": {
+      "what": "Setting a password for migrapilot_brain_stage_app.",
+      "why": "Both available routes cross a stated boundary: generating it through this session would print a secret into the transcript, and writing it on db-core falls outside the approved hook scope (which permits only `sudo -u postgres psql` and denies file writes).",
+      "consequence": "Blocks schema 28, and therefore the staging Brain, the staging runtime and any staging deployment.",
+      "ownerAction": "Set the password by a channel that does not route it through an agent transcript, then place the DSN in the staging Brain env file. Everything downstream is unblocked by that one step."
+    }
   }
 }
