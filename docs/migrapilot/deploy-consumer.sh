@@ -24,12 +24,26 @@
 # is inside the owner's bounded VM111 elevation (paths under /opt/migrapilot and
 # migrapilot-* units only).
 #
-#   usage:  docs/migrapilot/deploy-consumer.sh <release-name>
+#   usage:  docs/migrapilot/deploy-consumer.sh --target <production|staging> <release-name>
 #   e.g.    docs/migrapilot/deploy-consumer.sh identifier-09040504
 #
 set -euo pipefail
 
-REL="${1:?usage: deploy-consumer.sh <release-name>}"
+# ── the target is NAMED, never assumed. See deploy-targets.sh ──────────────
+TARGET=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) TARGET="${2:-}"; shift 2 ;;
+    --target=*) TARGET="${1#*=}"; shift ;;
+    *) break ;;
+  esac
+done
+
+REL="${1:?usage: deploy-consumer.sh --target <production|staging> <release-name>}"
+
+# shellcheck source=./deploy-targets.sh
+. "$(dirname "$0")/deploy-targets.sh"
+deploy_target "$TARGET" || exit 2
 # The release name is interpolated into a privileged recursive delete below, so
 # it is constrained here rather than trusted there. No slashes, no dots, no
 # emptiness: it must name one directory inside the releases/ directory.
@@ -38,8 +52,12 @@ case "$REL" in
 esac
 REPO="$(cd "$(dirname "$0")/.." && cd .. && pwd)"
 APP="$REPO/apps/migrapilot-consumer"
-HOST=migrapilot-app-core
-ROOT=/opt/migrapilot/consumer
+# Resolved from the named target — never a literal in this file again.
+HOST="$DEPLOY_HOST"
+ROOT="$DEPLOY_CONSUMER_ROOT"
+
+printf '\n== deploying to %s (%s), db authority %s\n' \
+  "$DEPLOY_TARGET_NAME" "$HOST" "$DEPLOY_DB_AUTHORITY"
 PORT=3097
 
 step() { printf '\n== %s\n' "$1"; }

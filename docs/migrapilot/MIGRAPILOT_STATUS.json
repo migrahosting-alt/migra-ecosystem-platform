@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — deployment policy revised: staging before acceptance",
+  "updatedBy": "Claude (Opus 5) — staging target decided; deploy scripts now require an explicit target",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2768,7 +2768,14 @@
       "the QA Gmail account only",
       "production chat-platform-rc-0908 untouched until acceptance passes",
       "the deployment must RECORD THE EXACT COMMIT AND BUILD IDENTITY before acceptance starts, so the evidence is tied to the artifact later considered for promotion"
-    ]
+    ],
+    "targetContract": {
+      "file": "docs/migrapilot/deploy-targets.sh + deploy-target.controls.sh",
+      "change": "deploy-brain.sh and deploy-consumer.sh now REQUIRE --target <production|staging>. There is deliberately no default: a default is exactly what \"VM111 unless otherwise stated\" was, and its failure mode is a production deployment nobody intended.",
+      "why": "Both scripts carried HOST=migrapilot-app-core as a literal, so `deploy-brain.sh rc-0909` read like a release name and WAS a production deployment. Identical-looking invocations differing only in which script someone remembered to edit is not survivable once staging exists.",
+      "proved": "9 runtime authorities differ between targets (host, both roots, both units, both env files, db authority, public host); no host literal remains in executable code; unnamed and unknown targets both refuse with exit 2; the fingerprint carries target, release, commit, short, branch and dirty BEFORE acceptance starts.",
+      "breakingChange": "Existing invocations without --target now FAIL. That is the point: they fail closed rather than deploying somewhere nobody named."
+    }
   },
   "stagingEnvironmentGap": {
     "_finding": "🚨 CHECKED, AND IT DOES NOT EXIST YET. There is no MigraPilot staging environment to deploy to.",
@@ -2778,6 +2785,21 @@
       "the VM111 runbook knows only VM111, VM102 and chat.migrateck.com"
     ],
     "consequence": "\"Deploy to staging\" is not a step the next session can simply run. Standing the environment up is its own piece of work — a host or isolated instance, its own database with migrations 27/28, its own secrets, its own Google OAuth callback registered against the existing read-only client, and an authenticated-only edge.",
-    "recommendation": "Decide the staging target BEFORE the wiring finishes, so the deploy is not blocked behind an unscoped infrastructure task at the moment the code is ready. This is an owner decision: a second VM, an isolated instance on VM111, or a different host."
+    "recommendation": "Decide the staging target BEFORE the wiring finishes, so the deploy is not blocked behind an unscoped infrastructure task at the moment the code is ready. This is an owner decision: a second VM, an isolated instance on VM111, or a different host.",
+    "decided": {
+      "_authority": "Bonex, 2026-09-09.",
+      "shape": "A DEDICATED migrapilot-staging-core instance. Not VM111, and not staging bolted onto production.",
+      "boundary": "SAME SOFTWARE ARTIFACT, DIFFERENT RUNTIME AUTHORITY. No \"staging mode\" and no behavioural exceptions — an environment full of exceptions proves nothing about the build you later promote. Differences are limited to environment, identity/secrets, database, hostname and controlled test data.",
+      "sizing": "Deliberately small. It is for controlled acceptance, not public load — enough to run the real Brain/Consumer/Auth/database path faithfully, not production concurrency. Do NOT provision another oversized general-purpose VM.",
+      "constraints": [
+        "separate Postgres, migrations 27/28 applied there FIRST",
+        "separate Brain + Consumer runtime, separate env/secrets file",
+        "authenticated-only access; staging-chat.migrateck.com",
+        "the Google OAuth client keeps its production callback and ADDS a staging one",
+        "QA Gmail account only; no send/draft scope",
+        "no production database or session reuse"
+      ],
+      "status": "TARGET CONTRACT LANDED IN CODE; the host itself is not provisioned yet."
+    }
   }
 }

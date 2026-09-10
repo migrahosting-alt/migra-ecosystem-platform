@@ -35,11 +35,37 @@
 #
 set -euo pipefail
 
-REL="${1:?usage: deploy-brain.sh <release-name>}"
+# ── the target is NAMED, never assumed ──────────────────────────────────────
+#
+# 🚨 THIS SCRIPT USED TO DEPLOY TO PRODUCTION AND NOT SAY SO.
+#
+# `HOST=migrapilot-app-core` sat as a literal below, so `deploy-brain.sh
+# rc-0909` read like a release name and was in fact a production deployment.
+# Survivable while production was the only environment; not survivable once
+# staging exists, because the two invocations would look identical.
+#
+# There is deliberately no default: a default is exactly what "VM111 unless
+# otherwise stated" already was, and the cost of an unnamed target is one
+# retyped word against a production deployment nobody intended.
+TARGET=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --target) TARGET="${2:-}"; shift 2 ;;
+    --target=*) TARGET="${1#*=}"; shift ;;
+    *) break ;;
+  esac
+done
+
+REL="${1:?usage: deploy-brain.sh --target <production|staging> <release-name>}"
 if [ "$#" -ne 1 ]; then
-  echo "refusing: exactly one argument (the release name) is accepted" >&2
+  echo "refusing: exactly one positional argument (the release name) is accepted" >&2
+  echo "usage: deploy-brain.sh --target <production|staging> <release-name>" >&2
   exit 1
 fi
+
+# shellcheck source=./deploy-targets.sh
+. "$(dirname "$0")/deploy-targets.sh"
+deploy_target "$TARGET" || exit 2
 # The release name is interpolated into a privileged recursive delete below, so
 # it is constrained here rather than trusted there.
 case "$REL" in
@@ -50,12 +76,18 @@ esac
 
 REPO="$(cd "$(dirname "$0")/.." && cd .. && pwd)"
 APP="$REPO/apps/brain-service"
-HOST=migrapilot-app-core
-ROOT=/opt/migrapilot/brain-service
-UNIT=migrapilot-brain.service
-BOOT_PORT=3987
-PROD_BIND=127.0.0.1
-PROD_PORT=3988
+# Resolved from the named target — never a literal in this file again.
+HOST="$DEPLOY_HOST"
+ROOT="$DEPLOY_BRAIN_ROOT"
+UNIT="$DEPLOY_BRAIN_UNIT"
+BOOT_PORT="$DEPLOY_BRAIN_BOOT_PORT"
+PROD_BIND="$DEPLOY_BRAIN_BIND"
+PROD_PORT="$DEPLOY_BRAIN_PORT"
+
+# 🚨 SAID OUT LOUD, EVERY TIME. A deployment that does not announce where it is
+# going is one somebody runs from the wrong terminal.
+printf '\n== deploying to %s (%s), db authority %s\n' \
+  "$DEPLOY_TARGET_NAME" "$HOST" "$DEPLOY_DB_AUTHORITY"
 
 step() { printf '\n== %s\n' "$1"; }
 fail() { printf '\nDEPLOY ABORTED: %s\n' "$1" >&2; exit 1; }
