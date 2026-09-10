@@ -7,11 +7,93 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-09_
+_Last updated: 2026-09-10_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Lane 2026-09-10 — normal chat reaches the mailbox, and the live test earned its keep
+
+`73e2ae5e` · `38b85f2c` · `19cbc440` · `5a3e8dfe` · `38bce47b`
+
+**Status: READY FOR OWNER PRODUCT ACCEPTANCE.** Local only. Nothing is deployed.
+
+Gates: brain-service **3174/3174**, shared-types **70/70**, consumer **1161/1161**, `tsc` clean in all three.
+
+### What a person can now do
+
+Type into normal chat — no email route, no tool call — and get an answer from their own mailbox:
+
+| Turn | What happened | Proof |
+| --- | --- | --- |
+| "search my email for the test file" | selected `migra.email`, searched the **real** Gmail mailbox, answered from what came back | `email.operation stage=search count=1` |
+| "who sent that email, and what is its subject line?" | **re-read** through the capability under the current identity | `stage=read_message` |
+| a *different principal* says "that email" in the same conversation | resolved nothing, got no content, and triggered **no mailbox search of their own** | exactly **one** mailbox operation for the whole exchange |
+| "where is the rate limiter in this repo?" | repository planning kept, mailbox untouched | no `email.operation` |
+
+That third row is the one worth reading twice: a failed cross-scope reference does **not** become an
+implicit authorization to search the asker's mailbox instead.
+
+### Four defects only the real mailbox could show
+
+Every one of them passed the entire suite first, because a fake provider matches whatever the fake
+decides to match.
+
+1. **The whole prompt was the query.** Real Gmail: `"test file"` → 1 result; *"search my inbox for the
+   message about the test file"* → **0**. A provider ANDs its terms. The search succeeds, the count is
+   zero, and "nothing was found" is indistinguishable from an empty mailbox.
+2. **A bare "it" was a backward reference**, so *"…and tell me who sent it"* refused to search and asked
+   the user to clarify what "it" meant. The pronoun points where the rest of the sentence points.
+3. **A comma hid a reference.** Matching required a space, `?` or `.` after the phrase, so *"who sent
+   that email, and what is its subject line?"* fell through to a search — and **still answered
+   correctly, from the previous turn's summary.** That is exactly the failure re-reading exists to
+   prevent: disconnect the mailbox in between and the same sentence appears, out of remembered prose,
+   with nothing checking whether the user may still see it.
+4. **The model wrote an internal id to the user** — "I've retrieved the message from `[email_1]`…".
+   This route has no verifier downstream to rewrite citations out of prose.
+
+Plus one silent state: a user whose mailbox is **not connected** received no context at all, so the
+model answered a mailbox question from its own knowledge. It is told now, in the engine's own words,
+never naming a provider — and only when the caller is identified, because an unidentified request must
+not learn whether a mailbox exists.
+
+### Architecture the slice forced
+
+- **One workbook reader.** The consumer already owned a qualified `.xlsx` reader; a second one in the
+  Brain would have been two opinions about what a sheet says. The *reader* is shared now
+  (`@migrapilot/shared-types/workbook`); the two *renderings* are not — the classifier tidies numbers
+  for arithmetic, evidence copies them literally, because `1.10` tidied to `1.1` is a value the
+  grounding gate can no longer find.
+- **`.xlsx` had been promised and never implemented.** The file policy has classified it "accepted and
+  analysed" since the three-state model landed, and `STRUCTURED_ONLY_EXTENSIONS` had **no consumer
+  anywhere in the service**. A spreadsheet passed every gate, arrived as bytes, and stopped.
+- **The verifier was generic over two kinds, not over kinds.** `groundInOther` built the email haystack
+  itself from `subject`/`from`/`sentAt`, so a third kind was ungroundable by construction. Adapters now
+  supply their own searchable surface; the *standard* stays shared.
+- **Citations were per paragraph.** One `path:line` anywhere in a block made every non-repo claim in it
+  unsupported. Now per sentence — and the full suite is unchanged, which is the evidence that
+  repository verdicts are intact.
+- **The `.gitignore` allowlist does not reach subdirectories.** `packages/shared-types/src/workbook/*`
+  was written, built and green while being uncommittable.
+
+### Known limits — read before promising anything
+
+- 🚨 **`/api/ai/chat` has no grounding gate.** It never had one; `verifyAnswer` lives in
+  `/api/ai/answer` and the agentic loop. Capability evidence reaches the model as context and the
+  answer is **not claim-verified in this route**. Adding one is a real slice, not a narrow insertion.
+- Conversation evidence is **in-memory**: a restart forgets what "that email" pointed at and the next
+  turn asks. Fails safe.
+- The query builder is a heuristic. One leftover word of phrasing costs every result.
+- The local 8B model occasionally refuses to relay mail content (1 in 5 identical requests).
+- A `conversationId` not shaped `conv_[a-z0-9]{6,}` makes the memory store mint a new conversation per
+  turn, so nothing carries forward. Pre-existing memory behaviour.
+
+Disconnect-between-turns was **not** re-tested live — it would need the owner's consent revoked and
+re-granted. It is covered by the earlier live qualification plus unit tests against the real registry
+and readiness path.
 
 ---
 

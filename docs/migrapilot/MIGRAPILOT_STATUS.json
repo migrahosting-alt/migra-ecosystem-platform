@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
-  "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — staging credential bootstrapped; schema 28 still pending",
+  "updated": "2026-09-10",
+  "updatedBy": "Claude (Opus 5) — Track A complete: normal chat reaches the mailbox, live-verified; READY FOR OWNER PRODUCT ACCEPTANCE",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "SUBSTRATE AND SELECTOR COMPLETE, PRODUCT PATH NOT WIRED. Normal chatTurn still cannot execute a capability, so owner product acceptance would fail exactly as it did before. NOT ready for acceptance. No RC, no deploy, connection alive.",
+    "status": "PRODUCT PATH COMPLETE AND LIVE-VERIFIED on local. Normal chat (/api/ai/chat) reaches the connected mailbox under the caller's identity, produces typed evidence, and re-reads rather than replays on a follow-up. AWAITING OWNER PRODUCT ACCEPTANCE. Not deployed anywhere.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2730,28 +2730,58 @@
       "gate": "brain 3114/3114, consumer 1173/1173, 0 fail, 0 skipped"
     },
     "nextSlice": {
-      "_authority": "Bonex handoff, 2026-09-09. Continue from 03f29f87.",
-      "goal": "Make normal chatTurn execute selected capabilities end to end.",
-      "flow": "chatTurn -> capability selection -> canonical executeToolCore -> result-to-EvidenceItem production -> TypedEvidenceLedger -> synthesis -> shared verifyAnswer -> persisted conversation result",
-      "doNotReopen": "transport, OAuth, file policy, attachment identity, verifier architecture, selection — unless the wiring exposes a concrete defect",
-      "constraints": [
-        "no second capability executor",
-        "no Email-specific execution branch in Chat",
-        "no repo preloading when mailbox intent alone is selected",
-        "mixed repo + capability requests deliberately plan both",
-        "server-derived ExecutionIdentity only",
-        "no browser/model principal, workspace, account or provider identity",
-        "no send/draft capability or scope",
-        "foreign evidence fails closed",
-        "unavailable capability remains distinguishable from unrequested capability",
-        "all final factual output goes through the typed verifier"
+      "afterOwnerAcceptance": [
+        "1. Owner product acceptance of normal-chat email on local.",
+        "2. Decide whether /api/ai/chat gets a grounding gate — the largest open question, and the reason a chat answer is currently unverified.",
+        "3. Then the deployment ladder: staging (CT101 + db-core), owner acceptance there, RC freeze, promote."
       ],
-      "case3": "\"What are the values in the XLSX attached to that email?\" — conversation reference -> prior Email evidence -> stable attachment ref -> canonical file pipeline -> extracted FileEvidence -> exact values -> shared verifier. NO raw Gmail attachment id may persist into conversation state; it is regenerated per read and names nothing later.",
-      "case9": "A response synthesised from Email + repo evidence must still have an unsupported claim removed. Mixed evidence cannot weaken verification.",
-      "case10": "\"that email\" resolves through PERSISTED CONVERSATION STATE — conversation turn -> evidenceId -> scoped canonical EmailEvidence — never a Gmail message id in browser state. Re-authorize and re-resolve before any new provider operation. This is the shared substrate for \"the spreadsheet attached to it\", \"summarize the thread\", \"compare it with this file\".",
-      "doneAtSelectionLayer": "cases 1, 2, 4, 5, 6, 7, 8 pass in capabilitySelection.test.ts",
-      "unfinished": "cases 3, 9, 10 — all need the wiring",
-      "afterGreen": "Deploy that exact commit to the controlled staging environment and run owner acceptance THERE, not on localhost. Record the deployed commit and build id before acceptance begins. Production untouched. See stagingEnvironmentGap — the environment does not exist yet."
+      "deferredInfrastructure": [
+        "schema 28 on the staging DB",
+        "staging Brain boot (proves DB authentication — still UNPROVEN)",
+        "staging runtime",
+        "DNS / OAuth staging callback"
+      ]
+    },
+    "trackA_2026_09_10": {
+      "_authority": "Supersedes nextSlice for the chat product path. Read this before re-deriving any of it.",
+      "gates": "brain-service 3174/3174, shared-types 70/70, consumer 1161/1161, tsc clean in all three.",
+      "commits": [
+        "73e2ae5e workbook reader moved to @migrapilot/shared-types/workbook",
+        "38b85f2c FileEvidence + verifier generalised past email",
+        "19cbc440 attachment continuation end to end",
+        "5a3e8dfe capability nouns on the real descriptor",
+        "38bce47b chat insertion + live-found defects"
+      ],
+      "whatWorksLive": [
+        "A normal chat turn with x-owner-scope/x-workspace-scope selects migra.email, searches the REAL Gmail mailbox, and answers from what it returned. Telemetry: email.operation stage=search count=1.",
+        "A follow-up saying \"that email\" RE-READS through the capability (stage=read_message), it does not replay stored text.",
+        "A different principal saying \"that email\" in the SAME conversation resolves NOTHING, gets no content, and — verified in telemetry — triggers NO mailbox search on their behalf. Exactly one mailbox operation for the whole exchange.",
+        "A repository question keeps repository planning and touches no mailbox."
+      ],
+      "liveFoundDefects": [
+        "🚨 The whole prompt was the search query. Real Gmail: \"test file\" -> 1 result; \"search my inbox for the message about the test file\" -> 0. A provider ANDs its terms. Invisible in unit tests because a fake matches whatever it decides to.",
+        "🚨 A bare \"it\" was a backward reference, so \"...and tell me who sent it\" refused to search and asked for clarification.",
+        "🚨 Reference matching required space/?/. after the phrase, so a COMMA hid it. The answer still came out right — from the previous turn's SUMMARY. That is the failure re-reading exists to prevent.",
+        "🚨 Evidence ids were prefixed [email_1] and the model wrote one to the user. /api/ai/chat has no verifier downstream to rewrite citations out of prose.",
+        "🚨 An unconnected mailbox produced NO context, so the model answered a mailbox question from its own knowledge. Now stated in the engine's own words, identified callers only."
+      ],
+      "architecturalFindings": [
+        "groundInOther built the email haystack itself (subject/from/sentAt), so any third evidence kind was ungroundable by construction — candidates offered then dropped, every true sentence struck out. Adapter now supplies haystack(); the standard stays shared.",
+        "Claim citations were collected per BLOCK, so one path:line anywhere in a paragraph made every non-repo claim in it unsupported. Now per sentence. Full suite unchanged, which is the evidence that repo verdicts are intact.",
+        "The .gitignore allowlist does not reach subdirectories: packages/shared-types/src/workbook/* was written, built and green while being uncommittable.",
+        "The consumer already owned a qualified .xlsx reader. A second one in the Brain would have been two opinions about what a sheet says; the reader is shared now, the two renderings are not (classifier tidies numbers, evidence copies them literally)."
+      ],
+      "knownLimits": [
+        "🚨 /api/ai/chat HAS NO GROUNDING GATE. It never had one — verifyAnswer lives in /api/ai/answer and the agentic loop. Capability evidence reaches the model as context, and the answer is NOT claim-verified in this route. Adding one is a real slice, not a narrow insertion.",
+        "Conversation evidence is IN-MEMORY. A brain restart forgets what \"that email\" pointed at and the next turn asks. Fails safe; a durable store needs its own retention rules before it holds anything about a user's mail.",
+        "The search query builder is a heuristic (drop asking-words and the capability's own nouns). One leftover word of phrasing costs every result, and the failure looks exactly like an empty mailbox.",
+        "The local 8B model occasionally refuses to relay mail content (1 refusal in 5 identical requests). Model behaviour, not wiring.",
+        "A conversationId not shaped conv_[a-z0-9]{6,} makes the memory store mint a NEW conversation per turn, so capability evidence never carries forward. Pre-existing memory behaviour; capability evidence follows the same identity."
+      ],
+      "notDoneDeliberately": [
+        "Disconnect-between-turns was NOT re-tested live: it would require revoking and re-granting the owner's consent. Covered by the earlier live qualification plus unit tests 3d and 10c against the real registry and readiness path.",
+        "No deployment. No staging. No production."
+      ]
     }
   },
   "deploymentPolicy": {
