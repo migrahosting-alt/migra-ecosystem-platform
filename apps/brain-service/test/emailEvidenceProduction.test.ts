@@ -110,7 +110,7 @@ test('a THREAD yields one item per message, each with its own completeness', () 
  * 🚨 Attachments carry the stable ref, never the provider id
  * ------------------------------------------------------------------ */
 
-test('🚨 an attachment is identified by OUR ref, and is incomplete until extracted', () => {
+test('🚨 an attachment listing is OUR ref plus a filename — never contents', () => {
   const listed = evidenceFromAttachment({
     providerMessageId: 'pm-1', providerThreadId: 'pt-1',
     attachmentRef: 'ref-abc123', filename: 'invoice.xlsx',
@@ -123,14 +123,14 @@ test('🚨 an attachment is identified by OUR ref, and is incomplete until extra
   assert.equal(listed.complete, false);
   assert.equal(listed.text, 'invoice.xlsx');
 
-  const extracted = evidenceFromAttachment({
-    providerMessageId: 'pm-1', providerThreadId: 'pt-1',
-    attachmentRef: 'ref-abc123', filename: 'invoice.xlsx',
-    subject: 'Invoice 2026-09', from: 'billing@hetzner.com', sentAt: '2026-09-01T10:00:00Z',
-    extractedText: 'Total 48273.55 | Tax 7319.42 | Net 91504.08',
-  }, ALICE, ids());
-  assert.equal(extracted.complete, true);
-  assert.match(extracted.text, /91504\.08/);
+  /*
+   * 🚨 AND IT NEVER BECOMES COMPLETE HERE. Extracted contents used to be an
+   * optional field on this same item, which made one evidence type mean both
+   * "a message carries a file called this" and "here is what that file says".
+   * The second is a FILE, judged by the file adapter — see fileEvidenceFrom —
+   * so the only thing this lane can ever be is the pointer.
+   */
+  assert.equal('extractedText' in listed, false);
 });
 
 /* ------------------------------------------------------------------ *

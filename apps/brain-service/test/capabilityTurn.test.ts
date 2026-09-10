@@ -52,7 +52,7 @@ const message = (id: string) => ({
 });
 
 /** A registry whose email capability records every call it receives. */
-function registryFor(opts: { connectedFor: string[]; calls: Array<{ op: string; principal?: string }> }) {
+function registryFor(opts: { connectedFor: string[]; calls: Array<{ op: string; principal?: string; keywords?: string }> }) {
   class R extends CapabilityRegistry {
     override runnable(id: string) {
       const base = super.runnable(id);
@@ -60,8 +60,9 @@ function registryFor(opts: { connectedFor: string[]; calls: Array<{ op: string; 
       return {
         ...base,
         handler: async (input: unknown, ctx?: { principal?: { owner: string } }) => {
-          const op = String((input as { op?: string }).op ?? 'search');
-          opts.calls.push({ op, principal: ctx?.principal?.owner });
+          const req = input as { op?: string; keywords?: string };
+          const op = String(req.op ?? 'search');
+          opts.calls.push({ op, principal: ctx?.principal?.owner, keywords: req.keywords });
           if (op === 'readMessage') return { ok: true, message: message('pm-1') };
           if (op === 'readThread') {
             return { ok: true, thread: { providerThreadId: 't-pm-1', subject: 'Invoice', messages: [message('pm-1')] } };
@@ -81,7 +82,7 @@ function registryFor(opts: { connectedFor: string[]; calls: Array<{ op: string; 
   };
 }
 
-const deps = (o: { connectedFor: string[]; calls: Array<{ op: string; principal?: string }>; store?: MemoryConversationEvidence }) => ({
+const deps = (o: { connectedFor: string[]; calls: Array<{ op: string; principal?: string; keywords?: string }>; store?: MemoryConversationEvidence }) => ({
   ...registryFor(o),
   capabilities: [MAIL],
   evidence: o.store ?? new MemoryConversationEvidence(),
@@ -194,9 +195,43 @@ test('🚨 10d. another principal in the same conversation resolves NOTHING', as
   }, d);
 
   assert.equal(bob.reference, null, 'another principal resolved someone else\'s antecedent');
-  // Bob's turn falls back to a fresh search of HIS mailbox, never Alice's.
-  assert.equal(calls.at(-1)!.principal, BOB.owner);
-  assert.equal(calls.at(-1)!.op, 'search');
+
+  /*
+   * 🚨 AND IT DOES NOT BECOME A SEARCH.
+   *
+   * "Could not reuse prior evidence" and "you asked me to search your mailbox"
+   * are different answers. Letting the first fall through to the second means a
+   * failed cross-scope resolution quietly authorises reading a DIFFERENT
+   * mailbox — which is not what Bob asked for and not what Alice's turn implied.
+   */
+  assert.equal(calls.length, 1, 'a failed cross-scope reference triggered a mailbox search');
+  assert.equal(calls[0]!.principal, ALICE.owner, 'only Alice\'s original turn should have executed');
+  assert.deepEqual(bob.executed, []);
+  assert.equal(bob.unresolvedReference?.phrase, 'that email');
+  /*
+   * 🚨 AND HE IS TOLD NOTHING ABOUT WHY. The store scopes its reads, so this
+   * layer never sees Alice's turns at all — reporting "belongs to someone else"
+   * would tell Bob that Alice has evidence in a conversation they share. Not
+   * knowing is the correct amount to know.
+   */
+  assert.deepEqual(Object.keys(bob.unresolvedReference!), ['phrase']);
+});
+
+test('🚨 a backward reference with NO history at all also refuses to search', () => {
+  // Same rule, different cause: the user believes we are already looking at
+  // something. Searching would answer a question they did not ask.
+  return (async () => {
+    const calls: Array<{ op: string; principal?: string }> = [];
+    const d = deps({ connectedFor: [ALICE.owner], calls });
+    const result = await runCapabilityTurn({
+      prompt: 'summarize that email', identity: executionIdentityFrom(ALICE),
+      conversationId: 'fresh', turnId: 't1', requestId: 'r1',
+    }, d);
+
+    assert.equal(calls.length, 0, 'an unresolvable reference searched the mailbox');
+    assert.equal(result.unresolvedReference?.phrase, 'that email');
+    assert.equal(result.ledger.isEmpty(), true);
+  })();
 });
 
 /* ------------------------------------------------------------------ *
@@ -240,4 +275,104 @@ test('🚨 the orchestrator names no capability', async () => {
   for (const named of ['migra.email', 'gmail', 'Gmail']) {
     assert.ok(!code.includes(named), `the orchestrator hardcodes ${named}`);
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 The query is the request, not the sentence
+ * ------------------------------------------------------------------ */
+
+test('🚨 the search terms drop the ASKING and keep the SUBJECT', async () => {
+  /*
+   * 🚨 REGRESSION FROM A LIVE FAILURE. The first version sent `prompt` straight
+   * through. Against the real mailbox `"test file"` returned the message and
+   * "search my inbox for the message about the test file" returned nothing —
+   * a provider ANDs its terms, so every word of the asking became a word the
+   * message had to contain.
+   *
+   * It is invisible from inside: the search succeeds, the count is zero, and
+   * "nothing was found" reads exactly like an empty mailbox.
+   */
+  const calls: Array<{ op: string; principal?: string; keywords?: string }> = [];
+  const d = deps({ connectedFor: [ALICE.owner], calls });
+
+  await runCapabilityTurn({
+    prompt: 'search my inbox for the message about the test file',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-1', requestId: 'r1',
+  }, d);
+
+  assert.equal(calls[0]!.keywords, 'test file',
+    'the words of the asking reached the provider as words the mail had to contain');
+});
+
+test('a prompt that is ONLY asking still searches for something', async () => {
+  // "show me my email" has no subject left after the verbs and the owned
+  // nouns are removed. Sending an empty query would list the whole mailbox as
+  // though it had been searched for; the prompt goes through unchanged instead.
+  const calls: Array<{ op: string; principal?: string; keywords?: string }> = [];
+  const d = deps({ connectedFor: [ALICE.owner], calls });
+
+  await runCapabilityTurn({
+    prompt: 'show me my email',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-1', requestId: 'r1',
+  }, d);
+
+  assert.equal(calls[0]!.keywords, 'show me my email');
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 A bare pronoun points where the sentence points
+ * ------------------------------------------------------------------ */
+
+test('🚨 "tell me who sent it" on a FRESH request searches — it does not refuse', async () => {
+  /*
+   * 🚨 REGRESSION FROM A LIVE FAILURE. `it` was a backward reference outright,
+   * so this exact question came back as "please clarify what you mean by it" —
+   * for an ordinary request that names its own subject. The trailing pronoun
+   * points at what the turn is ABOUT TO FIND.
+   */
+  const calls: Array<{ op: string; principal?: string; keywords?: string }> = [];
+  const d = deps({ connectedFor: [ALICE.owner], calls });
+
+  const result = await runCapabilityTurn({
+    prompt: 'search my inbox for the message about the test file and tell me who sent it',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-1', requestId: 'r1',
+  }, d);
+
+  assert.equal(result.unresolvedReference, null, 'a fresh request was read as pointing backward');
+  assert.deepEqual(calls.map((c) => c.op), ['search']);
+  assert.equal(calls[0]!.keywords, 'test file');
+});
+
+test('🚨 "summarize it" with NOTHING else in the sentence still points backward', async () => {
+  // The pronoun is the only subject there is, so it must mean the last turn's —
+  // and with nothing to point at, the turn asks rather than searching.
+  const calls: Array<{ op: string; principal?: string; keywords?: string }> = [];
+  const d = deps({ connectedFor: [ALICE.owner], calls });
+
+  const result = await runCapabilityTurn({
+    prompt: 'summarize it',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c-empty', turnId: 'turn-1', requestId: 'r1',
+  }, d);
+
+  assert.equal(result.unresolvedReference?.phrase, 'it');
+  assert.deepEqual(calls, [], 'a failed reference became a mailbox search');
+});
+
+test('a subject-only prompt is not mistaken for a prompt with no subject', async () => {
+  // "test file" filters down to exactly itself. Deciding "has a subject" by
+  // comparing the filtered query to the prompt would call this one subjectless.
+  const calls: Array<{ op: string; principal?: string; keywords?: string }> = [];
+  const d = deps({ connectedFor: [ALICE.owner], calls });
+
+  await runCapabilityTurn({
+    prompt: 'search email for test file',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-1', requestId: 'r1',
+  }, d);
+
+  assert.equal(calls[0]!.keywords, 'test file');
 });

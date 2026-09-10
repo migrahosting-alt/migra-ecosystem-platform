@@ -101,16 +101,22 @@ export function evidenceFromThread(
 }
 
 /**
- * An attachment that was fetched and handed to the canonical file pipeline.
+ * An attachment a message was found to CARRY.
+ *
+ * 🚨 THIS IS A FACT ABOUT THE MESSAGE, NOT ABOUT THE FILE. It is what a listing
+ * knows: a name, and that it is attached to this message. So it is email
+ * evidence, and it is deliberately INCOMPLETE — a filename is not contents, and
+ * an answer resting on one must never read as though the file had been opened.
+ *
+ * 🚨 THE EXTRACTED TEXT USED TO LIVE HERE and no longer does. Once the bytes go
+ * through the canonical file pipeline they are a FILE, and the same spreadsheet
+ * uploaded from a desktop has to be judged by the same rules — see
+ * `fileEvidenceFrom`. What remains here is the pointer that lets a later turn
+ * say "the spreadsheet" and resolve it.
  *
  * 🚨 THE STABLE REF IS THE IDENTITY. The provider's own attachment id is
  * regenerated on every read, so recording it as durable identity would produce
  * provenance that names nothing an hour later.
- *
- * The text is what the pipeline extracted, when it extracted anything. Absent
- * extraction the item is deliberately INCOMPLETE and carries only what the
- * listing knew — a filename is not the contents, and an answer resting on one
- * must not read as though the file had been opened.
  */
 export function evidenceFromAttachment(
   input: {
@@ -121,13 +127,10 @@ export function evidenceFromAttachment(
     subject: string;
     from: string;
     sentAt: string;
-    /** Extracted text, when the canonical pipeline produced any. */
-    extractedText?: string;
   },
   scope: EvidenceScope,
   ids: EvidenceIdSource,
 ): EmailEvidence {
-  const extracted = typeof input.extractedText === 'string' && input.extractedText.length > 0;
   return emailEvidence({
     id: ids.nextId('email'),
     scope,
@@ -137,8 +140,8 @@ export function evidenceFromAttachment(
     subject: input.subject,
     from: input.from,
     sentAt: input.sentAt,
-    text: extracted ? input.extractedText! : input.filename,
-    complete: extracted,
+    text: input.filename,
+    complete: false,
   });
 }
 

@@ -32,6 +32,9 @@ const mail = (id: string, over: Record<string, unknown> = {}) => emailEvidence({
 
 const record = (items: ReturnType<typeof mail>[], scope = ALICE, turn = 't1') => ({
   conversationId: 'c1', turnId: turn, scope, items,
+  // Which capability retrieved each item. A later turn re-invokes THAT one, so
+  // an unattributed item is not a candidate at all.
+  producedBy: Object.fromEntries(items.map((i) => [i.id, 'migra.email'])),
 });
 
 /* ------------------------------------------------------------------ *
@@ -93,6 +96,22 @@ test('🚨 10b. the NEWEST evidence wins — "that email" means the one just sho
     scope: ALICE,
   });
   assert.equal(ref!.item.id, 'email_2', 'an older message was resolved as "that email"');
+});
+
+test('🚨 evidence with NO recorded producer is not a candidate at all', () => {
+  /*
+   * 🚨 THERE IS NO DEFAULT CAPABILITY. Resolving a reference means re-invoking
+   * whatever retrieved it, so an item with no recorded producer offers only
+   * two ways forward and both are wrong: guess a capability, or serve the
+   * stored text back — which is a pointer becoming a permission.
+   *
+   * A record written before attribution existed lands here, and refusing to
+   * resolve it is the safe half of that migration.
+   */
+  const orphaned = { ...record([mail('email_1')]), producedBy: {} };
+  const ref = resolveReference({ prompt: 'summarize that email', history: [orphaned], scope: ALICE });
+
+  assert.equal(ref, null, 'a reference resolved against evidence with no known producer');
 });
 
 test('🚨 10c. with nothing retrieved, the reference does NOT resolve', () => {
@@ -168,4 +187,37 @@ test('🚨 no provider id is required from the caller to resolve a reference', a
   assert.ok(!/providerMessageId\s*:\s*string/.test(code.split('export function resolveReference')[1] ?? ''),
     'resolveReference takes a provider id from its caller');
   assert.match(source, /history: readonly ConversationEvidenceRecord\[\]/);
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 Punctuation must not hide a reference
+ * ------------------------------------------------------------------ */
+
+test('🚨 a reference is found whatever punctuation follows it', () => {
+  /*
+   * 🚨 REGRESSION FROM A LIVE FAILURE. Matching required a space, a `?` or a
+   * `.` after the phrase. "Who sent that email, and what is its subject line?"
+   * has a COMMA — so the reference did not resolve and the turn searched
+   * instead.
+   *
+   * The answer still came out correct, which is what makes it dangerous: the
+   * model wrote it from the previous turn's summary. Disconnect the mailbox in
+   * between and the same sentence appears, produced from remembered prose with
+   * nothing checking whether the user may still see it.
+   */
+  for (const prompt of [
+    'who sent that email, and what is its subject line?',
+    'summarize that email; then tell me the total',
+    'about that email — who sent it?',
+    'what does "that email" say?',
+    'summarize that email!',
+    'that email\'s sender?',
+  ]) {
+    assert.equal(referencePhrase(prompt), 'that email', `not recognised: ${prompt}`);
+  }
+});
+
+test('a word that merely CONTAINS a phrase is not a reference', () => {
+  // Normalising punctuation must not turn matching into substring matching.
+  assert.equal(referencePhrase('rethatemail the archive'), null);
 });

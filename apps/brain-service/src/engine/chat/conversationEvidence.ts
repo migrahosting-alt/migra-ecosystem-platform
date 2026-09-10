@@ -30,6 +30,19 @@ export interface ConversationEvidenceRecord {
   turnId: string;
   scope: EvidenceScope;
   items: readonly EvidenceItem[];
+  /**
+   * Evidence id → the capability that produced it.
+   *
+   * 🚨 HERE, NOT ON THE EVIDENCE. Which capability ran is orchestration, and
+   * putting it on the item would push a chat concern into a type the verifier
+   * and the repository planner both share.
+   *
+   * It exists because resolving "that email" has to re-invoke the capability
+   * that produced it, and NOTHING ELSE in the record says which one that was.
+   * Guessing from the evidence kind works only while each kind has exactly one
+   * producer — an assumption that dies the first time Drive also yields files.
+   */
+  producedBy: Readonly<Record<string, string>>;
 }
 
 export interface ConversationEvidenceStore {
@@ -68,6 +81,11 @@ export type ReferenceKind = 'email' | 'attachment' | 'thread';
 export interface ResolvedReference {
   kind: ReferenceKind;
   /**
+   * The capability that retrieved it, which is the one a continuation
+   * re-invokes. Read from the record, never inferred from the evidence kind.
+   */
+  capabilityId: string;
+  /**
    * The canonical evidence the reference points at.
    *
    * Typed as email evidence because that is what backward references currently
@@ -89,17 +107,64 @@ const BACKWARD = [
   'that thread', 'this thread', 'the thread',
   'that attachment', 'the attachment', 'the spreadsheet', 'that spreadsheet',
   'the xlsx', 'the pdf', 'the file attached', 'attached to it', 'attached to that',
-  'it', 'its',
 ];
 
-/** Which phrase, if any, makes this prompt a backward reference. */
-export function referencePhrase(prompt: string): string | null {
-  const lower = ` ${prompt.toLowerCase()} `;
+/**
+ * Pronouns that MIGHT point backward, and might just as easily point forward.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 SEPARATED FROM THE LIST ABOVE AFTER A LIVE FAILURE
+ *
+ * `it` used to sit in BACKWARD. Then "search my inbox for the message about the
+ * test file and tell me who sent it" arrived — and the turn refused to search,
+ * because it read the trailing "it" as pointing at a previous turn and a failed
+ * reference must never become a licence to go looking. The user asked a
+ * perfectly ordinary question and was told to clarify what "it" meant.
+ *
+ * The difference is not in the pronoun, it is in the rest of the sentence. "Who
+ * sent it" AFTER a search points backward; the same words attached to a fresh
+ * request point at what that request is about to find. So a bare pronoun is a
+ * reference only when the prompt names nothing else to look for — which the
+ * caller knows and this module does not, because it depends on which words the
+ * registered capabilities own.
+ */
+const WEAK = ['it', 'its'];
+
+export interface ReferenceOptions {
+  /**
+   * True when the prompt names a subject of its own.
+   *
+   * The caller works this out from the capabilities' declared vocabulary, so a
+   * bare pronoun stops being a backward reference exactly when there is
+   * something else for the turn to go and find.
+   */
+  hasFreshSubject?: boolean;
+}
+
+/**
+ * Which phrase, if any, makes this prompt a backward reference.
+ *
+ * 🚨 PUNCTUATION IS NORMALISED, NOT ENUMERATED — FOUND LIVE.
+ *
+ * This used to look for the phrase followed by a space, a `?` or a `.`. Then
+ * "who sent that email, and what is its subject line?" arrived: the comma after
+ * "that email" matched none of the three, the reference did not resolve, and
+ * the turn fell through to a fresh search that found nothing.
+ *
+ * The answer still came out right, which is the alarming part — the model
+ * wrote it from the conversation summary of the previous turn. That is exactly
+ * what re-reading exists to prevent: had the mailbox been disconnected in
+ * between, the same sentence would have been produced from remembered prose,
+ * with nothing checking whether the user could still see it.
+ *
+ * So every non-word character becomes a separator and the match is on words.
+ */
+export function referencePhrase(prompt: string, opts: ReferenceOptions = {}): string | null {
+  const normalized = ` ${prompt.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const candidates = opts.hasFreshSubject ? BACKWARD : [...BACKWARD, ...WEAK];
   // Longest first: "attached to it" must win over the bare "it" inside it.
-  for (const phrase of [...BACKWARD].sort((a, b) => b.length - a.length)) {
-    if (lower.includes(` ${phrase} `) || lower.includes(` ${phrase}?`) || lower.includes(` ${phrase}.`)) {
-      return phrase;
-    }
+  for (const phrase of [...candidates].sort((a, b) => b.length - a.length)) {
+    if (normalized.includes(` ${phrase} `)) return phrase;
   }
   return null;
 }
@@ -126,20 +191,31 @@ export function resolveReference(input: {
   prompt: string;
   history: readonly ConversationEvidenceRecord[];
   scope: EvidenceScope;
+  hasFreshSubject?: boolean;
 }): ResolvedReference | null {
-  const phrase = referencePhrase(input.prompt);
+  const phrase = referencePhrase(input.prompt, { hasFreshSubject: input.hasFreshSubject });
   if (!phrase) return null;
 
   const kind = referenceKind(input.prompt);
 
   // Newest turn first, and within a turn the last item first.
-  const candidates: EvidenceItem[] = [];
+  const candidates: Array<{ item: EvidenceItem; capabilityId: string }> = [];
   for (const record of [...input.history].reverse()) {
     if (!sameScope(record.scope, input.scope)) continue; // belt and braces
-    for (const item of [...record.items].reverse()) candidates.push(item);
+    for (const item of [...record.items].reverse()) {
+      const capabilityId = record.producedBy[item.id];
+      /*
+       * 🚨 UNATTRIBUTED EVIDENCE IS NOT A CANDIDATE. Without a producer there
+       * is nothing to re-invoke, and the alternatives are both worse than
+       * skipping it: guess a capability, or serve the stored text back — which
+       * is the pointer becoming a permission.
+       */
+      if (!capabilityId) continue;
+      candidates.push({ item, capabilityId });
+    }
   }
 
-  for (const item of candidates) {
+  for (const { item, capabilityId } of candidates) {
     if (item.kind !== 'email') continue;
     const isAttachment = Boolean(item.locator.attachmentRef);
     /*
@@ -147,8 +223,8 @@ export function resolveReference(input: {
      * spreadsheet attached to that email" points at an attachment we may not
      * have fetched yet, and the message is what lets us go and find it.
      */
-    if (kind === 'attachment') return { kind, item, phrase };
-    if (!isAttachment) return { kind, item, phrase };
+    if (kind === 'attachment') return { kind, capabilityId, item, phrase };
+    if (!isAttachment) return { kind, capabilityId, item, phrase };
   }
   return null;
 }
