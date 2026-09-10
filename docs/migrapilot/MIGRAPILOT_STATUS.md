@@ -21,7 +21,58 @@ _Last updated: 2026-09-10_
 
 **Status: READY FOR OWNER PRODUCT ACCEPTANCE.** Local only. Nothing is deployed.
 
-Gates: brain-service **3174/3174**, shared-types **70/70**, consumer **1161/1161**, `tsc` clean in all three.
+Gates: brain-service **3198/3198**, shared-types **70/70**, consumer **1161/1161**, `tsc` clean in all three.
+
+### The grounding gate — `2119c71f`, `7e60fd33`, `9fc42792`
+
+`/api/ai/answer` and the autonomous loop have verified their claims for a long time. `/api/ai/chat`
+never had; it predates the gate, and nothing noticed while it had no retrieved evidence of its own to
+be wrong about. The moment a mailbox became reachable from normal chat, the surface people actually
+type into was the one surface with no gate on it.
+
+`capability evidence → TypedEvidenceLedger (+ repo chunks) → model → completed answer → the SHARED
+verifier → emit`. Decided **once**, above both answer paths — streaming and buffered are separate code
+here, so a check wired into one of them is a check with a documented bypass.
+
+- **A gated turn buffers.** A token on screen cannot be un-said, so nothing is emitted until the answer
+  is complete and checked, then exactly one frame. Live: **1** token frame gated, **406** ungated. The
+  client is told `stage: verifying` in between.
+- **Repo-only chat is untouched.** It has never verified; switching that on in the same change would
+  make any regression unattributable.
+- **Fails closed.** A verifier exception returns a refusal, never the raw model text.
+- **What you see is what is stored.** Those diverging is how an unverified claim becomes next turn's
+  context.
+- **No second verifier.** `aiRoutes` may not import `claimVerifier` at all, and a test asserts it.
+- **Internal evidence ids never reach a user** — both the ids a run issued and the id *shape*, because
+  the leak to guard against is a model inventing `[email_7]`. Stripped, never translated: translating a
+  label would *manufacture* a citation to evidence that was never involved.
+
+### Three more defects the real mailbox found
+
+1. **A true description was deleted.** "…sent by X, and the subject line is Y" failed the every-term
+   rule because `email`, `sent`, `subject` and `line` are not *inside* the message. A repository claim
+   quotes identifiers that really are in the code; a message claim mostly *describes* a message. That
+   vocabulary is now part of what a non-repo source can be quoted on — per kind, and it costs no
+   discrimination, because the **value** still has to match.
+2. **An exact answer carried a false caveat.** Answering from the *complete* spreadsheet, the reply said
+   "based on message previews" — the attachment *listing* is deliberately incomplete evidence and was
+   still in the ledger. Every figure was right and the disclosure told the reader to discount them.
+   Partiality now follows the evidence ids that actually sourced surviving claims. *A false caveat is a
+   false statement, in the direction that looks careful.*
+3. **"The spreadsheet" beside a PDF refused to choose.** Right for `Q3-budget.xlsx` beside
+   `Q3-budget-final.xlsx`; wrong here — it was declining to use a fact the provider had already
+   reported. A named file type is matched against the file's *own* declared type. Two files of the same
+   named type still ask.
+
+### The full chain, live through normal chat
+
+| Ask | What ran | Result |
+| --- | --- | --- |
+| "search my email for the test file" | `stage=search` | grounded answer, partiality disclosed |
+| "who sent that email, and what is its subject line?" | `stage=read_message` | *"sent by migrateck@gmail.com, and the subject line is «test file»"* |
+| "what values does the spreadsheet attached to that email contain?" | `attachment_list` (2) → `attachment_read` (1) | **48273.55 / 7319.42 / 91504.08** — the fixture's exact values |
+| another principal says "that email" | — | no content, and **zero** mailbox operations of their own |
+
 
 ### What a person can now do
 
@@ -81,9 +132,9 @@ not learn whether a mailbox exists.
 
 ### Known limits — read before promising anything
 
-- 🚨 **`/api/ai/chat` has no grounding gate.** It never had one; `verifyAnswer` lives in
-  `/api/ai/answer` and the agentic loop. Capability evidence reaches the model as context and the
-  answer is **not claim-verified in this route**. Adding one is a real slice, not a narrow insertion.
+- **A search returns previews**, so a turn answering straight from search results has most descriptive
+  prose removed as unsupported — truthful, but thin. Reading the single result when a search returns
+  exactly one message would fix it, and is a **product decision**, not done.
 - Conversation evidence is **in-memory**: a restart forgets what "that email" pointed at and the next
   turn asks. Fails safe.
 - The query builder is a heuristic. One leftover word of phrasing costs every result.

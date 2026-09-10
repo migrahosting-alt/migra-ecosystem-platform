@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-10",
-  "updatedBy": "Claude (Opus 5) — Track A complete: normal chat reaches the mailbox, live-verified; READY FOR OWNER PRODUCT ACCEPTANCE",
+  "updatedBy": "Claude (Opus 5) — /api/ai/chat grounded on both answer paths; READY FOR OWNER PRODUCT ACCEPTANCE",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "PRODUCT PATH COMPLETE AND LIVE-VERIFIED on local. Normal chat (/api/ai/chat) reaches the connected mailbox under the caller's identity, produces typed evidence, and re-reads rather than replays on a follow-up. AWAITING OWNER PRODUCT ACCEPTANCE. Not deployed anywhere.",
+    "status": "PRODUCT PATH COMPLETE, GROUNDED AND LIVE-VERIFIED on local. Normal chat reaches the connected mailbox, re-reads on follow-up, opens the right attachment, and every answer built on that evidence passes the SHARED claim verifier on both the buffered and streaming paths. READY FOR OWNER PRODUCT ACCEPTANCE. Not deployed anywhere.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2744,19 +2744,24 @@
     },
     "trackA_2026_09_10": {
       "_authority": "Supersedes nextSlice for the chat product path. Read this before re-deriving any of it.",
-      "gates": "brain-service 3174/3174, shared-types 70/70, consumer 1161/1161, tsc clean in all three.",
+      "gates": "brain-service 3198/3198, shared-types 70/70, consumer 1161/1161, tsc clean in all three.",
       "commits": [
         "73e2ae5e workbook reader moved to @migrapilot/shared-types/workbook",
         "38b85f2c FileEvidence + verifier generalised past email",
         "19cbc440 attachment continuation end to end",
         "5a3e8dfe capability nouns on the real descriptor",
-        "38bce47b chat insertion + live-found defects"
+        "38bce47b chat insertion + live-found defects",
+        "2119c71f grounding gate for /api/ai/chat, streaming buffered behind it",
+        "7e60fd33 two verifier defects a real mailbox exposed",
+        "9fc42792 attachment chosen by its own declared type"
       ],
       "whatWorksLive": [
-        "A normal chat turn with x-owner-scope/x-workspace-scope selects migra.email, searches the REAL Gmail mailbox, and answers from what it returned. Telemetry: email.operation stage=search count=1.",
-        "A follow-up saying \"that email\" RE-READS through the capability (stage=read_message), it does not replay stored text.",
-        "A different principal saying \"that email\" in the SAME conversation resolves NOTHING, gets no content, and — verified in telemetry — triggers NO mailbox search on their behalf. Exactly one mailbox operation for the whole exchange.",
-        "A repository question keeps repository planning and touches no mailbox."
+        "search my email for X -> real Gmail search, grounded answer (email.operation stage=search).",
+        "\"who sent that email, and what is its subject line?\" -> RE-READ (stage=read_message), correct answer through the gate.",
+        "\"what values does the spreadsheet attached to that email contain?\" -> attachment_list (2) -> attachment_read (1, chosen by declared type) -> the fixture's exact values 48273.55 / 7319.42 / 91504.08.",
+        "Another principal saying \"that email\" in the same conversation: no content, and ZERO mailbox operations of their own.",
+        "Streaming a gated turn emits exactly ONE token frame; a repo-only turn still streams token by token.",
+        "No internal evidence id has appeared in any live answer."
       ],
       "liveFoundDefects": [
         "🚨 The whole prompt was the search query. Real Gmail: \"test file\" -> 1 result; \"search my inbox for the message about the test file\" -> 0. A provider ANDs its terms. Invisible in unit tests because a fake matches whatever it decides to.",
@@ -2772,7 +2777,7 @@
         "The consumer already owned a qualified .xlsx reader. A second one in the Brain would have been two opinions about what a sheet says; the reader is shared now, the two renderings are not (classifier tidies numbers, evidence copies them literally)."
       ],
       "knownLimits": [
-        "🚨 /api/ai/chat HAS NO GROUNDING GATE. It never had one — verifyAnswer lives in /api/ai/answer and the agentic loop. Capability evidence reaches the model as context, and the answer is NOT claim-verified in this route. Adding one is a real slice, not a narrow insertion.",
+        "A SEARCH RETURNS PREVIEWS, so a turn answering straight from search results has most descriptive prose removed as unsupported — truthful, but thin. Reading the single result when a search returns exactly one message would fix it and is a PRODUCT decision, not done.",
         "Conversation evidence is IN-MEMORY. A brain restart forgets what \"that email\" pointed at and the next turn asks. Fails safe; a durable store needs its own retention rules before it holds anything about a user's mail.",
         "The search query builder is a heuristic (drop asking-words and the capability's own nouns). One leftover word of phrasing costs every result, and the failure looks exactly like an empty mailbox.",
         "The local 8B model occasionally refuses to relay mail content (1 refusal in 5 identical requests). Model behaviour, not wiring.",
@@ -2781,6 +2786,21 @@
       "notDoneDeliberately": [
         "Disconnect-between-turns was NOT re-tested live: it would require revoking and re-granting the owner's consent. Covered by the earlier live qualification plus unit tests 3d and 10c against the real registry and readiness path.",
         "No deployment. No staging. No production."
+      ],
+      "groundingGate": {
+        "shape": "capability evidence -> TypedEvidenceLedger (+ repo RAG chunks) -> model -> COMPLETED answer -> shared verifyAnswer -> emit/persist.",
+        "decidedOnce": "Above both answer paths. Streaming and buffered are separate code here, so a check wired into one is a check with a documented bypass.",
+        "streaming": "A gated turn BUFFERS: no token frame is emitted until the answer is complete and checked, then exactly one. Live-verified: 1 token frame gated, 406 ungated. Client is told stage=verifying meanwhile.",
+        "engagement": "Only when a capability contributed evidence. Repo-only chat is byte-for-byte unchanged — it has never verified and switching that on at the same time would make any regression unattributable.",
+        "failsClosed": "A verifier exception returns a refusal, never the raw model text.",
+        "persistence": "What is shown and what the conversation stores are the same verified string.",
+        "noSecondVerifier": "aiRoutes may not import claimVerifier at all; a test asserts it and asserts the seam does use the shared one.",
+        "evidenceLabels": "Internal ids stripped from anything user-visible — both issued ids and the id SHAPE, because the leak is a model inventing [email_7]. Stripped, never translated: translating would manufacture a citation."
+      },
+      "verifierDefectsFoundLive": [
+        "🚨 A TRUE DESCRIPTION WAS DELETED. \"sent by X, and the subject line is Y\" failed the every-term rule because email/sent/subject/line are not INSIDE the message. Structural vocabulary is now part of what a non-repo source can be quoted on, per kind. Costs no discrimination — the VALUE must still match.",
+        "🚨 AN EXACT ANSWER CARRIED A FALSE CAVEAT. Answering from a complete spreadsheet said \"based on message previews\", because the attachment LISTING is incomplete evidence and was still in the ledger. Partiality now follows the evidence ids that actually sourced surviving claims.",
+        "🚨 \"the spreadsheet\" beside a PDF refused to choose. Matching a named file type against the file's OWN declared type is not prose routing; two files of the same named type still ask."
       ]
     }
   },
