@@ -365,18 +365,6 @@ letsencrypt_public_read() {
   return 0
 }
 
-# NOTE: a MigraCMS commercial-authority env grant (Part G), plus a one-shot
-# repair extension, existed here on 2026-09-09, authorized by Bonex in writing.
-# They provisioned MIGRAPANEL_API_URL/_TRANSPORT/_INTERNAL_ORIGIN/_API_KEY into
-# /etc/migracms/migracms.env -- the token crossing hosts on a pipe, never on
-# this workstation -- normalized a duplicated write, and were REMOVED once the
-# file held exactly one of each key and migracms restarted clean.
-#
-# The exact rules, the 61-case permit/deny suite, the six defects that suite
-# found, and an UNRESOLVED duplication anomaly whose cause was never
-# established, are kept in docs/migracms/hook-patch-migracms-authority-env.md
-# and its .controls.sh if they are ever needed again.
-
 # -- PART H, TEMPORARY -- MigraCMS release deploy.
 #
 # Authorized by Bonex, 2026-09-09, in writing, to deploy commit f8c5cce as a NEW
@@ -385,13 +373,13 @@ letsencrypt_public_read() {
 # release must survive this grant completely untouched.
 #
 # The release directory name is BOUND at install time to exactly:
-#   20260909T222737Z-consumer-chain-f8c5cce
+#   20260910T000713Z-hero-visual-d614b41
 # There is no wildcard under /opt/migracms/releases. A later release needs a
 # fresh grant carrying its own name; matching the parent directory is not
 # enough. REMOVE once the deploy is accepted or rolled back.
 migracms_release_deploy() {
   local c="$1"
-  local rel="/opt/migracms/releases/20260909T222737Z-consumer-chain-f8c5cce"
+  local rel="/opt/migracms/releases/20260910T000713Z-hero-visual-d614b41"
   local cur="/opt/migracms/current"
   local src="/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/_release-migracms-f8c5cce/apps/web/.next/standalone"
   local old="20260816T061926Z-cms-auth"
@@ -510,7 +498,7 @@ migracms_release_deploy() {
 migracms_shared_uploads() {
   local c="$1" n
   local OLDR="/opt/migracms/releases/20260816T061926Z-cms-auth"
-  local CANDR="/opt/migracms/releases/20260909T222737Z-consumer-chain-f8c5cce"
+  local CANDR="/opt/migracms/releases/20260910T000713Z-hero-visual-d614b41"
   local SH="/opt/migracms/shared/uploads"
   local UNIT="/etc/systemd/system/migracms.service"
 

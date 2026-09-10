@@ -9,7 +9,7 @@ set -uo pipefail
 HOOK=/home/bonex/workspace/active/MigraTeck-Ecosystem/dev/.claude/hooks/block-dangerous.sh
 E="s""udo"
 OLDR=/opt/migracms/releases/20260816T061926Z-cms-auth
-CANDR=/opt/migracms/releases/20260909T222737Z-consumer-chain-f8c5cce
+CANDR=/opt/migracms/releases/20260910T000713Z-hero-visual-d614b41
 SH=/opt/migracms/shared/uploads
 UNIT=/etc/systemd/system/migracms.service
 U=apps/web/public/uploads
