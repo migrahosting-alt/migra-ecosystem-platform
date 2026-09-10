@@ -43,6 +43,7 @@ import { buildContext, type ContextDiagnostics } from '../memory/contextBuilder.
 import { redactSecrets } from '../memory/redaction.js';
 import { scopeFrom } from '../memory/memoryRoutes.js';
 import { capabilityContext, runChatCapabilities } from './chatCapabilities.js';
+import { chatGroundingFor, verifyChatAnswer } from './chatGrounding.js';
 import { engineCorrelationId } from '../tools/toolRoutes.js';
 import { BrainTurnTrace } from '../observability/turnTrace.js';
 
@@ -924,6 +925,22 @@ export function registerAiRoutes(
       }
     }
 
+    /*
+     * ── The grounding gate for this turn ─────────────────────────────────
+     *
+     * 🚨 DECIDED ONCE, HERE, SO THE TWO ANSWER PATHS CANNOT DISAGREE. Streaming
+     * and buffered are separate code paths in this route, and a gate wired into
+     * one of them is a gate with a documented way around it — ask for
+     * `stream: true` and the check is gone.
+     *
+     * Null means the turn retrieved no capability evidence, and repository-only
+     * chat behaves exactly as it always has.
+     */
+    const groundingSources = chatGroundingFor({ capability: capabilityTurn, ragChunks });
+    const verifyFinalAnswer = groundingSources
+      ? (raw: string) => verifyChatAnswer(raw, groundingSources)
+      : undefined;
+
     trace.mark('context')
     const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks, directives);
     trace.mark('request_built');
@@ -951,7 +968,7 @@ export function registerAiRoutes(
     if (body.stream) {
       await streamChat(request, reply, requestId, decision.ranked, decision.reason,
         (m) => providerFor(m, approvedVisionModel), chatRequest,
-        { contextDiagnostics, commit, fallback, trace, capacityProbe });
+        { contextDiagnostics, commit, fallback, trace, capacityProbe, verifyFinalAnswer });
       return reply; // response already sent via raw stream
     }
 
@@ -963,7 +980,16 @@ export function registerAiRoutes(
     for (const candidate of attempts) {
       try {
         const result = await providerFor(candidate, approvedVisionModel).complete(chatRequest);
-        await commit?.(result.content, candidate.id, candidate.provider);
+        /*
+         * 🚨 VERIFIED BEFORE IT IS KEPT, and kept as what was verified. Storing
+         * the model's raw text and returning the checked one would put an
+         * unverified answer in the conversation, where the next turn reads it
+         * back as context and the gate never sees it again.
+         */
+        const checked = verifyFinalAnswer?.(result.content);
+        const answerText = checked ? checked.text : result.content;
+        if (checked) trace.set('grounding', { removed: checked.removed, refused: checked.refused });
+        await commit?.(answerText, candidate.id, candidate.provider);
         await auditStore.append({
           correlationId: requestId,
           requestId,
@@ -990,7 +1016,7 @@ export function registerAiRoutes(
             failedOver: failed,
             ...(fallback.policy ? { policy: fallback.policy, requestedPolicy: fallback.requestedPolicy, effectivePolicy: fallback.effectivePolicy, policyReason: fallback.policyReason, fallbackRecommended: fallback.fallbackRecommended, fallbackReasons: fallback.reasons } : {}),
           },
-          content: result.content,
+          content: answerText,
           usage: { inputTokens: result.telemetry.inputTokens, outputTokens: result.telemetry.outputTokens, latencyMs: result.telemetry.latencyMs },
           ...(localSavings ? { localSavings } : {}),
         };
@@ -1322,7 +1348,27 @@ async function streamChat(
   primaryReason: string,
   providerFor: (m: ModelDescriptor) => StreamingProvider,
   chatRequest: ChatTurnRequest,
-  memory: { capacityProbe?: (model?: string) => Promise<AdmissionDecision>; contextDiagnostics?: ContextDiagnostics; commit?: (text: string, modelId: string, providerId: string) => void; fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] }; trace?: BrainTurnTrace } = {},
+  memory: {
+    capacityProbe?: (model?: string) => Promise<AdmissionDecision>;
+    contextDiagnostics?: ContextDiagnostics;
+    commit?: (text: string, modelId: string, providerId: string) => void;
+    fallback?: { policy?: string; requestedPolicy?: string; effectivePolicy?: string; policyReason?: string; fallbackRecommended: boolean; reasons: string[] };
+    trace?: BrainTurnTrace;
+    /**
+     * The grounding gate for this turn, when one applies.
+     *
+     * 🚨 ITS PRESENCE TURNS STREAMING INTO BUFFERING, and that is the whole
+     * design. A token already on the screen cannot be un-said, so an answer
+     * that has to be checked is not emitted a fragment at a time and then
+     * corrected — it is withheld until it has been checked, and only the
+     * checked text is ever sent.
+     *
+     * Verifying fragments instead was considered and rejected: a claim is a
+     * sentence, half a sentence supports nothing, and a gate that judged
+     * partial text would reject true statements for being incomplete.
+     */
+    verifyFinalAnswer?: (raw: string) => { text: string; refused: boolean; removed: number };
+  } = {},
 ): Promise<void> {
   const trace = memory.trace;
   reply.hijack();
@@ -1523,12 +1569,25 @@ async function streamChat(
         trace?.mark('upstream_open');
         send('route', routeFrame(requestId, candidate, primaryId, primaryReason, failed));
         committed = true;
+        /*
+         * 🚨 ONE PLACE DECIDES WHETHER A FRAGMENT MAY BE SENT.
+         *
+         * With a gate on this turn, nothing goes out until the answer is
+         * complete and checked. `markFirstToken` still fires, because the
+         * timing it records is when the MODEL started producing — a real
+         * measurement that must not be distorted by our own buffering.
+         */
+        const emit = (text: string): void => {
+          markFirstToken();
+          fullText += text;
+          if (!memory.verifyFinalAnswer) send('token', { text });
+        };
         if (!first.done && first.value) {
-          if (first.value.delta) { markFirstToken(); fullText += first.value.delta; send('token', { text: first.value.delta }); }
+          if (first.value.delta) emit(first.value.delta);
           if (first.value.usage) usage = first.value.usage;
         }
         for await (const ev of gen) {
-          if (ev.delta) { markFirstToken(); fullText += ev.delta; send('token', { text: ev.delta }); }
+          if (ev.delta) emit(ev.delta);
           if (ev.usage) usage = ev.usage;
         }
       } else {
@@ -1538,8 +1597,25 @@ async function streamChat(
         fullText = r.content;
         // Buffered: the whole answer arrives at once, so first token IS the end.
         markFirstToken();
-        send('token', { text: r.content });
+        if (!memory.verifyFinalAnswer) send('token', { text: r.content });
         usage = { inputTokens: r.telemetry.inputTokens, outputTokens: r.telemetry.outputTokens };
+      }
+
+      /*
+       * 🚨 THE GATE, THEN THE ONLY TOKEN THE CLIENT EVER SEES.
+       *
+       * Held back until here so an unsupported sentence is never on screen,
+       * not even briefly, and never in a form the client could persist. What
+       * the user receives and what the conversation stores are the same string
+       * — the verified one — because those two diverging is how an unchecked
+       * answer becomes next turn's context.
+       */
+      if (memory.verifyFinalAnswer) {
+        send('stage', { stage: 'verifying', detail: 'Checking the answer against what was retrieved' });
+        const checked = memory.verifyFinalAnswer(fullText);
+        fullText = checked.text;
+        trace?.set('grounding', { removed: checked.removed, refused: checked.refused });
+        send('token', { text: fullText });
       }
       // Successful completion → commit the assistant message to memory (only here,
       // never on a partial/cancelled/failed stream).
