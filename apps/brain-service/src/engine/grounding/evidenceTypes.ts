@@ -297,6 +297,26 @@ export const repoAdapter: EvidenceAdapter<RepoEvidence> = {
 };
 
 /**
+ * Verbs that state WHERE something is, rather than assert anything about it.
+ *
+ * 🚨 THE ASSERTION IS THE PAIR, NOT THE VERB. "MIGRA_EMAIL_SENTINEL_0909
+ * appears in migrapilot_email_fixture.pdf" is checkable exactly twice: the term
+ * has to be in the evidence, and the document has to be one this run read.
+ * "Appears" adds nothing a source could confirm or deny — and requiring the
+ * document to contain the word "appears" removed a true sentence about the very
+ * file the turn had just opened.
+ *
+ * Kept short, and to verbs only. A word that could carry a fact — a number, a
+ * name, a quantity, an adjective — never belongs here.
+ */
+const EVIDENTIAL_RELATION = [
+  'appears', 'appear', 'appeared', 'contains', 'contain', 'contained',
+  'includes', 'include', 'included', 'shows', 'show', 'shown',
+  'lists', 'list', 'listed', 'found', 'mentions', 'mention', 'mentioned',
+  'states', 'stated', 'reads', 'located',
+].join(' ');
+
+/**
  * The words that NAME the parts of a message, rather than say anything about
  * them. Deliberately short: every word here is one the gate stops checking, so
  * it holds only the vocabulary of pointing — never a word that could carry a
@@ -309,6 +329,7 @@ const MESSAGE_STRUCTURE = [
   'recipient', 'addressed',
   'date', 'dated', 'time', 'timestamp',
   'body', 'content', 'contents', 'text',
+  EVIDENTIAL_RELATION,
 ].join(' ');
 
 /**
@@ -367,12 +388,25 @@ export const emailAdapter: EvidenceAdapter<EmailEvidence> = {
     : 'This is based on message previews, not the full messages.'),
 };
 
+/** `budget-2026.xlsx` -> `budget-2026`. The name people say out loud. */
+function stemOf(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  return dot > 0 ? filename.slice(0, dot) : filename;
+}
+
+/** `budget-2026.xlsx` -> `xlsx`, so "the xlsx" and "the PDF" name their file. */
+function extensionOf(filename: string): string {
+  const dot = filename.lastIndexOf('.');
+  return dot > 0 ? filename.slice(dot + 1) : '';
+}
+
 /** The vocabulary for pointing at part of a document. See MESSAGE_STRUCTURE. */
 const FILE_STRUCTURE = [
   'file', 'filename', 'document', 'attachment', 'attached',
   'spreadsheet', 'workbook', 'sheet', 'tab',
   'row', 'rows', 'column', 'columns', 'cell', 'cells', 'header', 'headers',
   'page', 'pages', 'section', 'contents', 'content', 'text', 'value', 'values',
+  EVIDENTIAL_RELATION,
 ].join(' ');
 
 /**
@@ -405,7 +439,19 @@ export const fileAdapter: EvidenceAdapter<FileEvidence> = {
    * a sentence about a document mostly names its parts, and those words are
    * pointing, not claiming. A figure or a name still has to be in the bytes.
    */
-  haystack: (item) => [item.text, item.locator.filename, FILE_STRUCTURE].join('\n'),
+  haystack: (item) => [
+    item.text,
+    // 🚨 THE WHOLE NAME AND ITS PARTS. Tokens are matched exactly, so
+    // `migrapilot_email_fixture.pdf` in the evidence does not match a claim that
+    // says `migrapilot_email_fixture`, or one that says "the PDF" — and both of
+    // those name this file correctly. Found live: the gate removed a true
+    // sentence about the very document it had just opened, because the writer
+    // dropped the extension.
+    item.locator.filename,
+    stemOf(item.locator.filename),
+    extensionOf(item.locator.filename),
+    FILE_STRUCTURE,
+  ].join('\n'),
   /*
    * 🚨 THE DIGEST, not the filename. It is the only handle that still names
    * these exact bytes after someone attaches a second `budget.xlsx`.

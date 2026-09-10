@@ -78,6 +78,17 @@ function withMail(...items: ReturnType<typeof mail>[]): TypedEvidenceLedger {
   return ledger;
 }
 
+/**
+ * The answer WITHOUT the gate's explanation of what it removed.
+ *
+ * 🚨 ASSERTING ON THE WHOLE STRING IS VACUOUS: the removal notice names the
+ * terms that failed, so `answer.includes(term)` is TRUE for a claim the gate
+ * deleted. This has now bitten twice.
+ */
+function answerBody(answer: string): string {
+  return answer.split('> ⚠️ Grounding gate:')[0]!.trim();
+}
+
 function typed(scope: EvidenceScope, ...items: EvidenceItem[]): TypedEvidenceLedger {
   const ledger = new TypedEvidenceLedger(scope);
   for (const item of items) ledger.add(item);
@@ -585,4 +596,45 @@ test('and the caveat IS attached when the claim rests on the partial item', () =
   });
 
   assert.match(verified.answer, /previews/i, 'a preview-sourced claim lost its disclosure');
+});
+
+test('🚨 13. naming a file WITHOUT its extension still names that file', () => {
+  /*
+   * 🚨 REGRESSION FROM OWNER ACCEPTANCE. Tokens are matched exactly, so
+   * `migrapilot_email_fixture.pdf` in the evidence did not match a claim
+   * saying `migrapilot_email_fixture` — and the gate removed a true sentence
+   * about the very document it had just opened and read.
+   *
+   * The whole name, the stem and the extension all name the same file.
+   */
+  const doc = sheet({
+    id: 'file_named',
+    text: 'Sentinel\tMIGRA_EMAIL_SENTINEL_0909',
+    locator: { sha256: 'c'.repeat(64), filename: 'migrapilot_email_fixture.pdf', mimeType: 'application/pdf' },
+  });
+
+  for (const claim of [
+    'MIGRA_EMAIL_SENTINEL_0909 appears in migrapilot_email_fixture.pdf.',
+    'MIGRA_EMAIL_SENTINEL_0909 appears in migrapilot_email_fixture.',
+    'MIGRA_EMAIL_SENTINEL_0909 appears in the attached pdf.',
+  ]) {
+    const verified = verifyAnswer(claim, { repo: new EvidenceLedger(), other: typed(ALICE, doc) });
+    assert.ok(answerBody(verified.answer).includes('MIGRA_EMAIL_SENTINEL_0909'),
+      `a true claim was removed: ${claim}\n${verified.answer}`);
+  }
+
+  // And a document that was NOT read still cannot be named.
+  const wrong = verifyAnswer('MIGRA_EMAIL_SENTINEL_0909 appears in payroll_export.pdf.', {
+    repo: new EvidenceLedger(), other: typed(ALICE, doc),
+  });
+  assert.equal(answerBody(wrong.answer).includes('payroll_export'), false, 'an unread document was named');
+
+  /*
+   * 🚨 AND A TERM THAT IS NOT THERE STILL DIES, which is what makes permitting
+   * "appears"/"contains" safe: the verb was never the checkable part.
+   */
+  const invented = verifyAnswer('MIGRA_EMAIL_SENTINEL_9999 appears in migrapilot_email_fixture.pdf.', {
+    repo: new EvidenceLedger(), other: typed(ALICE, doc),
+  });
+  assert.equal(answerBody(invented.answer).includes('9999'), false, 'a fabricated sentinel survived');
 });

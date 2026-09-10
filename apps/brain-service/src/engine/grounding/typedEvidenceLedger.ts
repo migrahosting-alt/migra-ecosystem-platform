@@ -157,9 +157,25 @@ export class TypedEvidenceLedger {
   }
 
   /** Whether ANY retrieved source mentions a term. */
+  /**
+   * Did anything this run retrieved mention this term at all?
+   *
+   * ---------------------------------------------------------------------
+   * 🚨 THE ADAPTER'S HAYSTACK, NOT `item.text` — ONE AUTHORITY, NOT TWO.
+   *
+   * This used to search `text` alone, which meant a filename, a subject or a
+   * sender was invisible here while being perfectly quotable a few rules later.
+   * The gate's FIRST rule then rejected the claim as fabrication, before the
+   * rule that would have found the term ever ran.
+   *
+   * Found in owner acceptance: "MIGRA_EMAIL_SENTINEL_0909 appears in
+   * migrapilot_email_fixture.pdf" was removed as naming something the run had
+   * never retrieved — about a file the run had just downloaded and read, whose
+   * name was in the locator rather than in the extracted text.
+   */
   mentions(term: string): boolean {
     const needle = term.toLowerCase();
-    return this.items.some((i) => i.text.toLowerCase().includes(needle));
+    return this.items.some((i) => adapterFor(i).haystack(i as never).toLowerCase().includes(needle));
   }
 }
 
