@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — selector committed; handoff for the product-path slice",
+  "updatedBy": "Claude (Opus 5) — deployment policy revised: staging before acceptance",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2750,7 +2750,34 @@
       "case9": "A response synthesised from Email + repo evidence must still have an unsupported claim removed. Mixed evidence cannot weaken verification.",
       "case10": "\"that email\" resolves through PERSISTED CONVERSATION STATE — conversation turn -> evidenceId -> scoped canonical EmailEvidence — never a Gmail message id in browser state. Re-authorize and re-resolve before any new provider operation. This is the shared substrate for \"the spreadsheet attached to it\", \"summarize the thread\", \"compare it with this file\".",
       "doneAtSelectionLayer": "cases 1, 2, 4, 5, 6, 7, 8 pass in capabilitySelection.test.ts",
-      "unfinished": "cases 3, 9, 10 — all need the wiring"
+      "unfinished": "cases 3, 9, 10 — all need the wiring",
+      "afterGreen": "Deploy that exact commit to the controlled staging environment and run owner acceptance THERE, not on localhost. Record the deployed commit and build id before acceptance begins. Production untouched. See stagingEnvironmentGap — the environment does not exist yet."
     }
+  },
+  "deploymentPolicy": {
+    "_authority": "Bonex, 2026-09-09. Supersedes \"local-only until acceptance\" for MigraPilot Email and is adopted across Migra products.",
+    "rule": "Local = development and fast verification. Staging/internal = real integration and owner acceptance. Production = only after acceptance.",
+    "why": "Endlessly proving things on localhost produced weak evidence and a lot of avoidable friction — disposable auth, callback origins, cookie hosts, temporary databases. There are no real users yet, so early deployment to a CONTROLLED environment is safer evidence, not riskier.",
+    "sequence": "finish wiring -> suite green -> deploy that exact commit to staging -> owner acceptance there -> fix defects there -> freeze RC -> promote to production",
+    "notThis": "finish everything locally -> freeze RC -> only then see how it behaves outside localhost",
+    "stagingConstraints": [
+      "no public exposure unless authenticated",
+      "no send/draft scope",
+      "migrations 27/28 on the STAGING database first",
+      "staging Brain and Consumer use their own secrets and their own database",
+      "the QA Gmail account only",
+      "production chat-platform-rc-0908 untouched until acceptance passes",
+      "the deployment must RECORD THE EXACT COMMIT AND BUILD IDENTITY before acceptance starts, so the evidence is tied to the artifact later considered for promotion"
+    ]
+  },
+  "stagingEnvironmentGap": {
+    "_finding": "🚨 CHECKED, AND IT DOES NOT EXIST YET. There is no MigraPilot staging environment to deploy to.",
+    "evidence": [
+      "VM111 (migrapilot-app-core, 10.10.0.13) IS production — it serves chat-platform-rc-0908 at commit 0f494d27 on chat.migrateck.com",
+      "docs/migrapilot/deploy-brain.sh and deploy-consumer.sh carry no environment or target flag; they deploy to VM111",
+      "the VM111 runbook knows only VM111, VM102 and chat.migrateck.com"
+    ],
+    "consequence": "\"Deploy to staging\" is not a step the next session can simply run. Standing the environment up is its own piece of work — a host or isolated instance, its own database with migrations 27/28, its own secrets, its own Google OAuth callback registered against the existing read-only client, and an authenticated-only edge.",
+    "recommendation": "Decide the staging target BEFORE the wiring finishes, so the deploy is not blocked behind an unscoped infrastructure task at the moment the code is ready. This is an owner decision: a second VM, an isolated instance on VM111, or a different host."
   }
 }
