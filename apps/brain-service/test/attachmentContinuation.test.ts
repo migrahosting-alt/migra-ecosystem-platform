@@ -106,7 +106,10 @@ function deps(o: {
               ...(o.withholdKnown ? {} : { attachmentsKnown: true }),
               attachments: listed.map((a) => ({
                 ref: a.ref, filename: a.filename,
-                mimeType: 'application/vnd.ms-excel', size: WORKBOOK.length,
+                mimeType: a.filename.endsWith('.pdf')
+                  ? 'application/pdf'
+                  : 'application/vnd.ms-excel',
+                size: WORKBOOK.length,
               })),
             };
           }
@@ -402,4 +405,107 @@ test('🚨 3h. a listing that does not claim to be COMPLETE triggers no fetch', 
    */
   assert.equal(calls.filter((c) => c.op === 'fetchAttachment').length, 0,
     'a fetch followed a listing that never claimed to have looked');
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 3i. A named file TYPE is evidence the provider supplied
+ * ------------------------------------------------------------------ */
+
+test('🚨 3i. "the spreadsheet" beside a PDF opens the spreadsheet', async () => {
+  /*
+   * 🚨 FROM THE REAL QUALIFICATION MESSAGE, which carries a PDF and an XLSX.
+   * Refusing to guess between `Q3-budget.xlsx` and `Q3-budget-final.xlsx` is
+   * caution. Refusing to tell a spreadsheet from a PDF is declining to use a
+   * fact the provider already reported — and it left the product unable to
+   * answer the exact question the fixture was built for.
+   */
+  const calls: Call[] = [];
+  const store = new MemoryConversationEvidence();
+  const d = deps({
+    connectedFor: [ALICE.owner], calls, store,
+    attachments: [
+      { ref: 'ref-pdf', filename: 'migrapilot_email_fixture.pdf' },
+      { ref: OUR_REF, filename: 'migrapilot_email_fixture (1).xlsx' },
+    ],
+  });
+  await findTheMessage(d);
+
+  const result = await runCapabilityTurn({
+    prompt: 'what revenue does the spreadsheet attached to that email show for South?',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-2', requestId: 'r2',
+  }, d);
+
+  assert.equal(result.ambiguousAttachment, null, 'a spreadsheet and a PDF were treated as indistinguishable');
+  assert.equal(calls.find((c) => c.op === 'fetchAttachment')?.attachmentId, OUR_REF,
+    'the wrong attachment was opened');
+  assert.match(result.ledger.ofKind('file')[0]!.text, /South\t\$156500/);
+});
+
+test('🚨 3j. "the PDF" beside a spreadsheet opens the PDF', async () => {
+  // The same rule in the other direction, so it cannot be a spreadsheet-shaped
+  // special case wearing a general name.
+  const calls: Call[] = [];
+  const store = new MemoryConversationEvidence();
+  const d = deps({
+    connectedFor: [ALICE.owner], calls, store,
+    attachments: [
+      { ref: 'ref-pdf', filename: 'migrapilot_email_fixture.pdf' },
+      { ref: OUR_REF, filename: 'migrapilot_email_fixture (1).xlsx' },
+    ],
+  });
+  await findTheMessage(d);
+
+  await runCapabilityTurn({
+    prompt: 'what does the pdf attached to that email say?',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-2', requestId: 'r2',
+  }, d);
+
+  assert.equal(calls.find((c) => c.op === 'fetchAttachment')?.attachmentId, 'ref-pdf');
+});
+
+test('🚨 3k. two files of the SAME named type still refuse to guess', async () => {
+  const calls: Call[] = [];
+  const store = new MemoryConversationEvidence();
+  const d = deps({
+    connectedFor: [ALICE.owner], calls, store,
+    attachments: [
+      { ref: 'ref-one', filename: 'Q3-budget.xlsx' },
+      { ref: 'ref-two', filename: 'Q3-budget-final.xlsx' },
+    ],
+  });
+  await findTheMessage(d);
+
+  const result = await runCapabilityTurn({
+    prompt: 'what is the total in the spreadsheet attached to that email?',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-2', requestId: 'r2',
+  }, d);
+
+  assert.equal(calls.filter((c) => c.op === 'fetchAttachment').length, 0, 'the turn guessed');
+  assert.deepEqual(result.ambiguousAttachment?.candidates, ['Q3-budget.xlsx', 'Q3-budget-final.xlsx']);
+});
+
+test('a named type that matches NOTHING asks rather than opening something else', async () => {
+  const calls: Call[] = [];
+  const store = new MemoryConversationEvidence();
+  const d = deps({
+    connectedFor: [ALICE.owner], calls, store,
+    attachments: [
+      { ref: 'ref-pdf', filename: 'contract.pdf' },
+      { ref: 'ref-two', filename: 'notes.pdf' },
+    ],
+  });
+  await findTheMessage(d);
+
+  const result = await runCapabilityTurn({
+    prompt: 'what is in the spreadsheet attached to that email?',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-2', requestId: 'r2',
+  }, d);
+
+  assert.equal(calls.filter((c) => c.op === 'fetchAttachment').length, 0,
+    'a spreadsheet request opened a PDF');
+  assert.deepEqual(result.ambiguousAttachment?.candidates, ['contract.pdf', 'notes.pdf']);
 });

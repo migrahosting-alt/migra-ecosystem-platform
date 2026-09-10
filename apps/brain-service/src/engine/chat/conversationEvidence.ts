@@ -178,6 +178,34 @@ export function referenceKind(prompt: string): ReferenceKind {
 }
 
 /**
+ * The KIND OF FILE a reference names, when it names one.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 THIS IS NOT PROSE ROUTING, AND THE DIFFERENCE MATTERS
+ *
+ * Nothing here decides an operation or infers intent. It reads one word the
+ * user actually said — "spreadsheet", "PDF" — and that word is later matched
+ * against the file's OWN DECLARED TYPE, as reported by the provider. The
+ * evidence for the choice comes from the attachment, not from the sentence.
+ *
+ * It exists because the real qualification message carries a PDF and an XLSX.
+ * Asked about "the spreadsheet", a turn that refused to choose between two
+ * attachments of obviously different kinds was not being careful — it was
+ * declining to use a fact it had been given. Refusing to guess between
+ * `Q3-budget.xlsx` and `Q3-budget-final.xlsx` is caution; refusing to tell a
+ * spreadsheet from a PDF is not.
+ */
+export type ReferenceFileType = 'spreadsheet' | 'pdf' | 'document';
+
+export function referenceFileType(prompt: string): ReferenceFileType | null {
+  const lower = prompt.toLowerCase();
+  if (/spreadsheet|xlsx|workbook|\bsheet\b|\bexcel\b/.test(lower)) return 'spreadsheet';
+  if (/\bpdf\b/.test(lower)) return 'pdf';
+  if (/\bdocx?\b|\bword document\b/.test(lower)) return 'document';
+  return null;
+}
+
+/**
  * Resolve a backward reference against what this conversation actually retrieved.
  *
  * 🚨 SCOPED, AND NEWEST-FIRST. Scoped because a conversation id is not a

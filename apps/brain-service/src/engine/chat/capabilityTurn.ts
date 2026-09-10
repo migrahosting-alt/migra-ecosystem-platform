@@ -40,8 +40,8 @@ import {
 import { emailAttachmentOrigin, fileEvidenceFrom } from '../grounding/fileEvidenceProduction.js';
 import { extractFileText } from '../files/fileText.js';
 import {
-  referencePhrase, resolveReference,
-  type ConversationEvidenceStore, type ResolvedReference,
+  referenceFileType, referencePhrase, resolveReference,
+  type ConversationEvidenceStore, type ReferenceFileType, type ResolvedReference,
 } from './conversationEvidence.js';
 import type { EmailAttachment, EmailMessage, EmailThread } from '../email/types.js';
 
@@ -311,12 +311,24 @@ export async function runCapabilityTurn(
     const listed = attachmentsOf(result);
     if (!listed || !reference) continue;
     if (listed.length === 0) continue;
-    if (listed.length > 1) {
-      ambiguousAttachment = { candidates: listed.map((a) => a.filename) };
+
+    /*
+     * 🚨 NARROWED BY THE FILE'S OWN DECLARED TYPE, never by the wording alone.
+     * The user said "spreadsheet"; the provider said which of these IS one. If
+     * that leaves exactly one, there is nothing to guess at. If it leaves none,
+     * the whole list goes back — a type word that matches nothing is a reason
+     * to ask, never a reason to open whatever else was there.
+     */
+    const wantedType = referenceFileType(input.prompt);
+    const matching = wantedType ? listed.filter((a) => isType(a, wantedType)) : listed;
+    const candidates = matching.length > 0 ? matching : listed;
+
+    if (candidates.length > 1) {
+      ambiguousAttachment = { candidates: candidates.map((a) => a.filename) };
       continue;
     }
 
-    const only = listed[0]!;
+    const only = candidates[0]!;
     const fetched = await run({
       op: 'fetchAttachment',
       messageId: reference.item.locator.providerMessageId,
@@ -389,6 +401,26 @@ function operationFor(
     return { op: 'readMessage', messageId: reference.item.locator.providerMessageId };
   }
   return { op: 'search', keywords: searchTermsFor(prompt, nouns), limit: 20 };
+}
+
+/**
+ * Does this attachment match the kind of file the user named?
+ *
+ * 🚨 THE ATTACHMENT'S OWN PROPERTIES ANSWER, not the prompt. Both the declared
+ * MIME type and the extension are consulted because senders get either one
+ * wrong: a spreadsheet arrives as `application/vnd.ms-excel`, as the long
+ * OpenXML type, and occasionally as `application/octet-stream` with an honest
+ * `.xlsx` on the end.
+ */
+function isType(attachment: EmailAttachment, wanted: ReferenceFileType): boolean {
+  const name = attachment.filename.toLowerCase();
+  const mime = (attachment.mimeType ?? '').toLowerCase();
+  if (wanted === 'spreadsheet') {
+    return name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv')
+      || mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv');
+  }
+  if (wanted === 'pdf') return name.endsWith('.pdf') || mime.includes('pdf');
+  return name.endsWith('.docx') || name.endsWith('.doc') || mime.includes('word');
 }
 
 /**
