@@ -106,8 +106,15 @@ export interface CapabilityPlan {
  */
 const DEMONSTRATIVES = new Set(['that', 'this', 'the', 'my', 'those', 'these', 'our']);
 
-/** Verbs that act on a retrieved object. A noun with no action is a topic. */
-const RETRIEVAL_VERBS = new Set([
+/**
+ * Verbs that act on a retrieved object. A noun with no action is a topic.
+ *
+ * 🚨 EXPORTED BECAUSE A SEARCH NEEDS THE SAME LIST, INVERTED. These words say
+ * that the user is ASKING; they are never what they are asking ABOUT. Keeping a
+ * second copy beside the query builder would let the two drift, and the
+ * symptom would be a search that quietly includes "summarize" as a term.
+ */
+export const RETRIEVAL_VERBS: ReadonlySet<string> = new Set([
   'find', 'search', 'read', 'show', 'open', 'check', 'look', 'get', 'fetch',
   'list', 'summarize', 'summarise', 'summary', 'tell', 'what', 'which', 'who',
   'when', 'compare', 'from', 'about', 'in', 'containing', 'contains',
@@ -188,6 +195,30 @@ export function selectCapabilities(input: {
   capabilities: readonly SelectableCapability[];
   /** False when the request carries no authenticated identity. */
   identified: boolean;
+  /**
+   * What the prompt points BACKWARD at, and which capability retrieved it.
+   *
+   * ---------------------------------------------------------------------
+   * 🚨 A REFERENCE IS A SELECTION SIGNAL IN ITS OWN RIGHT
+   *
+   * "What revenue does the spreadsheet attached to that email show?" is not a
+   * request about a mailbox — grammatically it is a request about a
+   * spreadsheet, and the analysis below is right to call `email` a modifier
+   * here. Left at that, the turn selects nothing and the user is told the
+   * assistant cannot help with the thing it showed them a moment ago.
+   *
+   * The resolution is not to weaken the grammar. It is that CONTINUING with
+   * something already retrieved is a different reason to select a capability
+   * than being asked to go and look — which is why `explicit-reference` exists
+   * beside `object-of-request` rather than replacing it. The two answer
+   * different questions, and a plan that recorded only "selected" could not say
+   * which one happened.
+   *
+   * 🚨 AND IT IS NOT AN AUTHORIZATION. The capability still runs under the
+   * current identity against current readiness; a reference decides WHAT to
+   * continue, never whether the caller may.
+   */
+  continuation?: { capabilityId: string; phrase: string } | null;
 }): CapabilityPlan {
   const selected: SelectedCapability[] = [];
   const rejected: RejectedCapability[] = [];
@@ -196,6 +227,36 @@ export function selectCapabilities(input: {
   const action = hasRetrievalAction(tokens);
 
   for (const capability of input.capabilities) {
+    if (input.continuation?.capabilityId === capability.id) {
+      /*
+       * Identity and availability, exactly as below — a reference exempts a
+       * capability from neither.
+       *
+       * 🚨 DEFENCE IN DEPTH, NOT THE MECHANISM. Dispatch refuses an
+       * unavailable capability on its own, per principal, at execution time;
+       * that is what actually makes a disconnect take effect between turns, and
+       * removing these four lines does not let a revoked mailbox answer. They
+       * are here so the PLAN tells the truth about what was chosen and why —
+       * worth stating, because a guard mistaken for the mechanism is the kind
+       * of thing that gets deleted as redundant, and a guard mistaken for
+       * redundant is the kind of thing that gets deleted as defence.
+       */
+      if (!input.identified || !capability.available) {
+        rejected.push({
+          capabilityId: capability.id,
+          reason: 'capability-unavailable',
+          evidence: input.continuation.phrase,
+        });
+        continue;
+      }
+      selected.push({
+        capabilityId: capability.id,
+        reason: 'explicit-reference',
+        evidence: input.continuation.phrase,
+      });
+      continue;
+    }
+
     let sawNoun: string | undefined;
     let asObject: string | undefined;
     let asModifierOnly: string | undefined;

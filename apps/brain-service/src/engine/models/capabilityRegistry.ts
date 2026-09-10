@@ -110,6 +110,28 @@ export interface CapabilityDescriptor {
   category: CapabilityCategory;
   /** Grant tokens this capability needs; the engine decides if they're held. */
   requiredCapabilities: string[];
+  /**
+   * The nouns this capability OWNS, lower-case and singular where natural.
+   *
+   * ---------------------------------------------------------------------
+   * 🚨 THE VOCABULARY BELONGS TO THE CAPABILITY, NOT TO THE SELECTOR
+   *
+   * Chat has to decide which capability a request is ABOUT. The tempting place
+   * to put that knowledge is the selector — a list of mail words, a list of
+   * calendar words — and it is the wrong place twice over: the selector stops
+   * being generic, and adding a capability means editing a file that has
+   * nothing to do with it.
+   *
+   * So each capability declares its own words here and the selector stays
+   * structural. `thread` is the example that proves the point: "summarize the
+   * thread" selected nothing until Email declared it, and the fix was Email's
+   * to make.
+   *
+   * 🚨 OWNED, NOT MERELY ASSOCIATED. A word two capabilities would both claim
+   * means the vocabulary is too broad — not that the selector needs a
+   * tie-break. "file" belongs to no capability for exactly that reason.
+   */
+  nouns: readonly string[];
   readOnly: boolean;
   approvalRequired: boolean;
   supportsDryRun: boolean;
@@ -468,6 +490,9 @@ const TOOLS: RunnableCapability[] = [
       description: 'Execute a shell command (not yet enabled).',
       category: 'terminal',
       requiredCapabilities: ['terminal.exec'],
+      // No declared vocabulary: a chat turn can never select this. Reaching it
+      // takes an explicit tool call, which is the right bar for a shell.
+      nouns: [],
       readOnly: false,
       approvalRequired: true,
       supportsDryRun: false,
@@ -542,7 +567,25 @@ const TOOLS: RunnableCapability[] = [
       'Search and read your connected email.',
       'account',
       ['email.read'],
-      { readOnly: true },
+      {
+        readOnly: true,
+        /*
+         * 🚨 EMAIL'S OWN WORDS, DECLARED BY EMAIL.
+         *
+         * `thread` is here because "summarize the thread" selected nothing
+         * without it — a real gap, and one whose fix belongs to this
+         * registration rather than to the chat selector, which must stay
+         * generic across capabilities that do not exist yet.
+         *
+         * `attachment` and `spreadsheet` are deliberately ABSENT. They are
+         * things a message CARRIES, not things only a mailbox can be about: a
+         * spreadsheet may equally arrive from Drive or an upload, and a
+         * capability that claimed the word would win prompts that were never
+         * about mail. A reference to one already reaches the mailbox the
+         * correct way — by continuing from evidence this capability produced.
+         */
+        nouns: ['email', 'emails', 'mail', 'mailbox', 'inbox', 'message', 'messages', 'thread'],
+      },
     ),
     inputSchema: EmailSearchRequestSchema,
     /*
@@ -678,7 +721,11 @@ export function meta(
   description: string,
   category: CapabilityCategory,
   requiredCapabilities: string[],
-  opts: { readOnly?: boolean; approvalRequired?: boolean; supportsDryRun?: boolean; supportsStreaming?: boolean } = {},
+  opts: {
+    readOnly?: boolean; approvalRequired?: boolean; supportsDryRun?: boolean; supportsStreaming?: boolean;
+    /** The words this capability owns. Empty means chat can never select it. */
+    nouns?: readonly string[];
+  } = {},
 ): Omit<CapabilityDescriptor, 'available'> {
   return {
     kind: 'tool',
@@ -687,6 +734,13 @@ export function meta(
     description,
     category,
     requiredCapabilities,
+    /*
+     * 🚨 EMPTY BY DEFAULT, AND THAT IS THE SAFE DIRECTION. A capability with no
+     * declared vocabulary is simply never selected by a chat turn — it stays
+     * reachable through an explicit tool call and nothing else. The opposite
+     * default would have every capability quietly compete for every prompt.
+     */
+    nouns: opts.nouns ?? [],
     readOnly: opts.readOnly ?? false,
     approvalRequired: opts.approvalRequired ?? false,
     supportsDryRun: opts.supportsDryRun ?? false,
