@@ -915,8 +915,24 @@ export function verifyAnswer(
     .map((l) => `\n\n${l}`)
     .join('');
 
+  /*
+   * 🚨 THE REMOVAL NOTICE IS EMITTED ONCE, AND THE FALLBACK ALREADY CARRIES IT.
+   *
+   * Found in owner acceptance. `gapStatement` appends `removalNote` itself, so
+   * `(body || gapStatement(...)) + disclosure` printed the notice TWICE whenever
+   * the fallback was used — every sentence removed, yet `refused` false because
+   * the model's own text looked like a refusal and `sawRefusal` had been set.
+   * The user saw the same warning stacked on itself, which reads as a fault in
+   * the product rather than a disclosure about the answer.
+   *
+   * A disclosure that repeats is not more honest. It is less legible, and the
+   * second copy says nothing the first did not.
+   */
+  const usedFallback = !body;
   return {
-    answer: (body || gapStatement(ledger, rejected, claims, opts.question)) + disclosure + partiality,
+    answer: (body || gapStatement(ledger, rejected, claims, opts.question))
+      + (usedFallback ? '' : disclosure)
+      + partiality,
     claims,
     rejected,
     refused,
@@ -989,6 +1005,18 @@ function gapStatement(
       : 'I could not support an answer with evidence I actually retrieved in this run.',
   );
   lines.push('');
+  /*
+   * 🚨 THE EMPTY CASE IS EVIDENCE-NEUTRAL, BECAUSE THE GATE NO LONGER IS.
+   *
+   * "No workspace content was retrieved in this run" was written when a
+   * repository was the only thing evidence could come from. Said to someone who
+   * asked about their MAILBOX, it answers a question they did not ask and
+   * implies the wrong thing was searched — an owner reading it reasonably
+   * concluded the mail path had not run at all.
+   *
+   * The repository-specific lines below stay, because when there ARE paths they
+   * say something true and useful about what was read.
+   */
   if (ledger.readPaths.length) {
     lines.push('Content I did retrieve:');
     for (const p of ledger.readPaths.slice(0, 12)) {
@@ -999,9 +1027,15 @@ function gapStatement(
   } else if (ledger.knownPaths.length) {
     lines.push('I located these paths but read none of them, so I have no content to answer from:');
     for (const p of ledger.knownPaths.slice(0, 12)) lines.push(`- \`${p}\``);
-  } else {
-    lines.push('No workspace content was retrieved in this run.');
   }
+  /*
+   * 🚨 AND NOTHING AT ALL WHEN THERE IS NOTHING TO NAME. The empty case used to
+   * add "No workspace content was retrieved in this run" — repository language
+   * on a mailbox question, which told an owner the wrong thing had been
+   * searched. Replacing it with a neutral sentence only restated the line
+   * above it. The opening sentence is already evidence-neutral and already says
+   * this; a second sentence saying it again is not more honest, just longer.
+   */
   if (rejected.length) {
     lines.push('');
     lines.push(removalNote(rejected));

@@ -447,3 +447,65 @@ test('🚨 10. aiRoutes contains NO verification logic of its own', () => {
   const seam = readFileSync(locate('apps/brain-service/src/engine/chat/chatGrounding.ts'), 'utf8');
   assert.ok(seam.includes("from '../grounding/claimVerifier.js'"), 'the seam does not use the shared verifier');
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 11. The disclosure is emitted ONCE, and speaks about evidence
+ * ------------------------------------------------------------------ */
+
+test('🚨 11. the removal notice appears exactly once, even on the fallback', () => {
+  /*
+   * 🚨 THE OWNER ACCEPTANCE DEFECT. `gapStatement` appends the removal note
+   * itself, and the caller then added `disclosure` on top — so whenever the
+   * fallback was used (every sentence removed, yet `refused` false because the
+   * model's own text looked like a refusal) the same warning was printed twice.
+   * Stacked on itself it reads as a fault in the product, and the second copy
+   * says nothing the first did not.
+   */
+  const other = new TypedEvidenceLedger({ principalId: ALICE.owner, workspaceId: ALICE.workspace });
+  other.add(emailEvidence({
+    id: 'email_1', scope: { principalId: ALICE.owner, workspaceId: ALICE.workspace },
+    providerMessageId: 'pm-1', providerThreadId: 't-1',
+    subject: 'test file', from: 'migrateck@gmail.com', sentAt: 'T',
+    text: 'here s the test files', complete: false,
+  }));
+
+  /*
+   * 🚨 THE EXACT SHAPE THAT FAILED. "could not find" is a refusal marker, so
+   * `sawRefusal` is set and the answer is NOT classified as refused — while the
+   * sentence itself is removed as unsupported, leaving an empty body and
+   * sending the answer down the fallback path.
+   */
+  const raw = 'I could not find the email containing MIGRA_EMAIL_SENTINEL_0909 in your inbox.';
+  const verified = verifyChatAnswer(raw, { repo: new EvidenceLedger(), other });
+
+  const notices = (verified.text.match(/Grounding gate:/g) ?? []).length;
+  assert.equal(notices, 1, `the removal notice was emitted ${notices} times:\n${verified.text}`);
+});
+
+test('🚨 12. the fallback does not talk about WORKSPACE content on a mailbox request', () => {
+  /*
+   * 🚨 ALSO FROM OWNER ACCEPTANCE. "No workspace content was retrieved in this
+   * run" was written when a repository was the only source evidence could come
+   * from. Said to someone who asked about their MAILBOX it answers a question
+   * they did not ask, and implies the wrong thing was searched — the owner
+   * reasonably read it as the mail path never having run.
+   */
+  const other = new TypedEvidenceLedger({ principalId: ALICE.owner, workspaceId: ALICE.workspace });
+  other.add(emailEvidence({
+    id: 'email_1', scope: { principalId: ALICE.owner, workspaceId: ALICE.workspace },
+    providerMessageId: 'pm-1', providerThreadId: 't-1',
+    subject: 'test file', from: 'migrateck@gmail.com', sentAt: 'T',
+    text: 'here s the test files', complete: false,
+  }));
+
+  const verified = verifyChatAnswer(
+    'I could not find the email containing MIGRA_EMAIL_SENTINEL_0909 in your inbox.',
+    { repo: new EvidenceLedger(), other },
+  );
+
+  assert.equal(/workspace content/i.test(verified.text), false,
+    `repository language on a mailbox turn:\n${verified.text}`);
+  // The opening sentence is already evidence-neutral and already says it; the
+  // fix removed the restatement rather than swapping one wording for another.
+  assert.match(verified.text, /could not support an answer with evidence I actually retrieved/i);
+});
