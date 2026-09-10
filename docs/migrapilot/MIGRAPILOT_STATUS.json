@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-10",
-  "updatedBy": "Claude (Opus 5) — /api/ai/chat grounded on both answer paths; READY FOR OWNER PRODUCT ACCEPTANCE",
+  "updatedBy": "Claude (Opus 5) — OWNER PRODUCT ACCEPTANCE: FAIL, diagnosed and fixed; awaiting re-acceptance",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "PRODUCT PATH COMPLETE, GROUNDED AND LIVE-VERIFIED on local. Normal chat reaches the connected mailbox, re-reads on follow-up, opens the right attachment, and every answer built on that evidence passes the SHARED claim verifier on both the buffered and streaming paths. READY FOR OWNER PRODUCT ACCEPTANCE. Not deployed anywhere.",
+    "status": "🚨 OWNER PRODUCT ACCEPTANCE — FAIL (2026-09-10 02:44, turn req-1d). Root causes found and fixed; re-verified live. AWAITING OWNER RE-ACCEPTANCE. NO RC freeze. NO staging promotion. Gmail connection untouched.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2801,6 +2801,47 @@
         "🚨 A TRUE DESCRIPTION WAS DELETED. \"sent by X, and the subject line is Y\" failed the every-term rule because email/sent/subject/line are not INSIDE the message. Structural vocabulary is now part of what a non-repo source can be quoted on, per kind. Costs no discrimination — the VALUE must still match.",
         "🚨 AN EXACT ANSWER CARRIED A FALSE CAVEAT. Answering from a complete spreadsheet said \"based on message previews\", because the attachment LISTING is incomplete evidence and was still in the ledger. Partiality now follows the evidence ids that actually sourced surviving claims.",
         "🚨 \"the spreadsheet\" beside a PDF refused to choose. Matching a named file type against the file's OWN declared type is not prose routing; two files of the same named type still ask."
+      ]
+    },
+    "ownerAcceptanceFailure_2026_09_10": {
+      "_authority": "The diagnosis of the exact failing turn. Read before re-deriving any of it.",
+      "failingTurn": {
+        "requestId": "req-1d",
+        "at": "02:44:49.557, response 200 in 1369ms (BUFFERED path, not SSE)",
+        "conversation": "conv_pv0jpy0r1qd4a53jrhwb8",
+        "prompt": "Find the email about containing MIGRA_EMAIL_SENTINEL_0909",
+        "preserved": "User+assistant rows still in postgres conversation_messages; brain log /tmp/brain-live.log. NOT overwritten — every reproduction used separate conversations."
+      },
+      "traceAnswers": {
+        "selectorChose": "migra.email, reason=object-of-request, evidence=\"email\". Verified by running the real selector on the exact prompt against the real registry.",
+        "repoPlanningRan": "NO. plan.repoPlanning=false, so the index was never consulted. The repo-shaped wording in the answer came from the verifier fallback, not from repo retrieval.",
+        "emailExecuted": "YES. Telemetry: email.operation stage=search outcome=ok count=1.",
+        "operation": "search (one op; nothing else ran on that turn).",
+        "queryToGmail": "\"migra_email_sentinel_0909\" — the asking words and the capability nouns stripped, as designed.",
+        "gmailResults": "1.",
+        "singleResultEnrichment": "🚨 DID NOT EXIST. No readMessage enrichment had been built — it was explicitly deferred as a product decision. It exists NOW, and is what makes absence provable.",
+        "evidenceInLedger": "ONE EmailEvidence from evidenceFromSearch: the snippet, complete=false. Nothing else.",
+        "sentinelLocation": "🚨 ONLY IN THE ATTACHMENTS. Verified live: snippet NO, subject NO, FULL body NO (bodyComplete=true, 140 chars). The PDF and the XLSX both carry it. Gmail matched the message because Gmail indexes attachment content.",
+        "whyWorkspaceLanguage": "gapStatement() ends \"No workspace content was retrieved in this run\" when the repo ledger is empty — text written when a repository was the only source of evidence.",
+        "whyNoticeTwice": "gapStatement() appends removalNote() itself, and the caller added `disclosure` (removalNote again) on top. Reached when every sentence is removed AND refused=false — which happens when the model says \"could not find\", a REFUSAL_MARKER that sets sawRefusal. Captured with a stack trace: two removalNote calls in one verifyAnswer, from lines 886 and 919."
+      },
+      "fixes": [
+        "7251112a — the removal notice is emitted once; the fallback no longer says \"workspace content\" (the opening sentence is already evidence-neutral, so the restatement is gone rather than reworded).",
+        "3926a9c4 — mentions() asks the adapter instead of reading item.text alone (a filename/subject/sender was invisible to rule 1, the FIRST rule, which rejects before anything can rescue); a filename's stem and extension name the same file; verbs of evidential relation (appears/contains/shows/found) are structural, not claims.",
+        "75325660 — the provider-match bridge: one result whose evidence lacks the query terms -> read the message in full -> still absent? open the attachments through the canonical file pipeline, stopping when the term is actually in front of us. At most three. An ordinary search costs nothing extra."
+      ],
+      "liveAfterFix": [
+        "3/3 runs: \"The term MIGRA_EMAIL_SENTINEL_0909 was found in the attachment migrapilot_email_fixture.pdf rather than in the message body.\" — zero statements removed, no repository language.",
+        "Telemetry per turn: search -> read_message -> attachment_list(2) -> attachment_read(1).",
+        "Streaming still buffered behind the gate: exactly 1 token frame.",
+        "Cross-principal isolation: mallory triggered 0 mailbox operations.",
+        "No internal evidence id in any answer (strict \\b(email|file|repo)_[0-9]+\\b check)."
+      ],
+      "gates": "brain-service 3207/3207, tsc clean.",
+      "doNot": [
+        "No RC freeze.",
+        "No staging promotion.",
+        "Do NOT reconnect or disconnect Gmail."
       ]
     }
   },

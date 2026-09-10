@@ -15,6 +15,84 @@ _Last updated: 2026-09-10_
 
 ---
 
+## 🚨 2026-09-10 — OWNER PRODUCT ACCEPTANCE: **FAIL**, diagnosed and fixed
+
+`7251112a` · `3926a9c4` · `75325660`
+
+**No RC freeze. No staging promotion. Gmail connection untouched.** Awaiting owner re-acceptance.
+
+The failing turn is preserved: request `req-1d`, 02:44:49, conversation `conv_pv0jpy0r1qd4a53jrhwb8`,
+prompt *"Find the email about containing MIGRA_EMAIL_SENTINEL_0909"*. Both message rows are still in
+postgres; every reproduction used separate conversations.
+
+### The trace, from telemetry and the durable record
+
+| Question | Answer |
+| --- | --- |
+| Selector chose | `migra.email`, `object-of-request`, on the word "email" |
+| Repo planning | **No** — `repoPlanning: false`; the index was never consulted |
+| `migra.email` executed | **Yes** — `stage=search outcome=ok count=1` |
+| Operation | `search`, and nothing else that turn |
+| Query sent to Gmail | `migra_email_sentinel_0909` |
+| Results | 1 |
+| Single-result `readMessage` enrichment | **Did not exist.** It had been deferred as a product decision. It exists now |
+| Evidence in the ledger | one `EmailEvidence` — the snippet, `complete: false` |
+| Where the sentinel actually is | **Only in the attachments.** Snippet no, subject no, *full body* no (`bodyComplete: true`, 140 chars) |
+
+So your hypothesis was exactly right: **Gmail matched the message because Gmail indexes attachment
+content.** The retrieved message never contained the term, so the verifier removed every claim that it
+did — correctly. The user was told nothing was found, about a search that had found the right message.
+
+### Why the answer looked broken in two more ways
+
+- **"No workspace content was retrieved in this run"** — `gapStatement()` ends that way when the repo
+  ledger is empty. Written when a repository was the only place evidence came from; said to someone
+  asking about their mailbox it implies the wrong thing was searched.
+- **The notice appeared twice** — `gapStatement()` appends `removalNote()` itself, and the caller then
+  added `disclosure` (the same note) on top. Reached only when every sentence is removed *and*
+  `refused` is false — which is what happens when the model writes "could not find", a refusal marker
+  that sets `sawRefusal`. Confirmed with a stack trace: two `removalNote` calls inside one
+  `verifyAnswer`.
+
+Neither was introduced by the chat gate. Both were latent in the shared verifier and could only surface
+once a surface with non-repository evidence began verifying.
+
+### The bridge — go and look, don't relax the gate
+
+```
+search returns ONE result whose evidence lacks the query terms
+  → read the message in full        (absence from a SNIPPET is not absence from a message)
+  → still absent? list + open the attachments through the canonical file pipeline
+  → stop the moment the term is actually in front of us
+  → only then may the answer say where it was found — about a FILE that was read
+```
+
+Narrow on purpose: one result only, terms genuinely absent, at most three attachments. An ordinary
+search whose terms are in the body costs nothing extra. When nothing readable holds the term, the turn
+says the provider matched but the term was **not located**, and invents no evidence for it.
+
+Two further false rejections had to go first, both the same root cause — a rule written when evidence
+*was* a repository span:
+
+- `mentions()` searched `item.text` alone, so a filename was invisible to **rule 1**, the first rule,
+  which rejects as fabrication before the rule that would have found the term ever runs.
+- A file's **stem and extension** name the same file, and verbs of evidential relation
+  (*appears, contains, shows, found*) state where something is rather than assert anything checkable.
+
+### Live, after the fix — 3/3
+
+> The term "MIGRA_EMAIL_SENTINEL_0909" was found in the attachment "migrapilot_email_fixture.pdf"
+> **rather than in the message body.**
+
+Zero statements removed. No repository language. Telemetry per turn: `search → read_message →
+attachment_list(2) → attachment_read(1)`. Streaming still buffered behind the gate (1 token frame).
+Cross-principal isolation: 0 mailbox operations for the other principal. No internal evidence id in any
+answer.
+
+Gates: brain-service **3207/3207**, `tsc` clean.
+
+---
+
 ## Lane 2026-09-10 — normal chat reaches the mailbox, and the live test earned its keep
 
 `73e2ae5e` · `38b85f2c` · `19cbc440` · `5a3e8dfe` · `38bce47b`
