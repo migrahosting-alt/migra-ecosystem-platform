@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-09",
-  "updatedBy": "Claude (Opus 5) — CT101 retired, staging DB created; blocked on staging role credential",
+  "updatedBy": "Claude (Opus 5) — staging credential bootstrapped; schema 28 still pending",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2859,12 +2859,25 @@
       "basis": "MIGRAPILOT_ASSISTANT_SECRET is read only by apps/pilot-web (lib/pilot/assistant-auth.ts, the /api/pilot/assistant bearer gate, and its verify/eval scripts) — the workload just retired. No /etc/migrapilot/*.env on VM111 production references it.",
       "caveat": "NOT confirmed dead. An internal caller on vmbr10 could have used :3399; that endpoint is now down. Value never read or printed. NOT rotated — owner is away."
     },
-    "trackA_chatTurn": "NOT STARTED. No work performed; the recorded state at 03f29f87 stands.",
+    "trackA_chatTurn": "NOT STARTED in this run either. Stated plainly: 03f29f87 stands, and cases 3, 9, 10 remain open.",
     "blocker": {
       "what": "Setting a password for migrapilot_brain_stage_app.",
       "why": "Both available routes cross a stated boundary: generating it through this session would print a secret into the transcript, and writing it on db-core falls outside the approved hook scope (which permits only `sudo -u postgres psql` and denies file writes).",
       "consequence": "Blocks schema 28, and therefore the staging Brain, the staging runtime and any staging deployment.",
       "ownerAction": "Set the password by a channel that does not route it through an agent transcript, then place the DSN in the staging Brain env file. Everything downstream is unblocked by that one step."
-    }
+    },
+    "credentialBootstrap": {
+      "_authority": "Bonex, 2026-09-10: one-shot bootstrap for migrapilot_brain_stage_app only.",
+      "credentialCreated": "yes",
+      "method": "Generated on CT101 with openssl rand -hex 32. Hex chosen so it needs no SQL escaping. Written directly to the staging secret authority; the ALTER ROLE statement was piped to db-core stdin and the local copy shredded. The value was never printed, never placed in chat, and never read back.",
+      "secretFile": "/etc/migrapilot-staging/brain.env on CT101",
+      "ownerMode": "root:root, 0600 (directory 0750)",
+      "variables": "MIGRAPILOT_PERSISTENCE, MIGRAPILOT_BRAIN_DATABASE_URL",
+      "dbAuthentication": "NOT YET PROVEN — CT101 has no psql client. pg_authid confirms rolpassword is set and the role can log in, but an actual authenticated connection has not been made. It will be proven by the staging Brain boot.",
+      "schemaVersion": "not applied — still 0/empty",
+      "scopeRespected": "No production role, database, env file or secret was read or modified.",
+      "twoMistakesWorthRecording": "(1) `ssh -n` redirects stdin from /dev/null, so the first ALTER ROLE silently applied nothing — caught only because I verified rolpassword rather than trusting empty output. (2) The db-core hook exception refuses any command also mentioning pve/pct exec, so generation and application must stay in separate invocations."
+    },
+    "ollama": "Stopped and disabled only. Packages deliberately NOT removed, per Bonex — the runtime memory is already reclaimed and uninstalling adds destructive work for little value."
   }
 }
