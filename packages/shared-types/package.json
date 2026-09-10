@@ -49,6 +49,10 @@
     "./file-policy": {
       "types": "./src/filePolicy.ts",
       "default": "./dist/filePolicy.js"
+    },
+    "./workbook": {
+      "types": "./src/workbook/index.ts",
+      "default": "./dist/workbook/index.js"
     }
   },
   "files": [

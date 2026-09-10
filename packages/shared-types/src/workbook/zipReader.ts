@@ -1,5 +1,13 @@
-import 'server-only'
-
+/*
+ * 🚨 NOT A BROWSER MODULE, AND NO LONGER GUARDED BY ONE.
+ *
+ * This carried Next's `server-only` import while it lived inside the consumer
+ * app. It is shared now — the Brain reads the same workbooks, and two readers
+ * would disagree about what a sheet says the first time either was tuned — so
+ * that guard is gone and the isolation is the package export map: nothing
+ * reaches this except an explicit `@migrapilot/shared-types/workbook` import,
+ * which no client component makes.
+ */
 import { inflateRawSync } from 'node:zlib'
 
 /**

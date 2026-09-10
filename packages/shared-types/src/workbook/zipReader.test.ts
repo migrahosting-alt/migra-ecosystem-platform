@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { deflateRawSync } from 'node:zlib'
 import { describe, it } from 'node:test'
 
-import { ZipError, looksLikeZip, readNamedEntry, readZipEntries, readZipEntry } from './zipReader'
+import { ZipError, looksLikeZip, readNamedEntry, readZipEntries, readZipEntry } from './zipReader.js'
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__')
 const load = (name: string): Buffer => readFileSync(join(FIXTURES, name))

@@ -226,6 +226,19 @@
 !/packages/shared-types/src/
 !/packages/shared-types/src/*.ts
 
+# The workbook reader lives in a SUBDIRECTORY, and `src/*.ts` above does not reach one — which is
+# the same trap this block was written about, one level deeper. The reader moved here out of the
+# consumer app because the Brain reads the same .xlsx files and two readers would disagree about
+# what a sheet says the first time either was tuned. It was written, built and green before
+# anything noticed it could not be committed.
+#
+# The .xlsx fixtures are tracked deliberately: they are real Excel output, which is exactly what
+# makes them worth having, and nothing in the repo can regenerate them from source.
+!/packages/shared-types/src/workbook/
+!/packages/shared-types/src/workbook/*.ts
+!/packages/shared-types/src/workbook/__fixtures__/
+!/packages/shared-types/src/workbook/__fixtures__/*.xlsx
+
 # @migraai/compute-client is the typed client for the Shared Compute Authority — the ONE package
 # Studio, Brain, Engineer, MigraPilot and the CLI all talk to the authority through. It is a
 # contract, not an implementation: no provider, scheduling, evidence or lifecycle logic, enforced

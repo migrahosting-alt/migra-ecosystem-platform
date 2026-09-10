@@ -13,10 +13,19 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
-import { readWorkbook, type WorkbookSheet } from './readWorkbook'
-import { chooseSheet, excelSerialToIso, renderCellText, sheetToTable } from './workbookTable'
+import { excelSerialToIso, readWorkbook, type WorkbookSheet } from '@migrapilot/shared-types/workbook'
+import { chooseSheet, renderCellText, sheetToTable } from './workbookTable'
 
-const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__')
+/*
+ * 🚨 THE READER'S OWN FIXTURES, WHERE THE READER LIVES. These four workbooks
+ * test how a .xlsx is READ, so they moved into the shared package with it. The
+ * `eq_*` corpus stays here: it tests that a sheet and its CSV export classify
+ * identically, which is this lane's question, not the reader's.
+ */
+const FIXTURES = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../packages/shared-types/src/workbook/__fixtures__',
+)
 const load = (name: string): Buffer => readFileSync(join(FIXTURES, name))
 
 const sheet = (name: string, rows: (string | number)[][]): WorkbookSheet => ({

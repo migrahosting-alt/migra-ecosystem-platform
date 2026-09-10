@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { parseTable, TableParseError, type ParsedTable, type TableColumn } from './parseTable'
 import { computeColumn, groupBy, ComputationRefused, type Operation } from './computeTable'
-import { readWorkbook, WorkbookError } from './readWorkbook'
+import { readWorkbook, WorkbookError } from '@migrapilot/shared-types/workbook'
 import { chooseSheet, sheetToTable } from './workbookTable'
 import { composeEvidence } from '@/server/evidence/composition'
 
@@ -258,7 +258,7 @@ export interface TableEvidence {
 type LoadedTable =
   | { kind: 'table'; table: ParsedTable; sheetName?: string; formulaColumns: number[] }
   /** Every sheet, for a whole-workbook description. */
-  | { kind: 'workbook'; sheets: readonly import('./readWorkbook').WorkbookSheet[] }
+  | { kind: 'workbook'; sheets: readonly import('@migrapilot/shared-types/workbook').WorkbookSheet[] }
   | { kind: 'refused'; reason: string }
   | { kind: 'none' }
 
