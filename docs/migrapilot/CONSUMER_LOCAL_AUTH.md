@@ -27,6 +27,34 @@ defaults or are optional. A public PKCE client needs **no client secret**.
 
 ---
 
+## The narrow path, located (audited 2026-09-11)
+
+MigraAuth has a per-client API. **Use it. Do not run the bulk seed.**
+
+| | |
+| --- | --- |
+| Audit existing clients | `GET /v1/clients` — what this user can see |
+| Create exactly one | `POST /v1/clients` |
+| 🚨 Do **not** use | `MigraTeck/apps/auth-api/src/seed.ts` — an upsert pass that rewrites every client |
+| Developer console (live, 200) | `https://auth.migrateck.com/developers/apps` |
+
+Both routes sit behind `requireSession`, so **an owner session is required to audit or create** —
+there is no unauthenticated way to look, which is correct and is exactly why I stopped here.
+
+The create contract (`createOAuthClientSchema`):
+
+```
+client_name        MigraPilot Consumer (local development)
+client_type        public
+redirect_uris      ["http://127.0.0.1:3000/api/auth/callback"]
+allowed_scopes     ["openid","profile","email","offline_access"]
+requires_pkce      true
+token_auth_method  none
+```
+
+`redirect_uris` is validated with a plain `z.string().url()` — there is **no https-only rule**, so a
+loopback `http://` callback is accepted.
+
 ## The one thing only the owner can do
 
 A public OAuth client must exist at `https://auth.migrateck.com` for this local app, with:
@@ -36,12 +64,16 @@ A public OAuth client must exist at `https://auth.migrateck.com` for this local 
 - **token endpoint auth** — `none` (public client)
 - **scopes** — `openid profile email offline_access`
 
-🚨 **I have not created one, and will not without being asked.** Registering a client on the
-live identity provider is a security-settings change, and the seed paths in this repo are
-upserts that rewrite every client — running one to add a single entry is how the others get
-silently reshaped.
+**Sign in at `https://auth.migrateck.com`.** Once you have, I can drive the developer console to
+audit the existing clients and create this one if none is suitable — that is sanctioned by
+`CLAUDE.md` after a manual login. I cannot get there alone: both the list and the create sit
+behind a session, by design.
 
-If a suitable client already exists, its id is all that is needed.
+🚨 **One dedicated client, created through `POST /v1/clients`.** Never the seed: it upserts the
+whole registry, and adding a single local client that way is how the others get silently
+reshaped.
+
+If a suitable public client already exists, its id is all that is needed and nothing is created.
 
 ---
 
