@@ -145,6 +145,34 @@ export async function runChatCapabilities(input: {
 }
 
 /**
+ * The final answer text, when the capability owns it.
+ *
+ * 🚨 NULL MEANS GENERATE NORMALLY. Non-null means the words are already written
+ * and the route must emit them without a model call — the facts are typed, the
+ * text was rendered from them by code, and a model asked to restate it can only
+ * change it.
+ */
+export function capabilityOwnedAnswer(outcome: ChatCapabilityOutcome): string | null {
+  const answer = outcome.turn.capabilityAnswer;
+  if (!answer || answer.mode !== 'capability') return null;
+  return [answer.groundedText, answer.disclosure].filter(Boolean).join('\n\n');
+}
+
+/**
+ * The immutable payload a HYBRID answer is built around.
+ *
+ * 🚨 THE MODEL WRITES AROUND THIS, NEVER INSIDE IT. The route emits this text
+ * verbatim and appends whatever the model wrote once the gate has checked it —
+ * so commentary can be refused entirely and the facts still stand, and no
+ * wording a model chooses can alter a figure, a filename or a date.
+ */
+export function capabilityPayload(outcome: ChatCapabilityOutcome): string | null {
+  const answer = outcome.turn.capabilityAnswer;
+  if (!answer || answer.mode !== 'hybrid') return null;
+  return [answer.groundedText, answer.disclosure].filter(Boolean).join('\n\n');
+}
+
+/**
  * What the model is told about what was retrieved.
  *
  * 🚨 EVIDENCE AND ITS LIMITS TRAVEL TOGETHER. A preview reads exactly like a

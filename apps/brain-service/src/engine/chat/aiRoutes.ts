@@ -42,7 +42,7 @@ import { ConversationStore, PersistenceUnavailableError, type Scope } from '../m
 import { buildContext, type ContextDiagnostics } from '../memory/contextBuilder.js';
 import { redactSecrets } from '../memory/redaction.js';
 import { scopeFrom } from '../memory/memoryRoutes.js';
-import { capabilityContext, runChatCapabilities } from './chatCapabilities.js';
+import { capabilityContext, capabilityOwnedAnswer, capabilityPayload, runChatCapabilities } from './chatCapabilities.js';
 import { chatGroundingFor, verifyChatAnswer } from './chatGrounding.js';
 import { engineCorrelationId } from '../tools/toolRoutes.js';
 import { BrainTurnTrace } from '../observability/turnTrace.js';
@@ -936,6 +936,31 @@ export function registerAiRoutes(
      * Null means the turn retrieved no capability evidence, and repository-only
      * chat behaves exactly as it always has.
      */
+    /*
+     * ── The capability owns this answer ──────────────────────────────────
+     *
+     * 🚨 NO MODEL CALL AT ALL. The facts are typed and the text was rendered
+     * from them by code, so there is nothing here for a model to improve that
+     * it could not also corrupt — and everything that went wrong in owner
+     * acceptance was corruption of exactly this kind: an invented filename, a
+     * list missing its first entry, a flat refusal, all from the same correct
+     * retrieval.
+     *
+     * It is also not sent through the grounding gate. The gate exists to check
+     * GENERATED prose against evidence; this text was not generated, and
+     * re-verifying it would only reintroduce the stochastic refusal it was
+     * written to remove.
+     */
+    const ownedAnswer = capabilityTurn ? capabilityOwnedAnswer(capabilityTurn) : null;
+    /*
+     * 🚨 A HYBRID TURN'S FACTS ARE FIXED BEFORE A TOKEN IS GENERATED. The model
+     * still writes — it may explain, contextualise, answer the narrow question
+     * — but it writes AROUND this block. If everything it writes is refused,
+     * the payload stands on its own, which is why a figure can no longer go
+     * missing because of how a sentence came out.
+     */
+    const payload = capabilityTurn ? capabilityPayload(capabilityTurn) : null;
+
     const groundingSources = chatGroundingFor({ capability: capabilityTurn, ragChunks });
     const verifyFinalAnswer = groundingSources
       ? (raw: string) => verifyChatAnswer(raw, groundingSources)
@@ -965,10 +990,43 @@ export function registerAiRoutes(
       },
     });
 
+    /*
+     * 🚨 EMITTED HERE, BEFORE ANY GENERATION. Placed after routing is decided
+     * so the audit trail still records what WOULD have served the turn, and
+     * before a single token is requested, because a capability-owned answer
+     * that still paid for inference would be the same design mistake wearing a
+     * cheaper hat.
+     */
+    if (ownedAnswer) {
+      trace.set('answer_owner', 'capability');
+      await commit?.(ownedAnswer, decision.model.id, decision.model.provider);
+      await auditStore.append({
+        correlationId: requestId, requestId, type: 'execution.completed', component: 'chat',
+        outcome: 'ok',
+        fields: { model: 'capability-owned', provider: 'engine', toolCalls: 0 },
+      });
+      trace.mark('generation');
+      trace.finish('ok');
+      if (body.stream) {
+        return streamOwnedAnswer(request, reply, requestId, ownedAnswer, contextDiagnostics);
+      }
+      return {
+        ok: true,
+        model: 'capability-owned',
+        provider: 'engine',
+        tier: decision.model.tier,
+        conversationId: conv?.id,
+        context: contextDiagnostics,
+        routing: { reason: 'answered by the capability that retrieved it', alternatives: [], failedOver: [] },
+        content: ownedAnswer,
+        usage: { inputTokens: 0, outputTokens: 0, latencyMs: 0 },
+      };
+    }
+
     if (body.stream) {
       await streamChat(request, reply, requestId, decision.ranked, decision.reason,
         (m) => providerFor(m, approvedVisionModel), chatRequest,
-        { contextDiagnostics, commit, fallback, trace, capacityProbe, verifyFinalAnswer });
+        { contextDiagnostics, commit, fallback, trace, capacityProbe, verifyFinalAnswer, payload });
       return reply; // response already sent via raw stream
     }
 
@@ -987,7 +1045,11 @@ export function registerAiRoutes(
          * back as context and the gate never sees it again.
          */
         const checked = verifyFinalAnswer?.(result.content);
-        const answerText = checked ? checked.text : result.content;
+        const generated = checked ? checked.text : result.content;
+        // 🚨 PAYLOAD FIRST, AND NEVER REGENERATED.
+        const answerText = payload
+          ? [payload, checked?.refused ? '' : generated].filter((p) => p && p.trim()).join('\n\n')
+          : generated;
         if (checked) trace.set('grounding', { removed: checked.removed, refused: checked.refused });
         await commit?.(answerText, candidate.id, candidate.provider);
         await auditStore.append({
@@ -1340,6 +1402,60 @@ async function streamGeneration(
  * then `token` frames, then `done` — or `error` (sanitized). Client disconnect
  * aborts upstream work and stops without a `done`, so a cancelled turn never
  * yields a false completed answer. */
+/**
+ * Stream an answer the capability already wrote.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 STREAMING IS A PRESENTATION CHOICE, NOT A LICENCE TO CHANGE THE TEXT.
+ *
+ * The client asked for a stream and gets one — the same SSE frames, in the same
+ * order, so nothing downstream needs to know which path produced the answer.
+ * What it does NOT get is a model: the text is emitted in chunks exactly as
+ * rendered, so what arrives concatenates back to the verified payload
+ * character for character.
+ *
+ * Chunked rather than sent whole because a long summary should appear the way
+ * every other answer appears. The boundaries are arbitrary and carry no
+ * meaning, which is precisely why they are safe.
+ */
+async function streamOwnedAnswer(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  requestId: string,
+  answer: string,
+  contextDiagnostics?: ContextDiagnostics,
+): Promise<FastifyReply> {
+  reply.hijack();
+  const raw = reply.raw;
+  raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  const send = (event: string, data: unknown): void => {
+    try {
+      raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch {
+      /* connection gone */
+    }
+  };
+  request.raw.once('aborted', () => { if (!raw.writableEnded) raw.end(); });
+
+  if (contextDiagnostics) send('context', contextDiagnostics);
+  send('route', { requestId, model: 'capability-owned', provider: 'engine', reason: 'answered by the capability that retrieved it' });
+
+  // 🚨 SPLIT ONLY. Never reflowed, never re-cased, never trimmed per chunk —
+  // the concatenation is the payload, byte for byte.
+  const CHUNK = 240;
+  for (let at = 0; at < answer.length; at += CHUNK) {
+    send('token', { text: answer.slice(at, at + CHUNK) });
+  }
+  send('done', { requestId, model: 'capability-owned', provider: 'engine', usage: { inputTokens: 0, outputTokens: 0 } });
+  raw.end();
+  return reply;
+}
+
 async function streamChat(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -1368,6 +1484,8 @@ async function streamChat(
      * partial text would reject true statements for being incomplete.
      */
     verifyFinalAnswer?: (raw: string) => { text: string; refused: boolean; removed: number };
+    /** An immutable capability payload this answer is built around, if any. */
+    payload?: string | null;
   } = {},
 ): Promise<void> {
   const trace = memory.trace;
@@ -1613,7 +1731,13 @@ async function streamChat(
       if (memory.verifyFinalAnswer) {
         send('stage', { stage: 'verifying', detail: 'Checking the answer against what was retrieved' });
         const checked = memory.verifyFinalAnswer(fullText);
-        fullText = checked.text;
+        /*
+         * 🚨 THE PAYLOAD LEADS, VERBATIM. Commentary follows only if it
+         * survived the gate; a refusal costs the commentary, never the facts.
+         */
+        fullText = memory.payload
+          ? [memory.payload, checked.refused ? '' : checked.text].filter((p) => p && p.trim()).join('\n\n')
+          : checked.text;
         trace?.set('grounding', { removed: checked.removed, refused: checked.refused });
         send('token', { text: fullText });
       }

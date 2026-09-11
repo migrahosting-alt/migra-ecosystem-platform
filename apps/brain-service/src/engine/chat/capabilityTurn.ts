@@ -45,6 +45,9 @@ import {
   type ConversationEvidenceStore, type ReferenceFileType, type ResolvedReference,
 } from './conversationEvidence.js';
 import type { EmailAttachment, EmailMessage, EmailThread } from '../email/types.js';
+import {
+  MAX_RENDERED_FILE_CHARS, renderFacts, type CapabilityAnswer, type StructuredFacts,
+} from './answerOwnership.js';
 
 export interface CapabilityTurnDeps {
   toolDeps: ToolExecDeps;
@@ -147,6 +150,15 @@ export interface CapabilityTurnResult {
    * Only then can an answer say where the term was found — and it says it about
    * a FILE it has read, not about a body it has not.
    */
+  /**
+   * The answer the CAPABILITY owns, when this turn produced one.
+   *
+   * 🚨 PRESENT MEANS THE WORDS ARE ALREADY WRITTEN. The caller emits
+   * `groundedText` as-is and makes no generation call: the facts are typed, the
+   * text was rendered from them by code, and there is nothing for a model to
+   * improve that it could not also corrupt.
+   */
+  capabilityAnswer: CapabilityAnswer | null;
   providerMatchBeyondEvidence: {
     /** The terms the provider matched on that our message evidence lacks. */
     terms: string[];
@@ -198,6 +210,7 @@ export async function runCapabilityTurn(
       reference: null,
       unresolvedReference: null,
       ambiguousAttachment: null,
+      capabilityAnswer: null,
       providerMatchBeyondEvidence: null,
       executed: [],
       // An unidentified turn plans repository evidence like any other, because
@@ -278,6 +291,7 @@ export async function runCapabilityTurn(
       reference: null,
       unresolvedReference: { phrase },
       ambiguousAttachment: null,
+      capabilityAnswer: null,
       providerMatchBeyondEvidence: null,
       executed: [],
       repoPlanning: plan.repoPlanning,
@@ -286,6 +300,23 @@ export async function runCapabilityTurn(
 
   let ambiguousAttachment: { candidates: string[] } | null = null;
   let providerMatchBeyondEvidence: CapabilityTurnResult['providerMatchBeyondEvidence'] = null;
+  /*
+   * 🚨 THE LAST AUTHORITATIVE RESULT WINS, and there is at most one per turn.
+   * A turn that both listed attachments and fetched one is answering about the
+   * fetch; the listing was a step on the way.
+   */
+  let capabilityAnswer: CapabilityAnswer | null = null;
+  const ownAnswer = (facts: StructuredFacts, citations: CapabilityAnswer['citations'], disclosure: string | null) => {
+    capabilityAnswer = {
+      mode: 'capability',
+      groundedText: renderFacts(facts),
+      structuredFacts: facts,
+      citations,
+      disclosure,
+      // 🚨 The words are final. See the note on the field.
+      allowModelRewrite: false,
+    };
+  };
   /** Evidence id → the capability that produced it, for the turns that follow. */
   const producedBy: Record<string, string> = {};
 
@@ -328,6 +359,18 @@ export async function runCapabilityTurn(
       ledger.add(item);
       producedBy[item.id] = chosen.capabilityId;
     }
+
+    /*
+     * 🚨 AN AUTHORITATIVE RESULT OWNS ITS OWN WORDS.
+     *
+     * Decided from the RESULT, never from how the question was phrased — an
+     * attachment listing is authoritative whatever a person typed to get it.
+     * Everything a reader will see is rendered from typed data by code, so a
+     * filename cannot be invented, an entry cannot be dropped, and the answer
+     * cannot come out differently on the next run.
+     */
+    const owned = authoritativeFacts(result, reference);
+    if (owned) ownAnswer(owned.facts, owned.citations, owned.disclosure);
 
     /*
      * ---------------------------------------------------------------------
@@ -393,10 +436,48 @@ export async function runCapabilityTurn(
           });
           if (!fetched) continue;
           inspected.push(attachment.filename);
+        // 🚨 A LISTING THAT LED TO A FETCH IS A STEP, NOT THE REPLY. Left
+        // owning the answer, it returned file NAMES to someone who asked for
+        // the figures inside one of them — eight times out of eight.
+        capabilityAnswer = null;
+
           for (const item of await evidenceFrom(fetched, reference, scope, ledger)) {
             ledger.add(item);
             producedBy[item.id] = chosen.capabilityId;
           }
+          for (const item of ledger.ofKind('file')) {
+            /*
+             * 🚨 THE DOCUMENT'S OWN WORDS, AS AN IMMUTABLE PAYLOAD.
+             *
+             * Extracted text is typed data the system holds exactly. Live, a model
+             * asked to restate these figures never produced a WRONG one — but one run
+             * in eight produced NONE, which is the same unreliability wearing a safe
+             * face. So the contents are rendered by code and the model may write
+             * AROUND them; it cannot write inside them.
+             *
+             * Only when the whole document fits in an answer. Past that it is not an
+             * answer, it is the document, and selecting from it is the model's job.
+             */
+            if (item.text.length > MAX_RENDERED_FILE_CHARS) continue;
+            capabilityAnswer = {
+              mode: 'hybrid',
+              groundedText: renderFacts({
+                kind: 'file-contents',
+                filename: item.locator.filename,
+                text: item.text,
+                complete: item.complete,
+              }),
+              structuredFacts: {
+                kind: 'file-contents', filename: item.locator.filename, text: item.text, complete: item.complete,
+              },
+              citations: [{ kind: 'file', cite: `"${item.locator.filename}"`, locator: item.locator.sha256 }],
+              disclosure: item.complete ? null : 'This is part of the file, not all of it.',
+              // 🚨 The model may add commentary; the payload above is not its to edit.
+              allowModelRewrite: true,
+            };
+            break;
+          }
+
           // Found it. Reading the rest would cost a round trip to prove nothing.
           if (coveredBy(ledger.all(), wanted)) break;
         }
@@ -458,10 +539,48 @@ export async function runCapabilityTurn(
     });
     if (!fetched) continue;
 
+        // 🚨 A LISTING THAT LED TO A FETCH IS A STEP, NOT THE REPLY. Left
+        // owning the answer, it returned file NAMES to someone who asked for
+        // the figures inside one of them — eight times out of eight.
+        capabilityAnswer = null;
+
     for (const item of await evidenceFrom(fetched, reference, scope, ledger)) {
       ledger.add(item);
       producedBy[item.id] = chosen.capabilityId;
     }
+    for (const item of ledger.ofKind('file')) {
+      /*
+       * 🚨 THE DOCUMENT'S OWN WORDS, AS AN IMMUTABLE PAYLOAD.
+       *
+       * Extracted text is typed data the system holds exactly. Live, a model
+       * asked to restate these figures never produced a WRONG one — but one run
+       * in eight produced NONE, which is the same unreliability wearing a safe
+       * face. So the contents are rendered by code and the model may write
+       * AROUND them; it cannot write inside them.
+       *
+       * Only when the whole document fits in an answer. Past that it is not an
+       * answer, it is the document, and selecting from it is the model's job.
+       */
+      if (item.text.length > MAX_RENDERED_FILE_CHARS) continue;
+      capabilityAnswer = {
+        mode: 'hybrid',
+        groundedText: renderFacts({
+          kind: 'file-contents',
+          filename: item.locator.filename,
+          text: item.text,
+          complete: item.complete,
+        }),
+        structuredFacts: {
+          kind: 'file-contents', filename: item.locator.filename, text: item.text, complete: item.complete,
+        },
+        citations: [{ kind: 'file', cite: `"${item.locator.filename}"`, locator: item.locator.sha256 }],
+        disclosure: item.complete ? null : 'This is part of the file, not all of it.',
+        // 🚨 The model may add commentary; the payload above is not its to edit.
+        allowModelRewrite: true,
+      };
+      break;
+    }
+
   }
 
   /*
@@ -482,6 +601,7 @@ export async function runCapabilityTurn(
     plan, identified: true, ledger, reference,
     unresolvedReference: null,
     ambiguousAttachment,
+    capabilityAnswer,
     providerMatchBeyondEvidence,
     executed,
     repoPlanning: plan.repoPlanning,
@@ -670,6 +790,76 @@ const ASKING: ReadonlySet<string> = new Set([
   'wrote', 'write', 'writes', 'said', 'say', 'says',
   'give', 'gives', 'need', 'want', 'know', 'please', 'help',
 ]);
+
+/**
+ * Facts a capability result is authoritative about, if any.
+ *
+ * 🚨 THE TEST IS THE SHAPE OF THE RESULT. `attachmentsKnown` is what makes a
+ * listing a PROVEN account of what a message carries — the same empty array
+ * from a search means nothing was ever inspected. A summary is authoritative
+ * because the summariser already checked its own prose against the sources it
+ * returns.
+ */
+function authoritativeFacts(
+  result: Record<string, unknown>,
+  reference: ResolvedReference | null,
+): { facts: StructuredFacts; citations: CapabilityAnswer['citations']; disclosure: string | null } | null {
+  const listed = attachmentsOf(result);
+  if (listed && reference) {
+    return {
+      facts: {
+        kind: 'attachment-list',
+        subject: reference.item.subject,
+        from: reference.item.from,
+        providerMessageId: reference.item.locator.providerMessageId,
+        attachments: listed.map((a) => ({
+          filename: a.filename,
+          ...(a.mimeType ? { mimeType: a.mimeType } : {}),
+          // Absent when the provider did not say; never rendered as 0.
+          ...(typeof a.sizeBytes === 'number' ? { sizeBytes: a.sizeBytes } : {}),
+        })),
+      },
+      citations: [{
+        kind: 'email',
+        cite: `message "${reference.item.subject}" from ${reference.item.from}`,
+        locator: reference.item.locator.providerMessageId,
+      }],
+      // A listing names files without opening them; that is its only shortfall.
+      disclosure: listed.length > 0
+        ? 'These files were listed, not opened, so nothing here describes their contents.'
+        : null,
+    };
+  }
+
+  if (typeof result.summary === 'string' && Array.isArray(result.sources)) {
+    const sources = result.sources as Array<{
+      subject: string; from: string; sentAt: string; providerMessageId: string;
+    }>;
+    return {
+      facts: {
+        kind: 'email-summary',
+        summary: result.summary,
+        complete: result.complete !== false,
+        sources: sources.map((x) => ({
+          subject: x.subject, from: x.from, sentAt: x.sentAt, providerMessageId: x.providerMessageId,
+        })),
+      },
+      citations: sources.map((x) => ({
+        kind: 'email' as const,
+        cite: `message "${x.subject}" from ${x.from}`,
+        locator: x.providerMessageId,
+      })),
+      /*
+       * 🚨 NOT RE-STATED HERE. The summariser attaches its own partiality
+       * sentence to the prose before returning it, so adding a second one would
+       * print the same caveat twice — the defect this project just fixed in the
+       * grounding gate, reintroduced one layer up.
+       */
+      disclosure: null,
+    };
+  }
+  return null;
+}
 
 /**
  * Is this prompt asking for a summary?
