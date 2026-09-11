@@ -746,3 +746,48 @@ test('🚨 15b. a listing says it did not OPEN the file, not that it previewed a
   assert.equal(/message previews/i.test(verified.answer), false,
     'a listing described itself as a message preview');
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 16. A heading whose content was removed goes with it
+ * ------------------------------------------------------------------ */
+
+test('🚨 16. an emptied section disappears together with its heading', () => {
+  /*
+   * 🚨 OWNER ACCEPTANCE, STEP 5. A thread summary came back as a list of bold
+   * labels with nothing under most of them — the gate had removed the
+   * unsupported lines and left their headings standing. A heading is a promise
+   * about what follows; when what followed did not survive, the promise goes
+   * too, or the product reads as though it lost the answer rather than declined
+   * to invent one.
+   */
+  const source = mail({ id: 'email_thread', text: 'Fixture Value 1 48273.55', complete: true });
+  const raw = [
+    '**Sender:**',
+    'billing@hetzner.com',
+    '**Attachments:**',
+    '- invented_report_2019.pdf',
+    '**Spreadsheet Values:**',
+    '- Fixture Value 1: 48273.55',
+  ].join('\n');
+
+  const verified = verifyAnswer(raw, { repo: new EvidenceLedger(), other: typed(ALICE, source) });
+  const body = answerBody(verified.answer);
+
+  assert.equal(body.includes('**Attachments:**'), false,
+    `an emptied heading survived:\n${body}`);
+  assert.equal(body.includes('invented_report_2019'), false, 'the unsupported line survived');
+  // Headings that still have content keep it.
+  assert.ok(body.includes('**Spreadsheet Values:**'), 'a populated heading was removed');
+  assert.ok(body.includes('48273.55'), 'supported content was removed');
+});
+
+test('🚨 16b. a dangling list marker left by a removal is not rendered', () => {
+  // "1." with its item gone reads as a numbering fault, not as an answer.
+  const source = mail({ id: 'email_m', text: 'the September invoice', complete: true });
+  const raw = ['1.', '2. The September invoice arrived.'].join('\n');
+
+  const verified = verifyAnswer(raw, { repo: new EvidenceLedger(), other: typed(ALICE, source) });
+  const body = answerBody(verified.answer);
+
+  assert.equal(/^1\.\s*$/m.test(body), false, `a bare list marker survived:\n${body}`);
+});

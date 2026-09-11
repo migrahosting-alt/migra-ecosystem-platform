@@ -913,7 +913,7 @@ export function verifyAnswer(
   }
 
   const directClaims = claims.filter((c) => c.kind === 'direct_evidence');
-  const body = rendered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const body = dropEmptySections(rendered.join('\n').replace(/\n{3,}/g, '\n\n').trim());
   const refused = directClaims.length === 0 && !sawRefusal;
 
   const evidence = {
@@ -990,6 +990,72 @@ function labelInference(sentence: string, basis: InferenceBasis): string {
   // says nothing about whether the CODE backs it.
   if (basis === 'hedged' && /\binfer(?:ence|red|s|ring)?\b/i.test(sentence)) return sentence;
   return `${label} ${sentence}`;
+}
+
+/**
+ * A heading whose content was removed goes with it.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 A LABEL WITH NOTHING UNDER IT IS ITS OWN KIND OF UNTRUTH
+ *
+ * Found in owner acceptance. A thread summary came back as "**1.** **2.**
+ * **3.** — **Attachments:** — **Spreadsheet Values:**" with real figures under
+ * one of them and nothing under the others: the gate had removed the
+ * unsupported lines and left their headings standing. The reader is told a
+ * section exists and shown no content, which reads as a product that lost the
+ * answer rather than one that declined to make it up.
+ *
+ * A heading is a promise about what follows. When what followed did not
+ * survive, the promise goes too.
+ */
+function dropEmptySections(body: string): string {
+  const lines = body.split('\n');
+  const kept: string[] = [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!;
+    if (!isHeadingLike(line)) { kept.push(line); continue; }
+
+    // Does anything that is NOT another heading follow, before the next one?
+    let hasContent = false;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const next = lines[j]!;
+      if (next.trim() === '') continue;
+      if (isHeadingLike(next)) break;
+      hasContent = true;
+      break;
+    }
+    if (hasContent) kept.push(line);
+  }
+
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * A line that introduces content rather than being content.
+ *
+ * Markdown headings, bold-only labels, and the bare list markers a model leaves
+ * behind when its list items are removed ("1.", "- ", "**2.**").
+ */
+function isHeadingLike(line: string): boolean {
+  const text = line.trim();
+  if (!text) return false;
+  if (/^#{1,6}\s/.test(text)) return true;
+
+  // Strip a leading list marker; what remains is the label itself.
+  const label = text.replace(/^(?:[-*+]|\d+[.)])\s*/, '').trim();
+
+  // A marker with nothing after it — "1.", "-", or the "**2." a model leaves
+  // when its list item was removed mid-emphasis.
+  if (label === '' || /^\*{0,2}$/.test(label)) return true;
+
+  /*
+   * A label ending in a colon, with the colon INSIDE or OUTSIDE the emphasis.
+   * Models write both `**Attachments:**` and `**Attachments**:`, and matching
+   * only one of them leaves half the empty headings standing.
+   */
+  const bare = label.replace(/\*\*/g, '').trim();
+  return bare.endsWith(':') && !bare.slice(0, -1).includes(':');
 }
 
 /**
