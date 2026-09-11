@@ -140,7 +140,15 @@ test('🚨 10b. "summarize that email" resolves the antecedent and RE-READS it',
    * 🚨 THE POINT. The second turn issued a readMessage — it did not serve the
    * stored body. A pointer is not a permission.
    */
-  assert.deepEqual(calls.map((c) => c.op), ['search', 'readMessage']);
+  /*
+   * 🚨 RE-EXECUTED, AND THROUGH THE GROUNDED SUMMARISER. A summary paraphrases,
+   * and paraphrase words are by definition absent from the source — so asking
+   * the model to summarise a fetched body produced prose the gate refused every
+   * time. The capability owns a summariser that keeps its sources; this is it
+   * being selected. What matters for THIS test is unchanged: the operation went
+   * back through the capability rather than replaying stored text.
+   */
+  assert.deepEqual(calls.map((c) => c.op), ['search', 'summarize']);
 });
 
 test('"summarize the thread" re-reads the THREAD, not the message', async () => {
@@ -151,7 +159,9 @@ test('"summarize the thread" re-reads the THREAD, not the message', async () => 
 
   await runCapabilityTurn({ prompt: 'find the email about invoice pm-1', identity, conversationId: 'c1', turnId: 't1', requestId: 'r1' }, d);
   await runCapabilityTurn({ prompt: 'summarize the thread', identity, conversationId: 'c1', turnId: 't2', requestId: 'r2' }, d);
-  assert.deepEqual(calls.map((c) => c.op), ['search', 'readThread']);
+  // Same for a thread: summarising one is the summariser's job, scoped to the
+  // thread rather than the message.
+  assert.deepEqual(calls.map((c) => c.op), ['search', 'summarize']);
 });
 
 /* ------------------------------------------------------------------ *

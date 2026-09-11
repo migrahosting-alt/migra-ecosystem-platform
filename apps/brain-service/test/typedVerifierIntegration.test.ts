@@ -638,3 +638,111 @@ test('🚨 13. naming a file WITHOUT its extension still names that file', () =>
   });
   assert.equal(answerBody(invented.answer).includes('9999'), false, 'a fabricated sentinel survived');
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 14. A grounded summary can carry a body claim — and only as far
+ *        as the body its sources actually hold
+ * ------------------------------------------------------------------ */
+
+test('🚨 14. a summary of a COMPLETE message can say what the message said', () => {
+  /*
+   * 🚨 THE OWNER ACCEPTANCE FAILURE, STEP 2. "Summarize that email" refused every
+   * single time — and the rule doing it was correct: a summary may support a
+   * claim only where one of its own SOURCES does. The sources were the problem.
+   * They carried the message's SUBJECT and nothing else, because the summariser
+   * dropped the text it had read. So a summary could support nothing about a
+   * body, and the most asked-for operation in a mailbox never survived.
+   */
+  const source = mail({
+    id: 'email_src',
+    text: 'here s the test files -- 4957 Coconut Creek Pkwy. PHONE: 877-545-5428',
+    complete: true,
+  });
+  const summary = mail({
+    id: 'email_sum',
+    text: 'The message shares test files and gives a phone number.',
+    complete: true,
+    preGrounded: true,
+  });
+
+  const verified = verifyAnswer('The message shares test files and gives a phone number.', {
+    repo: new EvidenceLedger(),
+    other: typed(ALICE, source, { ...summary, derivedFrom: [source.id] } as never),
+  });
+
+  assert.ok(answerBody(verified.answer).includes('test files'),
+    `a summary of a message that was fully read was refused: ${verified.answer}`);
+});
+
+test('🚨 14b. and a summary of a PREVIEW still cannot claim the rest of the body', () => {
+  /*
+   * The limit that makes the above safe. A source read as a preview carries only
+   * its preview, so the summary inherits exactly that reach — no more.
+   */
+  const preview = mail({ id: 'email_prev', text: 'here s the test files…', complete: false });
+  const summary = mail({
+    id: 'email_sum2',
+    text: 'The message gives a phone number of 877-545-5428.',
+    complete: false,
+    preGrounded: true,
+  });
+
+  const verified = verifyAnswer('The message gives a phone number of 877-545-5428.', {
+    repo: new EvidenceLedger(),
+    other: typed(ALICE, preview, { ...summary, derivedFrom: [preview.id] } as never),
+  });
+
+  assert.equal(answerBody(verified.answer).includes('877-545-5428'), false,
+    'a summary claimed a detail its preview source never contained');
+});
+
+/* ------------------------------------------------------------------ *
+ * 🚨 15. An attachment LISTING names its files, and says what it is
+ * ------------------------------------------------------------------ */
+
+test('🚨 15. every file in a listing survives, and the list keeps its introduction', () => {
+  /*
+   * 🚨 OWNER ACCEPTANCE, STEP 3. Asked what attachments a message had, the gate
+   * removed the first item and the lead-in and left an answer that began at
+   * "2." — because a listing's text IS a filename and only the FILE adapter
+   * knew that a name's parts name it, and because `attachment` was in the file
+   * vocabulary but not the message one.
+   */
+  const listing = (filename: string, id: string) => mail({
+    id, text: filename, complete: false,
+    attachmentRef: `ref-${id}`,
+  });
+  const ledger = typed(ALICE, listing('migrapilot_email_fixture.pdf', 'email_a'),
+    listing('migrapilot_email_fixture (1).xlsx', 'email_b'));
+
+  const verified = verifyAnswer(
+    'The email has two attachments:\n\n1. "migrapilot_email_fixture.pdf"\n2. "migrapilot_email_fixture (1).xlsx"',
+    { repo: new EvidenceLedger(), other: ledger },
+  );
+
+  const body = answerBody(verified.answer);
+  assert.ok(body.includes('two attachments'), `the list lost its introduction: ${verified.answer}`);
+  assert.ok(body.includes('migrapilot_email_fixture.pdf'), 'the first attachment was removed');
+  assert.ok(body.includes('migrapilot_email_fixture (1).xlsx'), 'the second attachment was removed');
+
+  // 🚨 AND A FILE THAT IS NOT THERE STILL DIES.
+  const invented = verifyAnswer('The email has one attachment: "migra_test_files_10292020.pdf"', {
+    repo: new EvidenceLedger(), other: ledger,
+  });
+  assert.equal(answerBody(invented.answer).includes('migra_test_files'), false,
+    'a fabricated attachment name survived');
+});
+
+test('🚨 15b. a listing says it did not OPEN the file, not that it previewed a message', () => {
+  const listing = mail({ id: 'email_l', text: 'budget.xlsx', complete: false, attachmentRef: 'ref-1' });
+
+  const verified = verifyAnswer('The email has an attachment: budget.xlsx', {
+    repo: new EvidenceLedger(), other: typed(ALICE, listing),
+  });
+  assert.ok(answerBody(verified.answer).includes('budget.xlsx'),
+    `the claim was refused, so no caveat could attach: ${verified.answer}`);
+
+  assert.match(verified.answer, /was not opened/i);
+  assert.equal(/message previews/i.test(verified.answer), false,
+    'a listing described itself as a message preview');
+});

@@ -515,3 +515,52 @@ test('a named type that matches NOTHING asks rather than opening something else'
     'a spreadsheet request opened a PDF');
   assert.deepEqual(result.ambiguousAttachment?.candidates, ['contract.pdf', 'notes.pdf']);
 });
+
+/* ------------------------------------------------------------------ *
+ * 🚨 3l. "What attachments are on it?" must REACH the mailbox
+ * ------------------------------------------------------------------ */
+
+test('🚨 3l. a question about a message\'s attachments retrieves them, it does not recall them', async () => {
+  /*
+   * 🚨 THE OWNER ACCEPTANCE FAILURE, STEP 3. This selected NOTHING and the model
+   * answered from conversation memory with a filename it invented —
+   * `migra_test_files_10292020.pdf`, a file that does not exist. And the gate
+   * never saw it: with no capability evidence there is nothing to verify
+   * against, so the turn was not verified at all.
+   *
+   * The cause was upstream of both. `attachments` is a STRUCTURAL word — the
+   * shape of the answer, not a thing to go and find — and counting it as a
+   * subject made the bare "it" look forward instead of back. So no reference
+   * resolved, no capability was selected, and nothing was retrieved.
+   */
+  const calls: Call[] = [];
+  const store = new MemoryConversationEvidence();
+  const d = deps({ connectedFor: [ALICE.owner], calls, store });
+  await findTheMessage(d);
+
+  const result = await runCapabilityTurn({
+    prompt: 'What attachments are on it?',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c1', turnId: 'turn-2', requestId: 'r2',
+  }, d);
+
+  assert.equal(result.plan.selected.length, 1, 'the question reached no capability at all');
+  assert.ok(calls.some((c) => c.op === 'listAttachments'), 'the attachments were never listed');
+  assert.equal(result.ledger.isEmpty(), false, 'nothing was retrieved to answer from');
+});
+
+test('a real subject beside a pronoun is still a FRESH request', async () => {
+  // The guard must not swallow genuine subjects: "test file" is not structural.
+  const calls: Call[] = [];
+  const store = new MemoryConversationEvidence();
+  const d = deps({ connectedFor: [ALICE.owner], calls, store });
+
+  const result = await runCapabilityTurn({
+    prompt: 'search my email for the test file and tell me who sent it',
+    identity: executionIdentityFrom(ALICE),
+    conversationId: 'c-fresh', turnId: 't1', requestId: 'r1',
+  }, d);
+
+  assert.equal(result.unresolvedReference, null, 'a fresh request was read as pointing backward');
+  assert.equal(calls[0]!.op, 'search');
+});

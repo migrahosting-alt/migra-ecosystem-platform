@@ -33,9 +33,10 @@ import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
 import { principalScopeOf, type ExecutionIdentity } from '../identity/executionIdentity.js';
 import { RETRIEVAL_VERBS, selectCapabilities, type CapabilityPlan, type SelectableCapability } from '../models/capabilitySelection.js';
 import { TypedEvidenceLedger } from '../grounding/typedEvidenceLedger.js';
-import { adapterFor, significantTerms, tokensOf, type EvidenceItem } from '../grounding/evidenceTypes.js';
+import { adapterFor, significantTerms, structuralWords, tokensOf, type EvidenceItem } from '../grounding/evidenceTypes.js';
 import {
-  evidenceFromAttachment, evidenceFromMessage, evidenceFromSearch, evidenceFromThread,
+  evidenceFromAttachment, evidenceFromMessage, evidenceFromSearch, evidenceFromSummary,
+  evidenceFromThread,
 } from '../email/emailEvidenceProduction.js';
 import { emailAttachmentOrigin, fileEvidenceFrom } from '../grounding/fileEvidenceProduction.js';
 import { extractFileText } from '../files/fileText.js';
@@ -224,7 +225,16 @@ export async function runCapabilityTurn(
    * "summarize it" names nothing, so it is about what the last turn found.
    */
   const ownedNouns = deps.capabilities.flatMap((c) => c.nouns);
-  const hasFreshSubject = subjectTermsOf(input.prompt, ownedNouns).length > 0;
+  /*
+   * 🚨 STRUCTURAL WORDS ARE NOT A SUBJECT. "What attachments are on it?" names
+   * nothing to go and find — `attachments` is the SHAPE of the answer, not the
+   * thing being asked about. Counting it as a subject made the bare "it" look
+   * forward, so the turn selected nothing, retrieved nothing, and the model
+   * answered from conversation memory with a filename it invented.
+   */
+  const structural = structuralWords();
+  const hasFreshSubject = subjectTermsOf(input.prompt, ownedNouns)
+    .some((t) => !structural.has(t));
   const reference = resolveReference({ prompt: input.prompt, history, scope, hasFreshSubject });
 
   /*
@@ -491,6 +501,34 @@ function operationFor(
   nouns: readonly string[],
 ): Record<string, unknown> {
   if (reference) {
+    /*
+     * ---------------------------------------------------------------------
+     * 🚨 A SUMMARY IS AN OPERATION, NOT A READ FOLLOWED BY IMPROVISATION.
+     *
+     * "Summarize that email" used to fetch the message and leave the model to
+     * write the summary — which the gate then refused, systematically and
+     * correctly: a summary PARAPHRASES, and paraphrase words are by definition
+     * not in the source it paraphrases. Every-term matching cannot pass prose
+     * that restates prose, so the one thing people most want from a mailbox
+     * was the one thing that never survived.
+     *
+     * The capability already has a grounded summariser, built for exactly this
+     * and reachable through the registry — it reads through the caller's own
+     * connection, keeps its sources, and marks its output `preGrounded` with
+     * `derivedFrom` so it can never support more than the messages behind it.
+     * Chat simply never selected it. This is that loop closed.
+     */
+    /*
+     * 🚨 AND NOT FOR AN ATTACHMENT. "Summarize the spreadsheet attached to that
+     * email" is a request about the FILE; routing it to the message summariser
+     * would answer about the covering note and never open the spreadsheet at
+     * all. Attachments keep their own path — fetch, extract, then answer.
+     */
+    if (reference.kind !== 'attachment' && summarising(prompt)) {
+      return reference.kind === 'thread'
+        ? { op: 'summarize', threadId: reference.item.locator.providerThreadId }
+        : { op: 'summarize', messageId: reference.item.locator.providerMessageId };
+    }
     if (reference.kind === 'thread') {
       return { op: 'readThread', threadId: reference.item.locator.providerThreadId };
     }
@@ -634,6 +672,21 @@ const ASKING: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Is this prompt asking for a summary?
+ *
+ * Deliberately a word test and nothing more: it selects an OPERATION the
+ * capability already offers, on an object a reference already resolved. It
+ * decides nothing about what to fetch or from where.
+ */
+function summarising(prompt: string): boolean {
+  // 🚨 `\bsummar\b` CANNOT MATCH "summarize" — there is no word boundary in the
+  // middle of a word, so the first version of this never fired at all and the
+  // tests that should have caught it passed vacuously.
+  return /\b(summar\w*|recap\w*|gist|tl;?dr|overview)\b/i.test(prompt.toLowerCase())
+    || /\bwhat (?:was|is)\b.*\babout\b/i.test(prompt.toLowerCase());
+}
+
+/**
  * The attachments a listing reported, or null when this was not a listing.
  *
  * 🚨 `attachmentsKnown` IS THE GATE, NOT THE ARRAY. An empty array means two
@@ -662,6 +715,18 @@ async function evidenceFrom(
   }
   if (result.thread) {
     return evidenceFromThread(result.thread as EmailThread, scope, ids);
+  }
+
+  /*
+   * A GROUNDED SUMMARY, WITH THE MESSAGES IT WAS BUILT FROM. The sources go in
+   * beside it and the summary records `derivedFrom`, which is what stops prose
+   * about two previews reading like prose about two full messages.
+   */
+  if (typeof result.summary === 'string' && Array.isArray(result.sources)) {
+    return evidenceFromSummary({
+      summary: result.summary,
+      sources: result.sources as never,
+    }, scope, ids);
   }
 
   /*

@@ -204,9 +204,12 @@ test('🚨 "that email" in a LATER chat turn resolves against the same conversat
     scope: ALICE, conversationId: 'c-9', turnId: 't2', requestId: 'r2',
   });
 
-  // 🚨 RE-READ, NOT REPLAYED. The stored id says what was shown, never that it
-  // may still be seen — so the second turn goes back through the capability.
-  assert.deepEqual(calls, ['search', 'readMessage']);
+  /*
+   * 🚨 RE-EXECUTED, NOT REPLAYED. The stored id says what was shown, never that
+   * it may still be seen — so the second turn goes back through the capability.
+   * A summary request reaches the capability's own grounded summariser.
+   */
+  assert.deepEqual(calls, ['search', 'summarize']);
   assert.equal(second!.turn.reference?.kind, 'email');
 });
 

@@ -322,15 +322,21 @@ const EVIDENTIAL_RELATION = [
  * it holds only the vocabulary of pointing — never a word that could carry a
  * fact about content.
  */
-const MESSAGE_STRUCTURE = [
+export const MESSAGE_STRUCTURE_WORDS: readonly string[] = [
   'email', 'mail', 'message', 'thread', 'inbox',
   'subject', 'line', 'title',
   'sender', 'sent', 'sends', 'from', 'received', 'receive',
   'recipient', 'addressed',
   'date', 'dated', 'time', 'timestamp',
   'body', 'content', 'contents', 'text',
+  // 🚨 A MESSAGE HAS ATTACHMENTS, so naming them names part of the message.
+  // These lived only in the FILE vocabulary, so "the email has two
+  // attachments:" was removed as unsupported while the two filenames under it
+  // survived — a list with its own introduction deleted.
+  'attachment', 'attached', 'enclosure', 'enclosed',
   EVIDENTIAL_RELATION,
-].join(' ');
+];
+const MESSAGE_STRUCTURE = withPlurals(MESSAGE_STRUCTURE_WORDS).join(' ');
 
 /**
  * The email adapter.
@@ -380,13 +386,43 @@ export const emailAdapter: EvidenceAdapter<EmailEvidence> = {
    */
   haystack: (item) => [
     item.text, item.subject, item.from, item.sentAt,
+    /*
+     * 🚨 AN ATTACHMENT LISTING'S TEXT IS A FILENAME. This item says "the
+     * message carries a file called this" — so the name's parts name it, the
+     * same way they do on the file itself. Without this the gate kept one
+     * attachment and removed the other from the same list.
+     */
+    ...(item.locator.attachmentRef ? [filenameVariants(item.text)] : []),
     MESSAGE_STRUCTURE,
   ].join('\n'),
   locate: (item) => item.locator.providerMessageId,
-  limitation: (item) => (item.complete
-    ? null
-    : 'This is based on message previews, not the full messages.'),
+  limitation: (item) => {
+    if (item.complete) return null;
+    /*
+     * 🚨 A LISTING IS NOT A PREVIEW. An attachment listing is incomplete in one
+     * specific way — it names a file without opening it — and saying "based on
+     * message previews" about it describes the wrong shortfall entirely. The
+     * listing itself is a PROVEN account of what the message carries.
+     */
+    return item.locator.attachmentRef
+      ? 'This names a file that was not opened, so nothing here describes its contents.'
+      : 'This is based on message previews, not the full messages.';
+  },
 };
+
+/**
+ * A filename, plus the parts that also name it.
+ *
+ * 🚨 BOTH ADAPTERS NEED THIS. A file's own evidence carries a filename, and so
+ * does an ATTACHMENT LISTING — which is email evidence, because what a message
+ * carries is a fact about the message. Fixing only the file adapter left
+ * exactly half the problem: asked what attachments a message had, the gate
+ * removed `migrapilot_email_fixture.pdf` and kept the other one, leaving a list
+ * that began at "2.".
+ */
+function filenameVariants(filename: string): string {
+  return [filename, stemOf(filename), extensionOf(filename)].filter(Boolean).join(' ');
+}
 
 /** `budget-2026.xlsx` -> `budget-2026`. The name people say out loud. */
 function stemOf(filename: string): string {
@@ -400,14 +436,50 @@ function extensionOf(filename: string): string {
   return dot > 0 ? filename.slice(dot + 1) : '';
 }
 
+/**
+ * Every word that only POINTS at part of a source, across kinds.
+ *
+ * 🚨 EXPORTED BECAUSE "IS THERE A FRESH SUBJECT HERE" NEEDS THE SAME LIST.
+ * "What attachments are on it?" names no subject to go and find — `attachments`
+ * is the shape of the answer, not the thing being asked about — so the bare
+ * "it" is pointing backward. Reading `attachments` as a subject made the
+ * pronoun look forward, the turn selected nothing, retrieved nothing, and the
+ * model answered from memory with a filename it invented.
+ */
+export function structuralWords(): ReadonlySet<string> {
+  return new Set(withPlurals([...MESSAGE_STRUCTURE_WORDS, ...FILE_STRUCTURE_WORDS]));
+}
+
+/**
+ * Every listed word, plus its naive plural.
+ *
+ * 🚨 DERIVED, NOT HAND-LISTED. `attachment` was in the list and `attachments`
+ * was not — so the exact question a person asks ("what attachments are on
+ * it?") fell through the one guard written for it. Hand-maintained plurals are
+ * a list that is always one word out of date; the words here are all ordinary
+ * nouns and verbs, so adding an `s` is sound and the cost of an extra harmless
+ * entry is nothing.
+ */
+function withPlurals(words: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const raw of words.flatMap((w) => w.split(' '))) {
+    const word = raw.toLowerCase().trim();
+    if (!word) continue;
+    out.add(word);
+    if (!word.endsWith('s')) out.add(`${word}s`);
+  }
+  return [...out];
+}
+
 /** The vocabulary for pointing at part of a document. See MESSAGE_STRUCTURE. */
-const FILE_STRUCTURE = [
+export const FILE_STRUCTURE_WORDS: readonly string[] = [
   'file', 'filename', 'document', 'attachment', 'attached',
   'spreadsheet', 'workbook', 'sheet', 'tab',
   'row', 'rows', 'column', 'columns', 'cell', 'cells', 'header', 'headers',
   'page', 'pages', 'section', 'contents', 'content', 'text', 'value', 'values',
   EVIDENTIAL_RELATION,
-].join(' ');
+];
+const FILE_STRUCTURE = withPlurals(FILE_STRUCTURE_WORDS).join(' ');
 
 /**
  * The file adapter.
@@ -439,19 +511,11 @@ export const fileAdapter: EvidenceAdapter<FileEvidence> = {
    * a sentence about a document mostly names its parts, and those words are
    * pointing, not claiming. A figure or a name still has to be in the bytes.
    */
-  haystack: (item) => [
-    item.text,
-    // 🚨 THE WHOLE NAME AND ITS PARTS. Tokens are matched exactly, so
-    // `migrapilot_email_fixture.pdf` in the evidence does not match a claim that
-    // says `migrapilot_email_fixture`, or one that says "the PDF" — and both of
-    // those name this file correctly. Found live: the gate removed a true
-    // sentence about the very document it had just opened, because the writer
-    // dropped the extension.
-    item.locator.filename,
-    stemOf(item.locator.filename),
-    extensionOf(item.locator.filename),
-    FILE_STRUCTURE,
-  ].join('\n'),
+  // 🚨 THE WHOLE NAME AND ITS PARTS. Tokens are matched exactly, so
+  // `migrapilot_email_fixture.pdf` in the evidence does not match a claim that
+  // says `migrapilot_email_fixture`, or one that says "the PDF" — and both of
+  // those name this file correctly.
+  haystack: (item) => [item.text, filenameVariants(item.locator.filename), FILE_STRUCTURE].join('\n'),
   /*
    * 🚨 THE DIGEST, not the filename. It is the only handle that still names
    * these exact bytes after someone attaches a second `budget.xlsx`.
