@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
-  "updated": "2026-09-10",
-  "updatedBy": "Claude (Opus 5) — OWNER PRODUCT ACCEPTANCE: FAIL, diagnosed and fixed; awaiting re-acceptance",
+  "updated": "2026-09-11",
+  "updatedBy": "Claude (Opus 5) — acceptance re-run: mechanism correct, CONSISTENCY is the blocker. Still FAIL.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -15,7 +15,7 @@
   "activeLane": {
     "name": "MigraPilot VS Code Extension on the governed Brain",
     "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-    "currentStep": "Panel sweep round 2 DEPLOYED (Brain deadline-09040923 + extension installed): the compute-probe deadline no longer refuses turns during a cold load, refusals no longer claim an unseen render, and the tier line no longer warns about a requirement the turn exceeded. Proven live: a greeting that was refused is now answered. NEXT: cold-load latency (keep_alive/preload) and control coverage. Still owed: the mockup panel acceptance.",
+    "currentStep": "EngineeringTask loop implemented 2026-09-10: Brain-owned EngineeringTask SSE envelope, native shell card with rationale/diff/verification/actions, exact existing approval/apply handshake, reject/no-write and double-apply guards, prompt guardrails for existing-product inspection and operational requests. Local proof: extension build, Brain typecheck, 915/915 extension unit tests, 3/3 Brain prompt tests. Governed-coding VSIX harness fixed with explicit MIGRAPILOT_PERSISTENCE=sqlite test adapter; this directly removed the no-persistence startup blocker. Current gates: VSIX 100 passing/5 remaining; integration 89 passing/7 remaining. Classified remaining failures: Quick Actions is an obsolete test expectation because the sidebar intentionally removed the duplicate section; explainSelection/fixDiagnostics/interaction-document failures are unrelated command-adapter or VS Code harness defects reproduced on the clean baseline; regular governed-coding expects 5 fixture failures but the current fixture produces 0, so that test has fixture/test drift. Fresh VSIX rebuilt and installed from current tree: git base c9ae2a85bda24a4b8114c2de5e9c3698a3232f64, extension 0.1.0, VSIX SHA256 c9210cc10b5b0b24257b9fddf19541c89ed7dc067eb9db8a8e3c72c2bd8a5874, Brain server SHA256 b9bb31d56b47af656cb770ce7d49f795347c1f6c7d0f19323664a9e65eee97a0. Real Brain acceptance proved existing-product inspection and operational refusal, plus a separate justified edit/apply-once run; deterministic test verification remains owner UI acceptance work. Do not mark PROVEN_LIVE or CLAUDE WORKLOAD OFFLOAD qualified yet.",
     "beforeTopology": {
       "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
       "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "🚨 OWNER PRODUCT ACCEPTANCE — FAIL (2026-09-10 02:44, turn req-1d). Root causes found and fixed; re-verified live. AWAITING OWNER RE-ACCEPTANCE. NO RC freeze. NO staging promotion. Gmail connection untouched.",
+    "status": "🚨 OWNER PRODUCT ACCEPTANCE — STILL FAIL (re-run 2026-09-11). The retrieval mechanism is correct and reproducible; ANSWER CONSISTENCY is not. No RC freeze. No staging promotion. Gmail connection untouched.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2843,6 +2843,29 @@
         "No staging promotion.",
         "Do NOT reconnect or disconnect Gmail."
       ]
+    },
+    "acceptanceRerun_2026_09_11": {
+      "_authority": "Second acceptance attempt. Read with ownerAcceptanceFailure_2026_09_10.",
+      "gates": "brain-service 3215/3216. The one failure — unifiedAgent \"the prompt forbids searching for something it is being asked to create\" — is NOT mine: it fails with my changes stashed, and comes from in-progress engineerRuntime/engineerRoutes edits on this branch.",
+      "commits": [
+        "55993942 summary sources carry the text that was read; derived reach measured in FACTS not wording",
+        "be1cc014 structural words are not a subject; a listing names its files; a message has attachments"
+      ],
+      "stepResults": {
+        "1 Find the email containing SENTINEL": "✅ CORRECT and reproducible. \"found in the attachment migrapilot_email_fixture.pdf ... rather than in the message body\". ops: search -> read_message -> attachment_list -> attachment_read.",
+        "2 Summarize that email": "⚠️ TRUTHFUL BUT THIN. Now routes to the capability's grounded summariser (ops: summarize) and real content survives; paraphrase wording is still trimmed.",
+        "3 What attachments are on it?": "🚨 INCONSISTENT — 2 of 3 fresh runs list both files correctly; 1 of 3 refuses outright. Retrieval is right every time (ops: attachment_list); the variance is in the model's wording meeting the gate.",
+        "4 Exact values in the spreadsheet": "✅ CORRECT, 0 notices: 48273.55 / 7319.42 / 91504.08, ops: attachment_read.",
+        "5 Summarize the thread": "⚠️ Content correct, but removals leave empty markdown headings (\"**Attachments:**\" with nothing under).",
+        "6 What was that email about?": "✅ Correct and attributed."
+      },
+      "rootCauseOfRemainingGap": "🚨 NOT A CORRECTNESS BUG. Every fact the gate removes is genuinely unsupported. The problem is that an 8B local model words the same true answer differently run to run, and an every-term gate accepts some phrasings and refuses others. Retrieval is deterministic; presentation is not.",
+      "theProductDecisionThisNeeds": [
+        "A. Accept \"truthful but sometimes thin/refused\" for the local build, and treat consistency as a model-quality item.",
+        "B. For capability turns, present the ENGINE'S OWN grounded output as the answer instead of having the model re-word retrieved evidence. The summariser already produces checked prose with its disclosure attached; there would be no paraphrase step left to verify. This is the structural fix and it changes who writes the answer.",
+        "RECOMMENDATION: B for summarise-shaped turns, A for the rest. Not taken unilaterally — it changes the chat contract and touches streaming."
+      ],
+      "uiRetestBlocked": "The consumer boots but auth is fail-closed: MIGRAAUTH_CLIENT_ID, APP_SESSION_SECRET, MIGRAAUTH_REDIRECT_URI, APP_BASE_URL are unset, so no owner session and no owner scope. Needs apps/migrapilot-consumer/.env.local (gitignored) before any UI acceptance run."
     }
   },
   "deploymentPolicy": {
