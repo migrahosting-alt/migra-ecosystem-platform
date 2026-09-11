@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-11",
-  "updatedBy": "Claude (Opus 5) — acceptance re-run: mechanism correct, CONSISTENCY is the blocker. Still FAIL.",
+  "updatedBy": "Claude (Opus 5) — capability-owned answer rendering; READY FOR OWNER PRODUCT ACCEPTANCE (UI auth remains a separate blocker)",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "🚨 OWNER PRODUCT ACCEPTANCE — STILL FAIL (re-run 2026-09-11). The retrieval mechanism is correct and reproducible; ANSWER CONSISTENCY is not. No RC freeze. No staging promotion. Gmail connection untouched.",
+    "status": "READY FOR OWNER PRODUCT ACCEPTANCE on the local build. All six acceptance steps deterministic (8/8 each, paced, live); attachment membership 20/20 identical. NO RC freeze. NO staging promotion. Gmail untouched. UI acceptance remains separately blocked on consumer auth env.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2866,6 +2866,55 @@
         "RECOMMENDATION: B for summarise-shaped turns, A for the rest. Not taken unilaterally — it changes the chat contract and touches streaming."
       ],
       "uiRetestBlocked": "The consumer boots but auth is fail-closed: MIGRAAUTH_CLIENT_ID, APP_SESSION_SECRET, MIGRAAUTH_REDIRECT_URI, APP_BASE_URL are unset, so no owner session and no owner scope. Needs apps/migrapilot-consumer/.env.local (gitignored) before any UI acceptance run."
+    },
+    "capabilityOwnedRendering_2026_09_11": {
+      "_authority": "⭐ ARCHITECTURAL. Applies to every capability, not to Email.",
+      "principle": "A language model reasons where reasoning is needed. It never regenerates a fact the system already knows exactly. A fact held as typed data reaches the user as typed data rendered by code.",
+      "answerModes": {
+        "capability": "The capability rendered the text from typed facts. NO model call at all — asserted by a test that counts generation calls. Not re-verified either: nothing was generated, so nothing in it can be unsupported.",
+        "hybrid": "An immutable payload the model may write AROUND but never inside. A refused commentary costs the commentary, never the facts.",
+        "model": "Ordinary generation, checked by the shared gate exactly as before."
+      },
+      "whoDecides": "🚨 THE CAPABILITY, FROM THE RESULT — never the prompt wording. A listing is authoritative because attachmentsKnown proves the whole MIME tree was read; a summary because the summariser checked its own prose against the sources it returns.",
+      "appliedTo": [
+        "attachment listings (deterministic, rendered from metadata; zero stated as zero)",
+        "email summaries (the summariser's own grounded prose, passed through)",
+        "file contents under 2000 chars (hybrid payload; beyond that the model selects and the gate checks)"
+      ],
+      "caughtByMeasuringNotReading": [
+        "🚨 A listing that led to a FETCH kept owning the answer, so \"what are the exact values in the spreadsheet?\" returned file NAMES — 8 of 8 live runs. Ownership is released when the listing turns out to be a step.",
+        "🚨 The model never produced a WRONG figure across 8 live runs, but one run produced NONE. Same unreliability, safer face — which is why the figures are now a rendered payload.",
+        "🚨 Gmail rate-limited after ~16 rapid sequences (search -> provider_unavailable). The product failed closed and invented nothing; determinism runs are paced now."
+      ],
+      "liveResults": {
+        "all six steps": "8/8 each, paced, against the real QA mailbox",
+        "step 3 membership": "20/20 identical — one distinct outcome: count 2 plus both exact filenames",
+        "answer owners": "1 model · 2 capability · 3 capability · 4 hybrid · 5 capability · 6 capability",
+        "grounding notices": "0 across all six"
+      },
+      "gates": "brain-service 3227/3228. The one failure — unifiedAgent \"the prompt forbids searching for something it is being asked to create\" — is pre-existing and unrelated: it reproduces with this work stashed, and comes from in-progress engineerRuntime/engineerRoutes edits on this branch.",
+      "uiAuthBlocker": {
+        "state": "Fail-closed authentication left untouched. No credentials fabricated.",
+        "requiredEnvNames": [
+          "APP_BASE_URL",
+          "APP_SESSION_SECRET",
+          "MIGRAAUTH_API_URL",
+          "MIGRAAUTH_BASE_URL",
+          "MIGRAAUTH_CLIENT_ID",
+          "MIGRAAUTH_CLIENT_SECRET",
+          "MIGRAAUTH_POST_LOGOUT_REDIRECT_URI",
+          "MIGRAAUTH_REDIRECT_URI",
+          "MIGRAAUTH_SCOPES",
+          "MIGRAAUTH_WEB_URL"
+        ],
+        "where": "apps/migrapilot-consumer/.env.local — verified gitignored.",
+        "meaning": "UI acceptance stays a SEPARATE blocker. The six steps above were driven through the same /api/ai/chat surface the UI calls, with owner scope headers."
+      },
+      "doNot": [
+        "No RC freeze.",
+        "No staging promotion.",
+        "Do NOT reconnect or disconnect Gmail."
+      ]
     }
   },
   "deploymentPolicy": {
