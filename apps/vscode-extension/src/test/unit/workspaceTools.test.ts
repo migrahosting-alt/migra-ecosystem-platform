@@ -40,7 +40,12 @@ function host(overrides: Partial<WorkspaceToolHost> = {}) {
     },
     async documentSymbols(rootPath, filePath) {
       calls.push(`symbols:${filePath}`);
-      return { tool: 'file.readSymbol', path: filePath, symbols: [], count: 0 };
+      return {
+        tool: 'file.readSymbol',
+        path: filePath,
+        symbols: [{ name: 'app', kind: 'Function', startLine: 1, endLine: 1 }],
+        count: 1,
+      };
     },
     async requestApproval() {
       calls.push('approval');
@@ -102,8 +107,18 @@ test('editor capabilities are delegated to the host, not guessed locally', async
   const root = fixture();
   const h = host();
   await h.exec('diagnostics.get', { rootPath: root });
-  await h.exec('file.readSymbol', { rootPath: root, path: 'src/app.ts' });
+  const sym = (await h.exec('file.readSymbol', { rootPath: root, path: 'src/app.ts' })) as {
+    symbolName: string;
+    kind: string;
+    range: { startLine: number; endLine: number };
+    content: string;
+  };
   assert.deepEqual(h.calls, ['diagnostics:*', 'symbols:src/app.ts']);
+  // The contract is ONE enclosing symbol with its source, not a raw listing.
+  assert.equal(sym.symbolName, 'app');
+  assert.equal(sym.kind, 'function');
+  assert.equal(sym.range.startLine, 1);
+  assert.equal(typeof sym.content, 'string');
 });
 
 test('a proposal classifies create vs overwrite and writes NOTHING', async () => {

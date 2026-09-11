@@ -507,6 +507,16 @@ export type EmailSummarizeResult =
         subject: string;
         sentAt: string;
         completeness: 'complete' | 'snippet';
+        /**
+         * 🚨 WHAT WAS ACTUALLY READ — a preview or the whole body.
+         *
+         * Dropped from this result until now, which quietly made the grounded
+         * summariser useless. A summary may support only what its sources
+         * support; with the sources reduced to headers, it could support
+         * nothing about a body, so every content summary was struck out. The
+         * rule was right and the sources were impoverished.
+         */
+        text: string;
       }>;
     }
   | { ok: false; failure: EmailFailure }
@@ -646,6 +656,7 @@ export async function executeEmailSummarize(input: {
       subject: e.subject,
       sentAt: e.sentAt,
       completeness: e.completeness,
+      text: e.text,
     })),
   };
 }

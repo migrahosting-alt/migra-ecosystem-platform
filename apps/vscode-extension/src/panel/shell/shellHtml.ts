@@ -141,8 +141,8 @@ export function shellHtml(options: ShellHtmlOptions): string {
   <div class="body" id="body">
 
     <aside id="nav-drawer" aria-label="MigraPilot navigation">
-      <button class="newchat" data-shell-action="newChat">${icon('add')}<span>New Chat</span></button>
-      <section class="navsec"><h3><span>Conversations</span></h3><div id="nav-conversations"></div></section>
+      <button class="newchat" data-shell-action="newChat">${icon('add')}<span>New Task</span></button>
+      <section class="navsec"><h3><span>Task History</span></h3><div id="nav-conversations"></div></section>
       <section class="navsec"><h3><span>Current workspace</span></h3><div id="nav-workspace"></div></section>
       ${only('nav-section', 'nav-agent', '<section class="navsec"><h3><span>Agent Mode</span><span id="nav-agent-status" class="badge b-muted">OFF</span></h3><div id="nav-agent"></div></section>')}
       ${only('nav-section', 'nav-tools', '<section class="navsec"><h3><span>Tools &amp; Services</span></h3><div id="nav-tools"></div></section>')}
@@ -198,9 +198,9 @@ export function shellHtml(options: ShellHtmlOptions): string {
         <button class="ctool" id="cmic" title="Voice input">${icon('mic')}<span>Voice</span></button>
         <button class="ctool" id="ccmd" title="Slash commands">${icon('terminal-cmd')}<span>Commands</span></button>
         <span class="spacer"></span>
-        ${only('composer-control', 'csource', `<label class="sr-only" for="csource">Evidence source</label>
+        ${only('composer-control', 'csource', `<label class="sr-only" for="csource">Sources</label>
         <select id="csource" title="Where answers may draw evidence from">${sourceModeOptions()}</select>`)}
-        <label class="sr-only" for="clive">Live knowledge</label>
+        <label class="sr-only" for="clive">Research</label>
         <select id="clive" title="Whether this turn may consult information outside the repository">${liveModeOptions()}</select>
         ${only('composer-control', 'croute', `<label class="sr-only" for="croute">Model routing</label>
         <select id="croute" title="Model routing for the next message">${routingOptions()}</select>`)}

@@ -496,6 +496,10 @@ window.addEventListener('message', (event) => {
       addToolActivity(message.data || {});
       break;
 
+    case 'engineeringTask':
+      renderEngineeringTask(message.task || {}, message.autoApply === true);
+      break;
+
     case 'statusUpdate':
       if (typeof message.text === 'string' && message.text.trim()) showHint(message.text, 'info');
       break;

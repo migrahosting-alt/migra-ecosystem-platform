@@ -241,7 +241,7 @@ export function sourceModeBadge(
 export const LIVE_MODE_OPTIONS = [
   {
     value: 'off',
-    label: 'Live knowledge off',
+    label: 'Workspace only',
     hint: 'No external lookup of any kind; nothing leaves this machine for this turn',
     governed: false,
   },

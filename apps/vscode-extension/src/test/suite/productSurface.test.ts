@@ -24,6 +24,7 @@ import { MigraAiClient } from '../../services/migraAiClient.js';
 import { applyApprovedChangesetDetailed } from '../../services/changesetApply.js';
 import { shellHtml } from '../../panel/shell/shellHtml.js';
 import { navigationHtml } from '../../panel/shell/navigationHtml.js';
+import { NAV_ACTIONS } from '../../panel/shell/navigationModel.js';
 import { shellScript } from '../../panel/shell/shellScript.js';
 import { isProductSurface, SURFACES } from '../../panel/shell/surfaceClassification.js';
 import type { TestRunOutcome } from '../../services/testRunFlow.js';
@@ -165,11 +166,23 @@ suite('PRODUCT SURFACE — one real coding task, product surfaces only', () => {
     }
     // What it DOES show: start, resume, where, and four outcomes.
     assert.match(markup, /data-nav-action="newTask"/);
-    for (const section of ['Recent', 'Workspace', 'Quick Actions']) {
+    // 'Quick Actions' was intentionally removed: it duplicated the Command Center.
+    for (const section of ['Task History', 'Workspace']) {
       assert.ok(markup.includes(`<span>${section}</span>`), `${section} must be a section`);
     }
     for (const row of ['explainCode', 'fixCode', 'reviewChanges', 'runTests']) {
-      assert.ok(markup.includes(`data-nav-action="${row}"`), `${row} must be offered`);
+      // These deliberately do NOT live in the sidebar any more: repeating the
+      // same four choices next to the composer made the product read as a
+      // console. They stay reachable as registered commands and slash commands
+      // (asserted in 1b), so nothing is stranded.
+      assert.ok(
+        !markup.includes(`data-nav-action="${row}"`),
+        `${row} must not be duplicated in the sidebar`,
+      );
+      assert.ok(
+        NAV_ACTIONS.some((a) => a.id === row),
+        `${row} must still be a registered action`,
+      );
     }
     // The approval prompt ships empty and hidden — not a permanent section.
     assert.match(markup, /<div id="nav-approvals"[^>]*><\/div>/);

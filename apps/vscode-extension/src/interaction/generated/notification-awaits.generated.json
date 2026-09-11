@@ -9,7 +9,7 @@
   "findings": [
     {
       "file": "src/chat/chatEngine.ts",
-      "line": 383,
+      "line": 384,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
@@ -93,14 +93,14 @@
     },
     {
       "file": "src/panel/shell/shellProvider.ts",
-      "line": 1396,
+      "line": 1465,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
     },
     {
       "file": "src/panel/shell/shellProvider.ts",
-      "line": 1412,
+      "line": 1481,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("
@@ -170,7 +170,7 @@
     },
     {
       "file": "src/services/vscodeWorkspaceHost.ts",
-      "line": 145,
+      "line": 151,
       "api": "showWarningMessage",
       "classification": "consumed",
       "snippet": "await vscode.window.showWarningMessage("

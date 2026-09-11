@@ -158,7 +158,7 @@ body { padding: 8px 10px 12px; background: var(--mp-rail); }
     the sidebar's job; Workspace stays because it is CONTEXT — which repository
     and branch you are addressing — rather than a menu of things to do.
   -->
-  <section class="navsec"><h3><span>Recent</span></h3><div id="nav-conversations"></div></section>
+  <section class="navsec"><h3><span>Task History</span></h3><div id="nav-conversations"></div></section>
   <section class="navsec"><h3><span>Workspace</span></h3><div id="nav-workspace"></div></section>
 
   ${only('nav-agent-actions', `<section class="navsec">

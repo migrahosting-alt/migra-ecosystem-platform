@@ -19,6 +19,40 @@ export type FeatureName =
 export type ModelProfile = 'none' | 'local' | 'cheap' | 'default' | 'premium';
 export type HealthStatus = 'ok' | 'starting' | 'degraded' | 'error';
 
+export type EngineeringTaskStage =
+  | 'inspect'
+  | 'plan'
+  | 'proposal'
+  | 'awaiting_approval'
+  | 'applying'
+  | 'testing'
+  | 'repair_needed'
+  | 'verified'
+  | 'failed'
+  | 'cancelled';
+
+export interface EngineeringTask {
+  /** Brain-owned durable correlation/task identity. */
+  taskId: string;
+  workspaceRoot: string;
+  branch?: string;
+  headSha?: string;
+  stage: EngineeringTaskStage;
+  checkpoint: string;
+  observedFiles: string[];
+  evidence: Array<{ path: string; startLine?: number; endLine?: number; summary: string }>;
+  proposal?: {
+    proposalHash: string;
+    approvalState: 'pending' | 'approved' | 'rejected' | 'applied' | 'stale';
+    operations: Array<{ path: string; operation: string; before?: string | null; after?: string | null; rationale?: string }>;
+    expectedVerification: string[];
+  };
+  commands: Array<{ argv: string[]; exitCode?: number | null; outputHead?: string; status: 'planned' | 'running' | 'passed' | 'failed' }>;
+  repairAttempts: number;
+  finalEvidence?: string[];
+  completion: 'in_progress' | 'blocked' | 'complete' | 'failed';
+}
+
 export interface ProviderHealth {
   name: string;
   reachable: boolean;

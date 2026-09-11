@@ -192,6 +192,44 @@ function addError(text) {
   scrollThread();
 }
 
+function renderEngineeringTask(task, autoApply) {
+  const existing = document.querySelector('[data-engineering-task]');
+  if (existing) existing.remove();
+  const proposal = task && task.proposal;
+  const card = document.createElement('article');
+  card.className = 'engineering-task';
+  card.setAttribute('data-engineering-task', task && task.taskId ? task.taskId : 'unknown');
+  const ops = proposal && Array.isArray(proposal.operations) ? proposal.operations : [];
+  const opRows = ops.length
+    ? ops.map((op) => '<li><code>' + escapeMd(op.path || '(unknown)') + '</code><span>' + escapeMd(op.operation || 'modify') + '</span>'
+        + '<div class="task-rationale">' + escapeMd(op.rationale || 'No rationale reported for this file.') + '</div></li>').join('')
+    : '<li class="muted">No file operations reported yet.</li>';
+  const diffRows = ops.slice(0, 6).map((op) => {
+    const before = op.before == null ? '' : String(op.before);
+    const after = op.after == null ? '' : String(op.after);
+    return '<details><summary>' + escapeMd(op.path || '(unknown)') + '</summary><pre>'
+      + escapeMd(before ? '- ' + before : '(new file)') + '\n'
+      + escapeMd(after ? '+ ' + after : '(deleted)') + '</pre></details>';
+  }).join('');
+  const verification = (proposal && proposal.expectedVerification || []).map((item) => '<li>' + escapeMd(item) + '</li>').join('') || '<li class="muted">Verification plan not reported yet.</li>';
+  const pending = proposal && proposal.approvalState === 'pending';
+  const autoNotice = autoApply ? '<div class="task-policy warn">Auto-apply is enabled by policy. Approval still runs through the Brain boundary.</div>' : '';
+  card.innerHTML = '<header><strong>Engineering task</strong><span class="task-stage">' + escapeMd(task && task.stage || 'inspect') + '</span></header>'
+    + '<p class="task-checkpoint">' + escapeMd(task && task.checkpoint || 'MigraPilot is gathering repository evidence.') + '</p>'
+    + autoNotice
+    + '<h4>Proposed changes</h4><ul class="task-ops">' + opRows + '</ul>'
+    + '<h4>Diff</h4>' + (diffRows || '<p class="muted">No bounded diff preview available.</p>')
+    + '<h4>Verification</h4><ul>' + verification + '</ul>'
+    + '<footer>'
+    + '<button data-task-action="approve" class="task-approve"' + (pending && !autoApply ? '' : ' disabled') + '>Approve</button>'
+    + '<button data-task-action="reject" class="task-reject"' + (pending ? '' : ' disabled') + '>Reject</button>'
+    + (autoApply ? '<span class="task-policy">Explicit auto-apply policy enabled</span>' : '')
+    + '</footer>';
+  const thread = $('thread');
+  if (thread) thread.appendChild(card);
+  scrollThread();
+}
+
 function scrollThread() {
   const main = $('main');
   if (!main) return;
@@ -251,6 +289,12 @@ document.addEventListener('click', (event) => {
     button.textContent = ok ? 'Copied' : 'Copy failed';
     setTimeout(() => { button.textContent = 'Copy'; }, 1400);
   });
+});
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-task-action]');
+  if (!button || button.disabled) return;
+  vscode.postMessage({ type: 'engineeringTaskAction', action: button.dataset.taskAction });
 });
 `;
 }

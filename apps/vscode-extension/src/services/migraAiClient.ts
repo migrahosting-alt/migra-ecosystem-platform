@@ -16,6 +16,7 @@ import { CLIENT_CONTRACT_VERSION, type WorkspaceToolExecutor } from './workspace
 import { CLIENT_EXECUTABLE_TOOL_IDS } from '@migrapilot/workspace-tools';
 import type { OrchestrationDecision } from '@migrapilot/shared-types/orchestration-decision';
 import type { ProjectAuthority } from '@migrapilot/shared-types/project-authority';
+import type { EngineeringTask } from '@migrapilot/shared-types';
 import { PilotError, type PilotErrorCode } from '@migrapilot/pilot-client';
 import { randomUUID } from 'node:crypto';
 import {
@@ -334,6 +335,8 @@ export interface EngineerStreamEvent {
   event: string;
   data: unknown;
 }
+
+export type EngineeringTaskEvent = { task: EngineeringTask };
 
 /** Sanitized capability metadata from the engine (no implementation details). */
 export interface ToolDescriptor {

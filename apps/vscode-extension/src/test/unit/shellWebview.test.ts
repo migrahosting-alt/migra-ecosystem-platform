@@ -197,7 +197,7 @@ test('NO ENGINEERING SURFACE LEAKS INTO THE PRODUCT DOCUMENT', () => {
     'Agent Workspace',
     'Audit Trail',
     'Model routing',
-    'Evidence source',
+    'Sources',
     'id="nav-tools"',
     'id="nav-agent"',
     'id="croute"',
@@ -359,7 +359,7 @@ test('THE PRODUCT SIDEBAR IS THREE THINGS: start, resume, and where', () => {
    * happens. What changed is that the sidebar stopped being a second launcher.
    */
   const document = navigationHtml({ nonce: NONCE, csp: CSP, logoUri: 'https://file%2B.vscode-resource/logo.svg' });
-  for (const section of ['Recent', 'Workspace']) {
+  for (const section of ['Task History', 'Workspace']) {
     assert.ok(document.includes(`<span>${section}</span>`), `${section} must be a sidebar section`);
   }
   assert.ok(
@@ -460,6 +460,21 @@ test('the launcher bundle excludes the context-panel renderer entirely', () => {
   assert.ok(nav.includes('function renderBrainBadge'), 'the launcher still needs the header badge');
   // The Command Center DOES have it.
   assert.ok(shellScript().includes('function renderContext'));
+});
+
+test('the engineering task card renders per-file rationale and a bounded diff, never a raw JSON dump', () => {
+  const script = shellScript();
+  assert.ok(script.includes('function renderEngineeringTask'), 'the native task card renderer must be bundled');
+  assert.ok(script.includes('task-rationale'), 'each proposed file must show its rationale');
+  assert.ok(script.includes('No rationale reported for this file'), 'an absent rationale is stated, never fabricated');
+  assert.ok(script.includes('data-task-action="approve"'), 'the card exposes an Approve action');
+  assert.ok(script.includes('data-task-action="reject"'), 'the card exposes a Reject action');
+  // The card renders named fields (path/operation/rationale/diff/verification) —
+  // never `JSON.stringify` of the task or proposal, which would leak the raw
+  // protocol shape into ordinary chat.
+  const renderer = script.slice(script.indexOf('function renderEngineeringTask'), script.indexOf('function scrollThread'));
+  assert.ok(!/JSON\.stringify\(\s*task/.test(renderer), 'the task card must not dump raw task JSON');
+  assert.ok(!/JSON\.stringify\(\s*proposal/.test(renderer), 'the task card must not dump raw proposal JSON');
 });
 
 test('the primary action STARTS A TASK, which is what a person came to do', () => {

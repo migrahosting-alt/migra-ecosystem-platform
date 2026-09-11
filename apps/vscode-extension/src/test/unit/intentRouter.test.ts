@@ -152,7 +152,8 @@ test('engineer run renders steps, proposals (not applied), and the final answer'
     { markdown: (t) => md.push(t) },
   );
   const out = md.join('');
-  assert.match(out, /file\.readRange/);
+  assert.match(out, /Reading `a\.ts`/);
+  assert.doesNotMatch(out, /\{"path"/, 'the raw tool input must never reach chat');
   assert.match(out, /Proposed change — `a\.ts`.*not applied/);
   assert.match(out, /Done\. See the proposed change above\./);
   assert.doesNotMatch(out, /unfortunately|sorry|i can't/i);

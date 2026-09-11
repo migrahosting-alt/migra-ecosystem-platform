@@ -176,6 +176,8 @@ export function evidenceFromSummary(
       from: string;
       sentAt: string;
       completeness: 'complete' | 'snippet';
+      /** What was actually read of this message — a preview or the whole body. */
+      text: string;
     }>;
   },
   scope: EvidenceScope,
@@ -190,18 +192,25 @@ export function evidenceFromSummary(
     from: s.from,
     sentAt: s.sentAt,
     /*
-     * 🚨 HEADER FACTS ONLY, AND THAT IS A REAL LIMIT.
+     * 🚨 WHAT THE SUMMARISER ACTUALLY READ — never the summary's own prose.
      *
-     * The summarise result reports each source's sender, subject, date and
-     * completeness — not its text. So a summary grounds claims about WHO sent
-     * WHAT and WHEN, and not about what a body said. Putting the summary's own
-     * prose here instead would make the summary its own source, which is the
-     * laundering `derivedFrom` exists to stop.
+     * The distinction is the whole point of `derivedFrom`: a summary may
+     * support a claim only where one of THESE does. Putting the summary text
+     * here would make the summary its own source, which is exactly the
+     * laundering the rule exists to stop.
      *
-     * A body claim becomes groundable by READING the message, which is the
-     * correct order anyway.
+     * This used to be the SUBJECT, because the executor did not return the
+     * text. A summary could then support nothing about a body — so every
+     * content summary was removed, and "summarize that email", the single most
+     * asked-for operation, refused every time. The rule was right; the sources
+     * were impoverished.
+     *
+     * 🚨 AND THE LIMIT STILL BINDS. A source read as a PREVIEW carries only its
+     * preview here, so a summary drawn from previews still cannot support a
+     * claim about the rest of the body — and `complete: false` makes the answer
+     * say so.
      */
-    text: s.subject,
+    text: s.text,
     complete: s.completeness === 'complete',
   }));
 

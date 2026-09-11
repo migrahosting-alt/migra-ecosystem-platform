@@ -143,6 +143,9 @@ test('🚨 a summary is emitted WITH its sources, and is marked derived', () => 
     sources: [{
       providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 'Invoice 2026-09',
       from: 'billing@hetzner.com', sentAt: '2026-09-01T10:00:00Z', completeness: 'complete',
+      // What the summariser actually read. A summary may support only what its
+      // sources support, so the sources have to carry something.
+      text: 'Your September invoice totals 48273.55.',
     }],
   }, ALICE, ids());
 
@@ -161,8 +164,9 @@ test('🚨 a summary of PREVIEWS is partial, whatever the summariser reported', 
   const items = evidenceFromSummary({
     summary: 'Two messages about invoices.',
     sources: [
-      { providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 'A', from: 'a@x.com', sentAt: 'T', completeness: 'complete' },
-      { providerMessageId: 'pm-2', providerThreadId: 'pt-1', subject: 'B', from: 'b@x.com', sentAt: 'T', completeness: 'snippet' },
+      { providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 'A', from: 'a@x.com', sentAt: 'T', completeness: 'complete', text: 'The whole of message A.' },
+      // 🚨 A PREVIEW CARRIES ONLY ITS PREVIEW, which is what keeps the limit real.
+      { providerMessageId: 'pm-2', providerThreadId: 'pt-1', subject: 'B', from: 'b@x.com', sentAt: 'T', completeness: 'snippet', text: 'The first line of B…' },
     ],
   }, ALICE, ids());
 
@@ -181,6 +185,7 @@ test('🚨 a summary cannot support a claim its SOURCES do not', () => {
     sources: [{
       providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 'Invoice 2026-09',
       from: 'billing@hetzner.com', sentAt: '2026-09-01T10:00:00Z', completeness: 'complete',
+      text: 'Your September invoice is attached.',
     }],
   }, ALICE, ids())) ledger.add(item);
 
@@ -210,6 +215,7 @@ test('a summary CAN support what its sources support', () => {
     sources: [{
       providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 'Invoice 2026-09',
       from: 'billing@hetzner.com', sentAt: '2026-09-01T10:00:00Z', completeness: 'complete',
+      text: 'Your September invoice is attached.',
     }],
   }, ALICE, ids())) ledger.add(item);
 
@@ -232,6 +238,7 @@ test('🚨 a summary cannot ground a claim about BODY content its sources never 
     sources: [{
       providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 'Invoice 2026-09',
       from: 'billing@hetzner.com', sentAt: '2026-09-01T10:00:00Z', completeness: 'complete',
+      text: 'Your September invoice is attached.',
     }],
   }, ALICE, ids())) ledger.add(item);
 
@@ -258,7 +265,7 @@ test('🚨 every produced item carries the caller\'s scope and a canonical id', 
     }, ALICE, mint),
     ...evidenceFromSummary({
       summary: 'x',
-      sources: [{ providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 's', from: 'a@x.com', sentAt: 'T', completeness: 'complete' }],
+      sources: [{ providerMessageId: 'pm-1', providerThreadId: 'pt-1', subject: 's', from: 'a@x.com', sentAt: 'T', completeness: 'complete', text: 'body' }],
     }, ALICE, mint),
   ];
 

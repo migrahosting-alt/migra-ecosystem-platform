@@ -29,6 +29,9 @@ import type { ChatAttachment } from '@migrapilot/shared-types';
 import { isPilotError } from '@migrapilot/pilot-client';
 import { conversationWasForgotten, FORGOTTEN_CONVERSATION_NOTICE } from './conversationRecovery.js';
 import { type ChatSink, type SelectableProfile, runChatTurn, summarizeTurns } from '../../chat/chatEngine.js';
+import type { EngineeringTask } from '@migrapilot/shared-types';
+import { previewAndMaybeApplyChangeset } from '../../services/proposedChangeset.js';
+import { rejectEngineeringTask, approveEngineeringTask } from '../../services/engineeringTaskActions.js';
 import { type GitResult, type GitRunner, assertReadOnly } from '../../commitGen/git.js';
 import { BrainClient } from '../../services/brainClient.js';
 import type { BackendRouter } from '../../services/backendRouter.js';
@@ -85,6 +88,8 @@ function isDispatchableCommand(command: string): boolean {
 
 const CONVERSATION_KEY = 'migrapilot.activeConversationId';
 const ACTIVE_RUN_KEY = 'migrapilot.shell.activeCommandRun';
+const ACTIVE_TASK_KEY = 'migrapilot.shell.activeEngineeringTask';
+const TASK_HISTORY_KEY = 'migrapilot.shell.engineeringTaskHistory';
 
 /** Cap the attachment payload forwarded to the backend (base64 inflates ~33%). */
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
@@ -176,6 +181,8 @@ export class MigraPilotShell {
   private inFlight = false;
   private cts?: vscode.CancellationTokenSource;
   private savedMessages: ChatMsg[] = [];
+  private activeEngineeringTask?: EngineeringTask;
+  private taskHistory: Record<string, EngineeringTask> = {};
   private conversationId?: string;
   private tab: ShellTabId = 'chat';
 
@@ -460,6 +467,9 @@ export class MigraPilotShell {
       case 'evidenceAction':
         await this.onEvidenceAction(message.action, message.runId);
         return;
+      case 'engineeringTaskAction':
+        await this.onEngineeringTaskAction(message.action);
+        return;
       case 'transcribe':
         await this.transcribe(message.audio, message.mime);
         return;
@@ -472,12 +482,22 @@ export class MigraPilotShell {
   }
 
   private async onReady(webview: vscode.Webview): Promise<void> {
+    this.taskHistory = this.deps.memento.get<Record<string, EngineeringTask>>(TASK_HISTORY_KEY) ?? {};
     if (this.conversationId && this.deps.memoryMode() !== 'off') {
       await this.reloadAuthoritativeHistory();
     } else if (this.savedMessages.length) {
       void webview.postMessage({ type: 'restore', messages: this.savedMessages });
     }
     await this.refresh();
+    const task = this.conversationId ? this.taskHistory[this.conversationId] : this.deps.memento.get<EngineeringTask>(ACTIVE_TASK_KEY);
+    if (task) {
+      this.activeEngineeringTask = task;
+      void webview.postMessage({
+        type: 'engineeringTask',
+        task,
+        autoApply: vscode.workspace.getConfiguration('migrapilot').get<boolean>('autoApplyChangeset', false),
+      });
+    }
     void this.postModelCatalog();
     const storedRun = this.deps.memento.get<string>(ACTIVE_RUN_KEY);
     if (storedRun && this.gate.enabled) await this.reconcile(storedRun);
@@ -976,6 +996,17 @@ export class MigraPilotShell {
     const sink: ChatSink = {
       progress: (value) => this.post({ type: 'statusUpdate', text: value }),
       markdown: (value) => this.post({ type: 'token', text: value }),
+      engineeringTask: (task) => {
+        this.activeEngineeringTask = task;
+        if (this.conversationId) this.taskHistory[this.conversationId] = task;
+        void this.deps.memento.update(ACTIVE_TASK_KEY, task);
+        void this.deps.memento.update(TASK_HISTORY_KEY, this.taskHistory);
+        this.post({
+          type: 'engineeringTask',
+          task,
+          autoApply: vscode.workspace.getConfiguration('migrapilot').get<boolean>('autoApplyChangeset', false),
+        });
+      },
     };
 
     const mode = this.deps.memoryMode();
@@ -1025,6 +1056,36 @@ export class MigraPilotShell {
     }
   }
 
+  private async onEngineeringTaskAction(action: string | undefined): Promise<void> {
+    const task = this.activeEngineeringTask;
+    if (!task) return;
+    if (action === 'reject') {
+      const rejected = rejectEngineeringTask(task);
+      if (!rejected) return;
+      this.activeEngineeringTask = rejected;
+      await this.deps.memento.update(ACTIVE_TASK_KEY, rejected);
+      this.post({ type: 'engineeringTask', task: rejected, autoApply: false });
+      return;
+    }
+    if (action !== 'approve') return;
+    // Reassigning `applying` here — BEFORE the apply call resolves — is what
+    // makes a second concurrent approve (double-click/replay) see a task whose
+    // approvalState already left 'pending' and get refused by the guard above.
+    const outcome = approveEngineeringTask(task, (rootPath, changeset) =>
+      previewAndMaybeApplyChangeset(this.deps.migraAiClient, rootPath, changeset, 'MigraPilot engineering task', {
+        autoApply: true,
+      }),
+    );
+    if (!outcome) return;
+    this.activeEngineeringTask = outcome.applying;
+    await this.deps.memento.update(ACTIVE_TASK_KEY, outcome.applying);
+    this.post({ type: 'engineeringTask', task: outcome.applying, autoApply: false });
+    const next = await outcome.result;
+    this.activeEngineeringTask = next;
+    await this.deps.memento.update(ACTIVE_TASK_KEY, next);
+    this.post({ type: 'engineeringTask', task: next, autoApply: false });
+  }
+
   private async postModelCatalog(): Promise<void> {
     try {
       const { models } = await this.deps.migraAiClient.getModels();
@@ -1048,6 +1109,9 @@ export class MigraPilotShell {
     this.cts?.cancel();
     this.conversationId = id;
     await this.deps.memento.update(CONVERSATION_KEY, id);
+    this.activeEngineeringTask = this.taskHistory[id];
+    await this.deps.memento.update(ACTIVE_TASK_KEY, this.activeEngineeringTask);
+    this.post({ type: 'engineeringTask', task: this.activeEngineeringTask ?? null, autoApply: false });
     await this.reloadAuthoritativeHistory();
     await this.publish();
   }
@@ -1055,10 +1119,15 @@ export class MigraPilotShell {
   private async newConversation(): Promise<void> {
     this.cts?.cancel();
     this.savedMessages = [];
-    this.conversationId = undefined;
+    const memoryMode = this.deps.memoryMode() === 'off' ? 'session' : this.deps.memoryMode();
+    const conversation = await this.deps.migraAiClient.createConversation({ title: 'New engineering task', memoryMode });
+    this.conversationId = conversation.id;
+    this.activeEngineeringTask = undefined;
     this.attachmentNames = [];
-    await this.deps.memento.update(CONVERSATION_KEY, undefined);
+    await this.deps.memento.update(CONVERSATION_KEY, conversation.id);
+    await this.deps.memento.update(ACTIVE_TASK_KEY, undefined);
     this.post({ type: 'newChat' });
+    this.post({ type: 'engineeringTask', task: null, autoApply: false });
     this.showTab('chat');
     await this.loadConversations();
     await this.publish();
@@ -1069,8 +1138,8 @@ export class MigraPilotShell {
   private async onHeaderAction(action: string | undefined): Promise<void> {
     switch (action) {
       case 'newTask':
-        this.showTab('agent');
-        await this.publish();
+        await this.deps.revealStudio?.('chat');
+        await this.newConversation();
         return;
       case 'agentMode':
         await this.toggleAgentMode();

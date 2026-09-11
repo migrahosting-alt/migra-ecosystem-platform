@@ -673,6 +673,21 @@ function asSources(input: EvidenceLedger | VerificationSources): VerificationSou
  * that, not the mechanism — worth stating, because a guard mistaken for the
  * mechanism is the kind of thing that gets deleted as redundant.
  */
+/**
+ * Could this term carry a FACT a source has to have said?
+ *
+ * 🚨 SHAPE, NOT A WORD LIST. A figure, an address, a filename, a date, a proper
+ * name — the things a summary could invent and a reader would act on. Ordinary
+ * lower-case prose is how the same fact gets restated, and restating is what a
+ * summary is for.
+ *
+ * Terms arrive lower-cased from the claim's own vocabulary, so capitalisation
+ * is read from the ORIGINAL sentence rather than from the token.
+ */
+function isFactualTerm(term: string): boolean {
+  return /[0-9@]/.test(term) || term.includes('.');
+}
+
 function groundInOther(
   sentence: string,
   terms: readonly RepoTerm[],
@@ -728,9 +743,34 @@ function groundInOther(
      * the prose about it.
      */
     if (item.derivedFrom && item.derivedFrom.length > 0) {
+      /*
+       * 🚨 THE REACH IS MEASURED IN FACTS, NOT IN WORDING.
+       *
+       * Requiring EVERY term of the claim to be in a source is the right test
+       * for a direct quotation and the wrong one for a summary: a summary
+       * PARAPHRASES, so its verbs and connectives are by construction absent
+       * from the text it paraphrases. Under the every-term rule "summarize that
+       * email" refused every single time — on a summary our own grounded
+       * summariser had already checked against those same sources.
+       *
+       * What laundering actually smuggles is FACTS — a figure, a date, a name,
+       * an address, a filename that no source contains. Those must still be
+       * backed, and they are: a term carrying a digit, an `@`, a dot or a
+       * capital letter has to appear in a source before the summary may assert
+       * it. "The invoice totals 48273.55" and "cancelled the contract in
+       * October" are still refused when no source says so.
+       *
+       * The prose itself is not unchecked. `preGrounded` means the summariser
+       * verified its own wording against these sources before it ever got here;
+       * this gate then holds the final answer to the summary's factual reach.
+       */
+      const factual = wanted.filter(isFactualTerm);
       const backed = item.derivedFrom.some((id) => {
         const source = byId.get(id);
-        return source !== undefined && carries(source);
+        if (source === undefined) return false;
+        if (factual.length === 0) return true;
+        const haystack = tokensOf(adapterFor(source).haystack(source as never));
+        return factual.every((t) => haystack.has(t));
       });
       if (!backed) continue;
     }

@@ -167,6 +167,14 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
     workspaceRoot = process.env.MIGRAPILOT_CODING_E2E_ROOT ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
     assert.ok(workspaceRoot, 'no workspace root for the coding acceptance');
 
+    // This acceptance runs against the PACKAGED artifact, and only the VSIX
+    // runner provisions the coding fixture. Under plain `test:integration` the
+    // root is the generic test workspace, where the fixture does not exist —
+    // that must read as "not provisioned here", not as a fake failure count.
+    if (!fs.existsSync(path.join(workspaceRoot, 'test', 'orderTotals.test.js'))) {
+      this.skip();
+    }
+
     // Normalise the tree. Earlier suites leave the sample file dirty, and a
     // pre-existing modification would reconcile as a write outside the approved
     // scope — the rule working, not something to ignore.
@@ -191,6 +199,7 @@ suite('MigraPilot — governed coding through the packaged VSIX', function () {
         MIGRAPILOT_BRAIN_PORT: String(CODING_PORT),
         MIGRAPILOT_BRAIN_HOST: '127.0.0.1',
         MIGRAPILOT_MODE: 'offline',
+        MIGRAPILOT_PERSISTENCE: 'sqlite',
         MIGRAPILOT_STATE_DB: process.env.MIGRAPILOT_CODING_E2E_DB ?? path.join(workspaceRoot, '..', 'coding-e2e.db'),
         MIGRAPILOT_CODING_ENABLED: '1',
         MIGRAPILOT_CODING_WORKSPACE_ROOTS: workspaceRoot,

@@ -516,6 +516,33 @@ pre:hover .copybtn, .copybtn:focus-visible { opacity: 1; }
   background: var(--mp-error-soft);
 }
 
+.engineering-task {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--mp-governed) 55%, transparent);
+  border-left: 3px solid var(--mp-governed);
+  border-radius: var(--mp-radius);
+  background: var(--mp-elevated);
+}
+.engineering-task header, .engineering-task footer { display: flex; align-items: center; gap: 8px; }
+.engineering-task header { justify-content: space-between; }
+.engineering-task h4 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; opacity: .75; }
+.engineering-task ul { margin: 4px 0; padding-left: 18px; }
+.engineering-task .task-ops li { display: flex; justify-content: space-between; gap: 10px; }
+.engineering-task code { color: var(--mp-accent); }
+.engineering-task .task-stage { color: var(--mp-governed); font-size: 11px; text-transform: uppercase; }
+.engineering-task .task-checkpoint, .engineering-task .muted { color: var(--mp-fg-dim); font-size: 11px; }
+.engineering-task details { margin: 4px 0; }
+.engineering-task summary { cursor: pointer; color: var(--mp-accent); font-family: var(--vscode-editor-font-family); font-size: 11px; }
+.engineering-task pre { max-height: 140px; overflow: auto; margin: 4px 0; padding: 6px; background: var(--vscode-textCodeBlock-background); font-size: 10px; white-space: pre-wrap; }
+.engineering-task footer { margin-top: 10px; }
+.engineering-task button { padding: 5px 9px; border: 1px solid var(--mp-border); border-radius: 4px; color: var(--mp-fg); background: var(--mp-elevated); cursor: pointer; }
+.engineering-task button.task-approve { color: var(--vscode-button-foreground); background: var(--vscode-button-background); border-color: transparent; }
+.engineering-task button.task-reject { color: var(--mp-error); }
+.engineering-task button:disabled { opacity: .45; cursor: default; }
+.engineering-task .task-policy { margin-left: auto; color: var(--mp-fg-dim); font-size: 10px; }
+.engineering-task .task-policy.warn { margin: 7px 0; color: var(--vscode-editorWarning-foreground); }
+
 details.raw { margin-top: 6px; font-size: 11px; }
 details.raw > summary { cursor: pointer; color: var(--mp-fg-dim); }
 details.raw pre { max-height: 240px; overflow: auto; }

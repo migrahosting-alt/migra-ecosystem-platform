@@ -16,6 +16,8 @@ import { sourceModeBadge } from '../../panel/shell/composerModel.js';
 import { CAP_FIX_DIAGNOSTICS, evaluateCapability } from '../../services/commandCapabilities.js';
 import { type MockPilotApi, startMockPilotApi } from '../support/mockPilotApi.js';
 import { MigraAiClient, type AiStreamEvent } from '../../services/migraAiClient.js';
+import { createVscodeWorkspaceHost } from '../../services/vscodeWorkspaceHost.js';
+import { DiagnosticsGetResponseSchema } from '@migrapilot/protocol';
 
 // Duck-typed PilotError check. In VSIX mode the packaged extension and this
 // runner load separate copies of pilotErrors.js, so `instanceof` across the
@@ -910,6 +912,33 @@ suite('MigraPilot extension — end to end', () => {
           false,
           'denied fix must not call proposed-edits',
         );
+      } finally {
+        collection.dispose();
+      }
+    });
+  });
+
+  suite('diagnostics.get producer conforms to the protocol', () => {
+    test('the VS Code host emits the schema shape, not a flat range', async () => {
+      const uri = fixtureUri();
+      const collection = vscode.languages.createDiagnosticCollection('schema-conformance');
+      collection.set(uri, [
+        new vscode.Diagnostic(new vscode.Range(1, 2, 3, 4), 'shape check', vscode.DiagnosticSeverity.Information),
+      ]);
+      try {
+        const host = createVscodeWorkspaceHost();
+        const rootPath = vscode.workspace.workspaceFolders![0]!.uri.fsPath;
+        const result = await host.diagnostics(rootPath, vscode.workspace.asRelativePath(uri, false));
+        // The contract is the judge. A flat item silently broke every consumer
+        // that reads `item.range.startLine`.
+        const parsed = DiagnosticsGetResponseSchema.safeParse(result);
+        assert.ok(parsed.success, `diagnostics.get must satisfy its own schema: ${JSON.stringify(parsed.error?.issues)}`);
+        const item = parsed.success ? parsed.data.items.find((i) => i.message === 'shape check') : undefined;
+        assert.ok(item, 'the seeded diagnostic must be reported');
+        assert.equal(item!.range.startLine, 2, 'lines are 1-based');
+        assert.equal(item!.range.startCharacter, 3);
+        assert.equal(item!.range.endLine, 4);
+        assert.equal(item!.severity, 'information', "severity must be the protocol name, not 'info'");
       } finally {
         collection.dispose();
       }
@@ -2026,7 +2055,7 @@ suite('MigraPilot extension — end to end', () => {
       // defined and never rendered, so the mode was reachable only by slash command.
       const html = shellHtml({ nonce: 'test-nonce', csp: "default-src 'none'", initialTab: 'chat', script: 'void 0;', compact: false });
       assert.match(html, /id="clive"/, 'the live-knowledge select must be present');
-      assert.match(html, /Live knowledge off/, 'the default option names itself');
+      assert.match(html, /Workspace only/, 'the default option names itself');
       assert.match(html, /Official sources/);
       assert.match(html, /Web research/);
       // Every select shares one style rule, or one of them renders as a native white

@@ -5,6 +5,7 @@
 // the same honesty contract as /agent.
 
 import type { MigraAiClient, EngineerRequest } from '../services/migraAiClient.js';
+import type { EngineeringTask } from '@migrapilot/shared-types';
 import { liveKnowledgeBadge, sourceModeBadge } from '../panel/shell/composerModel.js';
 import { recordCorrelation } from '../interaction/correlationLog.js';
 import { isPilotError } from '@migrapilot/pilot-client';
@@ -19,6 +20,8 @@ export interface EngineerSink {
   /** A changeset/edit proposal was surfaced — the host may offer to apply it
    * (user-confirmed) after the run. Called in addition to the markdown render. */
   onProposal?(proposal: unknown): void;
+  /** Brain-owned task envelope. The host stores only the pointer/recovery UI. */
+  onTask?(task: EngineeringTask): void;
 }
 
 interface StepData { n?: number; tool?: string; summary?: string }
@@ -46,6 +49,44 @@ function diffBlock(title: string, before: string | null | undefined, after: stri
     ...String(after ?? '').split('\n').filter((_, i, a) => after != null || a.length > 1).map((l) => `+ ${l}`),
     '```',
   ].join('\n');
+}
+
+/** Human-readable step line. The Brain's `summary` is the tool's raw input
+ * object, which must never reach the chat surface as protocol text. */
+function renderStep(step: StepData): string {
+  const tool = step.tool ?? 'tool';
+  const raw = (step.summary ?? '').trim();
+  let args: Record<string, unknown> = {};
+  if (raw.startsWith('{')) {
+    try {
+      args = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      args = {};
+    }
+  } else if (raw) {
+    return `\n· \`${tool}\` ${raw}\n`;
+  }
+  const str = (key: string): string | undefined => (typeof args[key] === 'string' ? (args[key] as string) : undefined);
+  const detail =
+    str('query') ? `“${str('query')}”` :
+    str('path') ? `\`${str('path')}\`` :
+    str('symbol') ? `\`${str('symbol')}\`` :
+    '';
+  const verb: Record<string, string> = {
+    'workspace.search': 'Searching for',
+    'workspace.find': 'Looking for',
+    'workspace.list': 'Listing files',
+    'file.read': 'Reading',
+    'file.readRange': 'Reading',
+    'file.readSymbol': 'Reading symbol',
+    'git.status': 'Checking git status',
+    'git.diff': 'Reading the diff',
+    'diagnostics.get': 'Checking problems',
+    'fs.proposeChangeset': 'Preparing a changeset',
+    'edit.preview': 'Preparing an edit',
+  };
+  const label = verb[tool] ?? `Running ${tool}`;
+  return `\n· ${label}${detail ? ` ${detail}` : ''}\n`;
 }
 
 function renderProposal(data: ProposalData): string {
@@ -203,7 +244,7 @@ export async function runEngineerTurn(
         sink.progress?.(`MigraPilot → ${d.model ?? 'model'}`);
       } else if (ev.event === 'step') {
         const d = ev.data as StepData;
-        sink.markdown(`\n· \`${d.tool ?? 'tool'}\` ${d.summary ?? ''}\n`);
+        sink.markdown(renderStep(d));
       } else if (ev.event === 'note') {
         streamed = ''; // a note breaks the run of streamed text
         // Visible reporting of normalization/dedup/command-effects/re-plans.
@@ -218,8 +259,16 @@ export async function runEngineerTurn(
         const icon = d.kind === 'command-effect' ? '📝' : d.kind === 'duplicate' ? '↩︎' : d.kind === 'policy' ? '⛔' : d.kind === 'replan' ? '↻' : d.kind === 'quality' ? '⚠️' : 'ℹ︎';
         sink.markdown(`\n  ${icon} _${d.message ?? d.kind ?? 'note'}_\n`);
       } else if (ev.event === 'proposal') {
-        sink.markdown(`\n${renderProposal(ev.data as ProposalData)}\n`);
+        // Keep the normal chat surface structured. A native task card owns the
+        // proposal presentation; markdown is only the compatibility fallback
+        // for surfaces that do not implement the task-card callback.
+        const task = (ev.data as { task?: EngineeringTask }).task;
+        if (task) sink.onTask?.(task);
+        else sink.markdown(`\n${renderProposal(ev.data as ProposalData)}\n`);
         sink.onProposal?.(ev.data);
+      } else if (ev.event === 'task') {
+        const task = (ev.data as { task?: EngineeringTask }).task;
+        if (task) sink.onTask?.(task);
       } else if (ev.event === 'escalation_offer') {
         // A defined local failure produced a cloud escalation OFFER. Consent is
         // handled by the caller (a modal) — no cloud call happens without it.

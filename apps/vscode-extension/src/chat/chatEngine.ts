@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { ChatAttachment, FeatureName } from '@migrapilot/shared-types';
+import type { ChatAttachment, EngineeringTask, FeatureName } from '@migrapilot/shared-types';
 import { BackendRouter } from '../services/backendRouter.js';
 import { BrainClient } from '../services/brainClient.js';
 import { newRequestId } from '@migrapilot/pilot-client';
@@ -36,6 +36,7 @@ import type { BrainStore } from '../services/brainPersistence.js';
 export interface ChatSink {
   progress(text: string): void;
   markdown(text: string): void;
+  engineeringTask?(task: EngineeringTask): void;
 }
 
 export interface ChatEngineDeps {
@@ -433,6 +434,7 @@ async function runChatTurnInner(
     // APPLY afterwards. The engineer loop is preview-only by owner policy — it
     // proposes, it never writes; applying is an explicit operator action here.
     const changesetProposals: ChangesetProposal[] = [];
+    let latestEngineeringTask: EngineeringTask | undefined;
     const taskSignal = tokenToSignal(token);
     await governedChild(turn, 'engineer_turn', () =>
       runEngineerTurn(
@@ -504,6 +506,10 @@ async function runChatTurnInner(
               changesetProposals.push({ proposalHash: pv.proposalHash, ops: pv.ops, ...(pv.fileCount != null ? { fileCount: pv.fileCount } : {}) });
             }
           },
+          onTask: (task) => {
+            latestEngineeringTask = task;
+            sink.engineeringTask?.(task);
+          },
         },
         taskSignal,
       ),
@@ -515,7 +521,8 @@ async function runChatTurnInner(
     const finalChangeset = changesetProposals.at(-1);
     const autoApply = vscode.workspace.getConfiguration('migrapilot').get<boolean>('autoApplyChangeset', false);
     let applied = false;
-    if (finalChangeset && !token.isCancellationRequested) {
+    const nativeTaskCard = Boolean(sink.engineeringTask);
+    if (finalChangeset && !token.isCancellationRequested && (!nativeTaskCard || autoApply)) {
       // Opt-in auto-approve: when on, apply without the interactive prompt. Default
       // off keeps the owner's preview-only behavior (review + click Apply).
       try {
@@ -524,6 +531,19 @@ async function runChatTurnInner(
         );
       } catch {
         /* apply UI failure never breaks the chat turn */
+      }
+      if (latestEngineeringTask) {
+        sink.engineeringTask?.({
+          ...latestEngineeringTask,
+          stage: applied ? 'testing' : 'repair_needed',
+          checkpoint: applied
+            ? 'The approved changeset was applied exactly once. Verification has not run yet.'
+            : 'The proposal was not applied. Review or repair the proposal before continuing.',
+          completion: applied ? 'in_progress' : 'blocked',
+          proposal: latestEngineeringTask.proposal
+            ? { ...latestEngineeringTask.proposal, approvalState: applied ? 'applied' : latestEngineeringTask.proposal.approvalState }
+            : undefined,
+        });
       }
     }
     // Consistent machine-authored work report after every build task — the user

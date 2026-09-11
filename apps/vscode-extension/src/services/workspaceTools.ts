@@ -74,6 +74,35 @@ const asRecord = (input: unknown): Record<string, unknown> =>
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
+/** vscode.SymbolKind names -> the protocol's `kind` enum. */
+const SYMBOL_KIND: Record<string, string> = {
+  function: 'function',
+  class: 'class',
+  interface: 'interface',
+  enum: 'enum',
+  method: 'method',
+  variable: 'variable',
+  constant: 'variable',
+  property: 'variable',
+  field: 'variable',
+  constructor: 'method',
+  struct: 'class',
+  typeparameter: 'type',
+  object: 'variable',
+};
+
+/** Read an inclusive, 1-based line span from a file inside the root. */
+async function readFileRange(root: string, rel: string, startLine: number, endLine: number): Promise<string> {
+  const nodeFs = await import('node:fs/promises');
+  const nodePath = await import('node:path');
+  const abs = nodePath.resolve(root, rel);
+  if (abs !== nodePath.resolve(root) && !abs.startsWith(nodePath.resolve(root) + nodePath.sep)) {
+    throw new WorkspaceToolError(`"${rel}" is outside the workspace root`);
+  }
+  const text = await nodeFs.readFile(abs, 'utf8');
+  return text.split('\n').slice(Math.max(0, startLine - 1), endLine).join('\n');
+}
+
 /**
  * Assert the root exists. The check whose ABSENCE caused the original defect:
  * without it a missing workspace lists as empty, and "empty" is the answer that
@@ -241,7 +270,38 @@ export function createWorkspaceToolExecutor(host: WorkspaceToolHost) {
         const root = await assertRoot(args.rootPath);
         const rel = str(args.path);
         if (!rel) throw new WorkspaceToolError('path is required');
-        return host.documentSymbols(root, rel);
+        const listed = (await host.documentSymbols(root, rel)) as {
+          symbols?: Array<{ name: string; kind: string; startLine: number; endLine: number }>;
+        };
+        const symbols = listed.symbols ?? [];
+        // The contract is ONE enclosing symbol with its source, not a listing.
+        // Returning the raw list left consumers reading `.range` off undefined.
+        const wantName = str(args.symbolName);
+        const wantLine = typeof args.line === 'number' ? args.line : undefined;
+        let picked = wantName ? symbols.find((s) => s.name === wantName) : undefined;
+        if (!picked && wantLine !== undefined) {
+          // Tightest span wins, so a method beats its enclosing class.
+          for (const s of symbols) {
+            if (s.startLine <= wantLine && wantLine <= s.endLine) {
+              if (!picked || s.endLine - s.startLine < picked.endLine - picked.startLine) picked = s;
+            }
+          }
+        }
+        if (!picked) picked = symbols[0];
+        if (!picked) {
+          throw new WorkspaceToolError(
+            `no symbol found in "${rel}"${wantName ? ` named "${wantName}"` : wantLine !== undefined ? ` covering line ${wantLine}` : ''}`,
+          );
+        }
+        const whole = await readFileRange(root, rel, picked.startLine, picked.endLine);
+        return {
+          tool: 'file.readSymbol',
+          path: rel,
+          symbolName: picked.name,
+          kind: SYMBOL_KIND[picked.kind.toLowerCase()] ?? 'unknown',
+          range: { startLine: picked.startLine, endLine: picked.endLine },
+          content: whole,
+        };
       }
 
       // ── Proposals (read-only) and applies (human-gated) ─────────────────────

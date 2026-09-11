@@ -39,7 +39,7 @@ function source(rel: string): string {
 
 test('the selector exposes the three protocol modes with the required labels', () => {
   assert.deepEqual(LIVE_MODE_OPTIONS.map((o) => o.value), ['off', 'official', 'web']);
-  assert.deepEqual(LIVE_MODE_OPTIONS.map((o) => o.label), ['Live knowledge off', 'Official sources', 'Web research']);
+  assert.deepEqual(LIVE_MODE_OPTIONS.map((o) => o.label), ['Workspace only', 'Official sources', 'Web research']);
 });
 
 test('the UI values match the protocol union exactly', () => {
@@ -154,7 +154,7 @@ test('the selector is actually RENDERED, not merely defined', () => {
   assert.match(html, /<select id="clive"/);
   assert.match(html, /liveModeOptions\(\)/);
   assert.match(html, /LIVE_MODE_OPTIONS\.map/);
-  assert.match(html, /<label class="sr-only" for="clive">Live knowledge<\/label>/, 'and it is labelled');
+  assert.match(html, /<label class="sr-only" for="clive">Research<\/label>/, 'and it is labelled');
 });
 
 test('the recommended composer order places live knowledge after evidence', () => {

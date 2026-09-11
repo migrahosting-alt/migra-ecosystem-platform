@@ -20,7 +20,8 @@ import type { WorkspaceToolHost } from './workspaceTools.js';
 const SEVERITY: Record<number, string> = {
   [vscode.DiagnosticSeverity.Error]: 'error',
   [vscode.DiagnosticSeverity.Warning]: 'warning',
-  [vscode.DiagnosticSeverity.Information]: 'info',
+  // These MUST be the protocol's names. 'info' is not in DiagnosticSeveritySchema.
+  [vscode.DiagnosticSeverity.Information]: 'information',
   [vscode.DiagnosticSeverity.Hint]: 'hint',
 };
 
@@ -99,13 +100,18 @@ export function createVscodeWorkspaceHost(
         for (const d of diags) {
           items.push({
             path: path.relative(rootPath, abs).split(path.sep).join('/'),
-            severity: SEVERITY[d.severity] ?? 'info',
+            severity: SEVERITY[d.severity] ?? 'information',
             message: d.message,
-            startLine: d.range.start.line + 1,
-            startColumn: d.range.start.character + 1,
-            endLine: d.range.end.line + 1,
-            ...(d.source ? { source: d.source } : {}),
-            ...(d.code ? { code: typeof d.code === 'object' ? String(d.code.value) : String(d.code) } : {}),
+            // DiagnosticItemSchema declares a NESTED range. Emitting these flat
+            // made every consumer read `item.range.startLine` off undefined.
+            range: {
+              startLine: d.range.start.line + 1,
+              startCharacter: d.range.start.character + 1,
+              endLine: d.range.end.line + 1,
+              endCharacter: d.range.end.character + 1,
+            },
+            source: d.source ?? null,
+            code: d.code == null ? null : typeof d.code === 'object' ? String(d.code.value) : String(d.code),
           });
         }
       }
