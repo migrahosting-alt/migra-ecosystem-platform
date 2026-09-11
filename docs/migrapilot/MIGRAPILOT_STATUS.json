@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-11",
-  "updatedBy": "Claude (Opus 5) — capability-owned answer rendering; READY FOR OWNER PRODUCT ACCEPTANCE (UI auth remains a separate blocker)",
+  "updatedBy": "Claude (Opus 5) — BACKEND/API ACCEPTANCE CANDIDATE. UI not tested; no promotion; no RC freeze.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "READY FOR OWNER PRODUCT ACCEPTANCE on the local build. All six acceptance steps deterministic (8/8 each, paced, live); attachment membership 20/20 identical. NO RC freeze. NO staging promotion. Gmail untouched. UI acceptance remains separately blocked on consumer auth env.",
+    "status": "READY FOR OWNER PRODUCT ACCEPTANCE — BACKEND PATH ONLY. See acceptanceScope.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2915,6 +2915,18 @@
         "No staging promotion.",
         "Do NOT reconnect or disconnect Gmail."
       ]
+    },
+    "acceptanceScope": {
+      "_authority": "🚨 THE EXACT BOUNDARY. Nothing here is live product acceptance.",
+      "/api/ai/chat path": "READY FOR OWNER ACCEPTANCE",
+      "capability-owned rendering": "READY FOR OWNER ACCEPTANCE",
+      "Gmail six-step workflow": "READY FOR OWNER ACCEPTANCE",
+      "UI / consumer app": "🚨 NOT TESTED / BLOCKED — auth+config; never exercised end to end in the real user surface",
+      "production / staging promotion": "🚨 NOT AUTHORIZED",
+      "RC freeze": "🚨 NOT AUTHORIZED",
+      "whyThisIsNotPass": "The six steps were driven through the same /api/ai/chat surface the UI calls, with owner scope headers — which is evidence about the BACKEND PATH and nothing more. No rendered answer, no attachment list, no spreadsheet values and no thread formatting have been seen in the actual MigraPilot UI.",
+      "whatMovesItToPass": "The OWNER runs the same six prompts against the same real mailbox from the consumer UI, in a legitimately authenticated session, and confirms: rendered answer, attachment list, exact spreadsheet values, thread summary formatting, contextual follow-up — plus NO hidden notices, stale headings, missing facts or fabricated filenames. Only then: OWNER PRODUCT ACCEPTANCE — PASS.",
+      "nextJob": "🚨 NOT more backend tuning. Get the consumer into a legitimate authenticated state without weakening anything, then run the six steps through the real UI."
     }
   },
   "deploymentPolicy": {
