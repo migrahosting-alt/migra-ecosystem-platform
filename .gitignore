@@ -71,6 +71,14 @@
 # on exactly one disk. Extension-scoped, like the *.md line, so the next one does
 # not have to rediscover this.
 !/docs/migrapilot/*.sh
+# 🚨 AND THE .mjs HALF, FOR THE SAME REASON THE .sh LINE EXISTS.
+#
+# `workspace-digest.mjs` is invoked by stage-workspace-deps.sh during every
+# release. It was never tracked, so it lived on exactly one disk — the failure
+# the comment above says it was written to prevent, repeated one extension
+# later. A clean checkout could not deploy: the consumer release aborted with
+# `scp: stat local ".../workspace-digest.mjs": No such file or directory`.
+!/docs/migrapilot/*.mjs
 # The canonical machine-readable status. Named explicitly rather than widening the
 # allowlist to *.json, so no other generated JSON slips into the repository with it.
 !/docs/migrapilot/MIGRAPILOT_STATUS.json
