@@ -240,10 +240,8 @@ BOOT_ENV="$ROOT/releases/$REL/.boot-test.env"
 ssh -n "$HOST" "printf 'MIGRAPILOT_BRAIN_PORT=%s\nMIGRAPILOT_BRAIN_HOST=127.0.0.1\n' '$BOOT_PORT' > $BOOT_ENV"
 ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
   --property=Type=simple \
-  --property=User=migrapilot --property=Group=migrapilot \
-  --property=EnvironmentFile=/etc/migrapilot/brain.env \
-  --property=EnvironmentFile=/etc/migrapilot/brain-postgres.env \
-  --property=EnvironmentFile=-/etc/migrapilot/qualification.env \
+  --property=User=$DEPLOY_SERVICE_USER --property=Group=$DEPLOY_SERVICE_GROUP \
+  $(env_file_properties "$DEPLOY_ENV_FILES") \
   --property=WorkingDirectory=$ROOT/releases/$REL \
   --property=NoNewPrivileges=true \
   --property=PrivateTmp=true \

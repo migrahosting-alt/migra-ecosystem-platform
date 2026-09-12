@@ -160,11 +160,11 @@ step "5. boot test on a spare port (before anything is swapped)"
 BOOT_UNIT="migrapilot-boottest-$REL"
 stop_boot() { ssh -n "$HOST" "sudo -n systemctl stop $BOOT_UNIT.service >/dev/null 2>&1; sudo -n systemctl reset-failed $BOOT_UNIT.service >/dev/null 2>&1; true"; }
 stop_boot
+ENV_PROPS="$(env_file_properties "$DEPLOY_CONSUMER_ENV_FILES")"
 ssh -n "$HOST" "sudo -n systemd-run --unit=$BOOT_UNIT --collect --quiet \
   --property=Type=simple \
-  --property=User=migrapilot --property=Group=migrapilot \
-  --property=EnvironmentFile=/etc/migrapilot/consumer.env \
-  --property=EnvironmentFile=/etc/migrapilot/consumer-auth-origins.env \
+  --property=User=$DEPLOY_SERVICE_USER --property=Group=$DEPLOY_SERVICE_GROUP \
+  $ENV_PROPS \
   --property=WorkingDirectory=$ROOT/releases/$REL \
   --property=NoNewPrivileges=true \
   --property=PrivateTmp=true \

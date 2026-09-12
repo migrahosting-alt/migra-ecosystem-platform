@@ -56,6 +56,15 @@ deploy_target() {
       DEPLOY_PUBLIC_HOST=chat.migrateck.com
       DEPLOY_ENV_FILE=/etc/migrapilot/brain.env
       DEPLOY_CONSUMER_ENV_FILE=/etc/migrapilot/consumer.env
+      # EVERY environment file the real unit loads, in the order it loads them.
+      # A `-` prefix is systemd's own "optional". The boot test mounts exactly
+      # this list, so a release that would fail on the real configuration fails
+      # before cutover rather than after it.
+      DEPLOY_ENV_FILES="/etc/migrapilot/brain.env /etc/migrapilot/brain-postgres.env -/etc/migrapilot/qualification.env"
+      DEPLOY_CONSUMER_ENV_FILES="/etc/migrapilot/consumer.env /etc/migrapilot/consumer-auth-origins.env"
+      # The account the real units run as.
+      DEPLOY_SERVICE_USER=migrapilot
+      DEPLOY_SERVICE_GROUP=migrapilot
       # 🚨 Named so a deploy cannot silently point a staging build at the
       # production database, which is the one mistake with no rollback.
       DEPLOY_DB_AUTHORITY=migrapilot-production
@@ -75,6 +84,17 @@ deploy_target() {
       DEPLOY_PUBLIC_HOST=staging-chat.migrateck.com
       DEPLOY_ENV_FILE=/etc/migrapilot-staging/brain.env
       DEPLOY_CONSUMER_ENV_FILE=/etc/migrapilot-staging/consumer.env
+      DEPLOY_ENV_FILES="/etc/migrapilot-staging/brain.env /etc/migrapilot-staging/brain-postgres.env -/etc/migrapilot-staging/qualification.env"
+      # One file, not two: staging has no separate auth-origins file, and naming
+      # a missing one without systemd's optional `-` would fail the boot test
+      # for a difference that is configuration, not code.
+      DEPLOY_CONSUMER_ENV_FILES="/etc/migrapilot-staging/consumer.env"
+      # Staging's units run as root. Naming production's service account here
+      # would make the boot test fail on file ownership rather than on the
+      # release — and, worse, would have been a production identity appearing
+      # in a staging deploy.
+      DEPLOY_SERVICE_USER=root
+      DEPLOY_SERVICE_GROUP=root
       DEPLOY_DB_AUTHORITY=migrapilot-staging
       ;;
     '')
@@ -95,7 +115,22 @@ deploy_target() {
   export DEPLOY_TARGET_NAME DEPLOY_HOST \
          DEPLOY_BRAIN_ROOT DEPLOY_BRAIN_UNIT DEPLOY_BRAIN_BIND DEPLOY_BRAIN_PORT DEPLOY_BRAIN_BOOT_PORT \
          DEPLOY_CONSUMER_ROOT DEPLOY_CONSUMER_UNIT DEPLOY_CONSUMER_BIND DEPLOY_CONSUMER_PORT \
-         DEPLOY_PUBLIC_HOST DEPLOY_ENV_FILE DEPLOY_CONSUMER_ENV_FILE DEPLOY_DB_AUTHORITY
+         DEPLOY_PUBLIC_HOST DEPLOY_ENV_FILE DEPLOY_CONSUMER_ENV_FILE DEPLOY_DB_AUTHORITY \
+         DEPLOY_ENV_FILES DEPLOY_CONSUMER_ENV_FILES DEPLOY_SERVICE_USER DEPLOY_SERVICE_GROUP
+}
+
+# Turn a target's env-file list into systemd-run properties.
+#
+# 🚨 THIS EXISTS BECAUSE BOTH BOOT TESTS HARD-CODED PRODUCTION'S FILES.
+# The comment above the consumer boot test correctly says it mounts "the SAME
+# EnvironmentFiles" as the real unit — and then named /etc/migrapilot/... as
+# literals, so `--target staging` mounted PRODUCTION configuration into a
+# staging boot test. On the staging host those paths do not exist, so it failed
+# loudly; the shape of the bug is that it could have succeeded.
+env_file_properties() {
+  local list="$1" out="" f
+  for f in $list; do out="$out --property=EnvironmentFile=$f"; done
+  printf '%s' "$out"
 }
 
 # ── the release fingerprint ────────────────────────────────────────────────
