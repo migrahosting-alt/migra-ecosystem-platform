@@ -122,6 +122,9 @@ function isAbort(err: unknown): boolean {
  * There is no silent fallback to a stub: a configured real provider that fails
  * surfaces the error to the caller (mirrors the extension-side provider policy). */
 export class OpenAiCompatProvider implements ProviderAdapter {
+  /** A real endpoint: whatever its health, it is the thing that generates. */
+  readonly kind = 'live' as const;
+
   public readonly profile: Exclude<ModelProfile, 'none'>;
   private readonly baseUrl: string;
   private readonly model: string;

@@ -4,6 +4,15 @@ import { OpenAiCompatProvider } from './openAiCompatProvider.js';
 
 export interface ProviderAdapter {
   profile: Exclude<ModelProfile, 'none'>;
+  /**
+   * What this adapter IS, separately from whether it answered a probe.
+   *
+   * `stub` is a deterministic placeholder for tests and local development. It
+   * returns text, so every "did it reply?" check passes — which is exactly why
+   * the distinction has to be carried as a property rather than inferred from
+   * behaviour.
+   */
+  readonly kind: 'live' | 'stub';
   isAvailable(): Promise<boolean>;
   complete(request: ChatTurnRequest): Promise<ChatTurnResponse>;
   stream?(
@@ -15,10 +24,30 @@ export interface ProviderAdapter {
 type Profile = Exclude<ModelProfile, 'none'>;
 
 export class StubProvider implements ProviderAdapter {
+  readonly kind = 'stub' as const;
+
   constructor(public readonly profile: Exclude<ModelProfile, 'none'>) {}
 
+  /**
+   * 🚨 FALSE, DELIBERATELY — AND THIS USED TO RETURN TRUE.
+   *
+   * "Available" is read by `/health` to decide `inferenceReady`, and through it
+   * the whole service's `status`. A stub answers `complete()` with canned text,
+   * so returning true here was locally defensible and globally false: a Brain
+   * with NO inference configured at all reported `status: ok` with all four
+   * profiles `reachable: true`.
+   *
+   * That was found on staging, where the only field telling the truth was
+   * `gpuCapacity: unavailable` — every provider line said the opposite. An
+   * operator reading a green health check has no way to discover that nothing
+   * can generate.
+   *
+   * The stub still WORKS: `complete()` and `stream()` are unchanged, so tests
+   * and offline development are unaffected. What changes is that it no longer
+   * claims to be an inference provider, because it is not one.
+   */
   async isAvailable(): Promise<boolean> {
-    return true;
+    return false;
   }
 
   async complete(request: ChatTurnRequest): Promise<ChatTurnResponse> {

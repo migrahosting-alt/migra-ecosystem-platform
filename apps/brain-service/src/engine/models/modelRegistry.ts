@@ -40,6 +40,18 @@ export interface ModelDescriptor {
   sizeBytes?: number;
   capabilities: ModelCapabilities;
   tier: ModelTier;
+  /**
+   * WHERE THE WEIGHTS ACTUALLY RUN.
+   *
+   * 🚨 Not the same question as which provider listed the model. Ollama lists
+   * its CLOUD models through the same local `/api/tags` endpoint as the ones on
+   * the disk, so `provider: 'ollama'` says nothing about whether the prompt
+   * leaves the machine. `gpt-oss:120b-cloud` is 384 BYTES on disk and 116.8B
+   * parameters — a manifest pointing at someone else's hardware.
+   *
+   * Absent means on-device. Discovery sets it explicitly when it can tell.
+   */
+  hosting?: 'on-device' | 'remote';
   /** Qualification state (installing a model does not approve it). */
   qualification?: QualificationInfo;
 }
@@ -68,6 +80,20 @@ export interface ModelRegistryOptions {
   /** Attach a qualification to each discovered model. Unqualified models default
    * to `installed` (present, not production-approved). */
   qualify?: (id: string) => QualificationInfo | undefined;
+  /**
+   * Admit models whose weights run off this machine. **Default false.**
+   *
+   * 🚨 FAIL CLOSED, BECAUSE THE COST AND LOCALITY CLAIMS ARE MADE ELSEWHERE.
+   * The `local` provider is declared with `dataLocality: 'on-device'` and
+   * `cost: { inputPer1M: 0, outputPer1M: 0 }`. A remote model discovered through
+   * that same endpoint inherits both claims and neither is true — measured on
+   * staging, a `tier: deep` turn sent 335 input tokens to Ollama Cloud and the
+   * engine reported `provider: local`.
+   *
+   * Opting in is one environment variable, and it should be a decision someone
+   * made rather than a default nobody saw.
+   */
+  allowRemote?: boolean;
 }
 
 const DEFAULT_TTL = 60_000;
@@ -80,6 +106,7 @@ export class ModelRegistry {
   private readonly fetchImpl: typeof fetch;
   private readonly staticModels?: ModelDescriptor[];
   private readonly qualifyFn?: (id: string) => QualificationInfo | undefined;
+  private readonly allowRemote: boolean;
   private cache: ModelDescriptor[] | undefined;
   private cachedAt = 0;
   private inflight: Promise<ModelDescriptor[]> | undefined;
@@ -91,6 +118,7 @@ export class ModelRegistry {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.staticModels = opts.staticModels;
     this.qualifyFn = opts.qualify;
+    this.allowRemote = opts.allowRemote ?? false;
   }
 
   /** Return the discovered catalog, refreshing when the cache is cold/stale.
@@ -134,7 +162,10 @@ export class ModelRegistry {
         if (!merged.has(m.id)) merged.set(m.id, m);
       }
     }
-    return [...merged.values()].map((m) => this.enrich(m)).sort((a, b) => a.id.localeCompare(b.id));
+    return [...merged.values()]
+      .filter((m) => this.allowRemote || m.hosting !== 'remote')
+      .map((m) => this.enrich(m))
+      .sort((a, b) => a.id.localeCompare(b.id));
   }
 
   /** Attach qualification; an unlisted installed model defaults to `installed`. */
@@ -198,6 +229,7 @@ export class ModelRegistry {
       sizeBytes: m.size,
       capabilities,
       tier: tierFor(paramCount),
+      hosting: isRemotelyHosted(name, m.size, paramCount) ? 'remote' : 'on-device',
     };
   }
 
@@ -214,6 +246,28 @@ export class ModelRegistry {
     };
     return { id, provider, capabilities, tier: tierFor(parseParamSize(id)) };
   }
+}
+
+/**
+ * Does this Ollama entry run somewhere else?
+ *
+ * TWO SIGNALS, because either alone is brittle:
+ *
+ *  · Ollama's own tag convention — a `-cloud` suffix on the tag. This is the
+ *    documented marker and the one that survives a re-pull.
+ *  · The manifest is impossibly small for the parameter count it advertises.
+ *    `gpt-oss:120b-cloud` reports 116.8B parameters in 384 bytes. Nothing that
+ *    size runs locally, whatever it is called.
+ *
+ * Deliberately conservative in the safe direction: an unrecognised remote model
+ * that trips neither signal is admitted, which is the pre-existing behaviour, so
+ * this narrows the gap without pretending to close it.
+ */
+export function isRemotelyHosted(name: string, sizeBytes?: number, paramCount?: number): boolean {
+  if (/-cloud\b|:cloud\b|-cloud$/i.test(name)) return true;
+  // A billion parameters is never under a megabyte of weights.
+  if (paramCount != null && paramCount >= 1 && sizeBytes != null && sizeBytes < 1_000_000) return true;
+  return false;
 }
 
 /** Parse "7.6B" / "32.8B" / "137M" → billions of parameters. */

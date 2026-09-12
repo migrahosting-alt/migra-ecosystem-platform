@@ -172,12 +172,24 @@ export function sourcesFromEnv(env: BrainEnv): ProviderSource[] {
 /** Build the engine ModelRegistry exactly as {@link registerAiRoutes} would, so a
  * caller can share ONE registry across the AI facade, the engineer route, and the
  * provider fleet. */
+/**
+ * Whether models that run off this machine may be routed to.
+ *
+ * Off unless an operator says otherwise. Read here rather than threaded through
+ * `BrainEnv` because it is a deployment policy, not a turn-level option a
+ * caller can set.
+ */
+function allowRemoteModels(): boolean {
+  const v = (process.env.MIGRAPILOT_ALLOW_REMOTE_MODELS ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 export function buildEngineModelRegistry(env: BrainEnv, qualStore?: QualificationStore): ModelRegistry {
   const real = env.localProvider === 'openai-compat';
   const qual = qualStore ?? new QualificationStore();
   return new ModelRegistry(
     real
-      ? { sources: sourcesFromEnv(env), qualify: (id) => qual.get(id) }
+      ? { sources: sourcesFromEnv(env), qualify: (id) => qual.get(id), allowRemote: allowRemoteModels() }
       : { sources: [], staticModels: [STUB_MODEL], qualify: (id) => qual.get(id) },
   );
 }
@@ -229,7 +241,7 @@ export function registerAiRoutes(
     registry ??
     new ModelRegistry(
       real
-        ? { sources: sourcesFromEnv(env), qualify: (id) => qual.get(id) }
+        ? { sources: sourcesFromEnv(env), qualify: (id) => qual.get(id), allowRemote: allowRemoteModels() }
         : { sources: [], staticModels: [STUB_MODEL], qualify: (id) => qual.get(id) },
     );
 

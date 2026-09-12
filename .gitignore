@@ -80,6 +80,13 @@
 # is not evidence, and the status documents point at these.
 !/docs/migrapilot/evidence/
 !/docs/migrapilot/evidence/*.json
+# 🚨 An allowlist exception does NOT reach into subdirectories — each level has
+# to be re-admitted, or a run's evidence folder is silently ignored and the
+# claim it supports lives on one machine again.
+!/docs/migrapilot/evidence/*/
+!/docs/migrapilot/evidence/*/*.md
+!/docs/migrapilot/evidence/*/*.json
+!/docs/migrapilot/evidence/*/*.psv
 
 # The exact text of every scoped elevation grant. The guard in
 # .claude/hooks/block-dangerous.sh removes each grant once its slice closes and

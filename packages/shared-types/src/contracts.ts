@@ -55,8 +55,25 @@ export interface EngineeringTask {
 
 export interface ProviderHealth {
   name: string;
+  /**
+   * The endpoint answered. NOT "it can generate" — see `kind`.
+   *
+   * These were conflated, and the conflation was invisible: a deterministic
+   * stub reported reachable and the service reported `ok` while nothing could
+   * produce a token.
+   */
   reachable: boolean;
   role: 'cheap' | 'default' | 'premium' | 'local';
+  /**
+   * Whether this profile is backed by a real inference endpoint (`live`) or by
+   * the deterministic placeholder (`stub`).
+   *
+   * Optional so an older Brain deserialises unchanged; absent means "not
+   * reported", which a reader must not read as `live`.
+   */
+  kind?: 'live' | 'stub';
+  /** Safe, secret-free reason, when there is one worth showing an operator. */
+  detail?: string;
 }
 
 export interface HealthResponse {

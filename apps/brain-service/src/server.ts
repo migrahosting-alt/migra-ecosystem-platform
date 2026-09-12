@@ -176,6 +176,11 @@ async function registerPlugins(): Promise<void> {
  *   ready        registered and able to record a signed decision
  */
 type GovernanceState = 'unavailable' | 'unsigned' | 'ready';
+
+/** One sentence an operator can act on, rather than a silently healthy line. */
+const STUB_DETAIL =
+  'deterministic stub — no inference endpoint configured (set MIGRAPILOT_LOCAL_PROVIDER=openai-compat, ' +
+  'MIGRAPILOT_PROVIDER_URL and a model for this profile)';
 let governanceState: GovernanceState = 'unavailable';
 
 async function getHealth(): Promise<HealthResponse> {
@@ -235,11 +240,21 @@ async function getHealth(): Promise<HealthResponse> {
     service: 'migrapilot-brain',
     version: '0.1.0',
     uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+    /*
+     * `kind` travels with every line, because `reachable` alone was read as
+     * "inference works" and a stub made that false without anything looking
+     * wrong. A reader that ignores `kind` now sees `reachable: false` for a
+     * stub, which is the safe direction.
+     */
     providers: [
-      { name: 'local', reachable: localOk, role: 'local' },
-      { name: 'cheap', reachable: cheapOk, role: 'cheap' },
-      { name: 'default', reachable: defaultOk, role: 'default' },
-      { name: 'premium', reachable: premiumOk, role: 'premium' },
+      { name: 'local', reachable: localOk, role: 'local', kind: localProvider.kind,
+        ...(localProvider.kind === 'stub' ? { detail: STUB_DETAIL } : {}) },
+      { name: 'cheap', reachable: cheapOk, role: 'cheap', kind: cheapProvider.kind,
+        ...(cheapProvider.kind === 'stub' ? { detail: STUB_DETAIL } : {}) },
+      { name: 'default', reachable: defaultOk, role: 'default', kind: defaultProvider.kind,
+        ...(defaultProvider.kind === 'stub' ? { detail: STUB_DETAIL } : {}) },
+      { name: 'premium', reachable: premiumOk, role: 'premium', kind: premiumProvider.kind,
+        ...(premiumProvider.kind === 'stub' ? { detail: STUB_DETAIL } : {}) },
     ],
     indexes: {
       repoMapReady: persistence.ragStore === 'ready',

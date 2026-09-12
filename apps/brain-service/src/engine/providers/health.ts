@@ -24,10 +24,19 @@ export type ProviderProbe = (provider: Provider) => Promise<ProbeOutcome>;
 
 /** Default read-only reachability probe: a discovery/list GET only. It sends NO
  * credential (any HTTP response — even 401 — proves the endpoint is reachable),
- * so it never handles a secret. Stub providers are reachable by definition. */
+ * so it never handles a secret. Stub providers have no endpoint, so they are
+ * reported as unreachable rather than as trivially healthy. */
 export function makeReachabilityProbe(fetchImpl: typeof fetch = fetch, timeoutMs = 3000): ProviderProbe {
   return async (provider: Provider): Promise<ProbeOutcome> => {
-    if (provider.protocol === 'stub') return { reachable: true, modelCount: 1 };
+    /*
+     * 🚨 NOT REACHABLE. This returned `{ reachable: true, modelCount: 1 }`,
+     * which `deriveHealth` turned into `healthy` — the strongest word available,
+     * for a provider with no endpoint at all. A stub has nothing to probe, and
+     * "nothing to probe" is not evidence of health.
+     */
+    if (provider.protocol === 'stub') {
+      return { reachable: false, detail: 'stub provider — no inference endpoint to probe' };
+    }
     if (!provider.baseUrl) return { reachable: false, detail: 'no base url' };
     const url = provider.baseUrl.replace(/\/$/, '') + '/models';
     const controller = new AbortController();
@@ -62,6 +71,21 @@ export function deriveHealth(
 ): ProviderHealth {
   if (!provider.enabled) {
     return { status: 'disabled', reachable: false, lastCheckedAt: null, detail: 'provider disabled' };
+  }
+  /*
+   * Before the credential and probe branches, because neither question applies:
+   * a stub has no endpoint to reach and no credential to hold. Reporting it as
+   * `unreachable` would be true but misleading — it reads as a fault, and this
+   * is a configuration state an operator chose (or inherited by configuring
+   * nothing).
+   */
+  if (provider.protocol === 'stub') {
+    return {
+      status: 'stub',
+      reachable: false,
+      lastCheckedAt: now,
+      detail: 'deterministic stub — returns canned text and cannot serve inference',
+    };
   }
   if (provider.credentialEnv && !hasCredential) {
     // A cloud provider whose credential env var is absent is never probed.

@@ -35,7 +35,20 @@ export interface ProviderCost {
   outputPer1M?: number;
 }
 
-export type ProviderHealthStatus = 'healthy' | 'degraded' | 'unreachable' | 'unknown' | 'disabled';
+/**
+ * `stub` is its own state, not a flavour of healthy.
+ *
+ * It used to be absent, and a stub therefore probed `reachable: true` with one
+ * advertised model and derived to `healthy` — the strongest word this union
+ * has, for the one provider that cannot generate anything.
+ */
+export type ProviderHealthStatus =
+  | 'healthy'
+  | 'degraded'
+  | 'unreachable'
+  | 'unknown'
+  | 'disabled'
+  | 'stub';
 
 /** Truthful, inspectable provider health. Never fabricated: an unprobed provider
  * is `unknown`, a disabled one is `disabled`, a failed probe is `unreachable`. */
