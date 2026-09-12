@@ -15,37 +15,53 @@ _Last updated: 2026-09-12_
 
 ---
 
-## 2026-09-12 — **MigraPilot staging EXISTS**, serves `3c204aa8`, owner login works
+## 2026-09-12 — **MigraPilot staging parity**: real inference, real database, real identity
 
-State: **DEPLOYED TO STAGING — OWNER LOGIN AVAILABLE — GMAIL FLOW BLOCKED ON GOOGLE REDIRECT**
+State: **STAGING PARITY READY — GMAIL INTEGRATION PENDING**
 
 Runbook: [`STAGING_ENVIRONMENT.md`](./STAGING_ENVIRONMENT.md). Details in the JSON under
 `stagingEnvironment2026_09_12`.
 
-| Check the owner asked for | Result |
-| --- | --- |
-| Both services boot under systemd | ✅ `migrapilot-staging-brain` + `migrapilot-staging-consumer`, active |
-| Release identity reports `3c204aa8` | ✅ both, `stamped: true`, from `RELEASE.json` in the build |
-| Consumer talks to the staging Brain | ✅ traced through the Brain's own request log |
-| Health checks pass | ✅ `/health` 200; schema at migration 28, 37 tables |
-| Rollback path proven | ✅ **exercised both ways** against the production baseline |
-| Production unchanged | ✅ still `0f494d27` / `chat-platform-rc-0908`, both units active |
-| SSH tunnel access works | ✅ `ssh -N -L 127.0.0.1:3200:10.10.0.12:3000 pve` |
-| Owner sign-in on staging | ✅ real MigraAuth profile + 19 capabilities returned |
+| | Staging | Production |
+| --- | --- | --- |
+| Release | `3c204aa8` / `staging-3c204aa8`, stamped | `0f494d27` / `chat-platform-rc-0908`, stamped |
+| Host | CT101, tailnet `migrapilot-staging-core` `100.83.46.93` | VM111, `100.95.14.29` |
+| Inference | `100.86.143.93:11434` over Tailscale | the same endpoint |
+| Database | db-core `migrapilot_brain_stage`, PG 16.15 | db-core `migrapilot_brain`, PG 16.15 |
+| Node | 22.23.2 | 22.23.2 |
 
-Staging is **CT101** (`migrapilot-core`, 10.10.0.12) with its own units, release roots, env files,
-PostgreSQL and a **staging-only** OAuth client `migrapilot-consumer-staging_UXO9zoqUpD` (public PKCE,
-no secret) registered for exactly `http://127.0.0.1:3200/api/auth/callback`. The local development
-client was not modified.
+**Chat works end to end.** Typed in the real composer, answered, persisted:
+`llama3.1:8b` via the Brain's capability router, 2 conversations and 4 messages durable on
+db-core. `/health` reports `gpuCapacity: ready`, `residentModels: ["qwen2.5-coder:14b"]`,
+15.2 GB VRAM — a real probe of the workstation GPU across the tailnet.
 
-Rollback is one line per service — swap the symlink, restart the unit — and the rollback target is the
-**real production artifact** copied read-only off VM111. Rolling back made both services report
-`0f494d27`; rolling forward returned them to `3c204aa8`. `/health` stayed 200 throughout.
+🚨 **The lesson from the previous state**: `probe()` returns `reachable: true` for a *stub*
+provider by definition, so all four profiles reported healthy while nothing could generate.
+`gpuCapacity` was the field telling the truth. Never read "providers reachable" as
+"inference works".
 
-**Not yet true of staging**, and each matters: the deploy scripts cannot run against it (no SSH path to
-CT101 — an access change only the owner should authorise), there is **no inference provider** so chat
-produces no answers, governance is unsigned, and Gmail is deliberately unwired. Nothing in Google Cloud
-was touched.
+**Rollback re-proven** after the Tailscale, inference and database moves — both ways, both
+services, `/health` 200 throughout. Retention now caps staging at three releases and never
+deletes the active one or the rollback target.
+
+**Isolation measured, not assumed**:
+`has_database_privilege('migrapilot_brain_stage_app','migrapilot_brain','CONNECT') = FALSE`.
+
+### One blocker, and it is the owner's call
+
+`DEPLOY_HOST=migrapilot-staging-core` now resolves via MagicDNS and Tailscale SSH is enabled
+on the node — but the tailnet ACL refuses it: *"tailnet policy does not permit you to SSH to
+this node."* **One SSH ACL rule** is all that stands between staging and the real deploy
+tooling. It is a security-policy change, so it was not made quietly.
+
+### Also open
+
+- **Model parity unconfirmed.** The profile defaults mirror the *local dev* Brain
+  (`qwen2.5-coder:14b`); production's env is root-only and holds secrets, so it was not read.
+  The router picked `llama3.1:8b` regardless, so this matters less than it looks — but confirm
+  before trusting staging as a behavioural gate.
+- Governance unsigned (**production reports the same**), Gmail deliberately unwired, nothing in
+  Google Cloud touched.
 
 ---
 

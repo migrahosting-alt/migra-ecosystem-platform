@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #
-# Release retention for MigraPilot on VM111.
+# Release retention for MigraPilot.
+#
+# `--base=` names the release root, because staging keeps releases in exactly
+# the same shape under a different prefix and a second copy of this script would
+# be a second policy. Production stays the default, so an unargued run is the
+# run it always was.
 #
 # Enumerates release directories, resolves what is actually IN USE, and prints a
 # plan. It deletes nothing unless --apply is passed, and even then only paths it
@@ -21,13 +26,23 @@ set -euo pipefail
 
 APPLY=0
 KEEP_EXTRA=5
+BASE=/opt/migrapilot
 for a in "$@"; do
   case "$a" in
     --apply) APPLY=1 ;;
     --keep=*) KEEP_EXTRA="${a#--keep=}" ;;
-    *) echo "usage: release-retention.sh [--apply] [--keep=N]" >&2; exit 2 ;;
+    --base=*) BASE="${a#--base=}" ;;
+    *) echo "usage: release-retention.sh [--apply] [--keep=N] [--base=PATH]" >&2; exit 2 ;;
   esac
 done
+# Interpolated into a grep pattern and into privileged deletions below, so it is
+# constrained here rather than trusted there.
+case "$BASE" in
+  /opt/migrapilot|/opt/migrapilot-staging) : ;;
+  *) echo "refusing base '$BASE' — known roots: /opt/migrapilot /opt/migrapilot-staging" >&2; exit 2 ;;
+esac
+echo "release root: $BASE"
+
 
 # Every path a running process has open, so a release in use is never a
 # candidate however old it looks. Read once: /proc is expensive to walk.
@@ -39,12 +54,12 @@ trap 'rm -f "$INUSE"' EXIT
     [ -r "$p/exe" ] && readlink -f "$p/exe" 2>/dev/null || true
     if [ -r "$p/cmdline" ]; then tr '\0' '\n' < "$p/cmdline" 2>/dev/null || true; fi
   done
-} | grep -oE '/opt/migrapilot/[a-z-]+/(releases|staging)/[^/[:space:]]+' | sort -u > "$INUSE" || true
+} | grep -oE "$BASE/[a-z-]+/(releases|staging)/[^/[:space:]]+" | sort -u > "$INUSE" || true
 
 echo "paths currently referenced by a running process:"
 if [ -s "$INUSE" ]; then sed 's/^/   /' "$INUSE"; else echo "   (none)"; fi
 
-# 🚨 EVERY `current` SYMLINK UNDER /opt/migrapilot, NOT JUST THIS APP'S.
+# 🚨 EVERY `current` SYMLINK UNDER THE RELEASE ROOT, NOT JUST THIS APP'S.
 #
 # The canaries live under their own roots and point INTO the main release
 # directories: brain-canary/current -> brain-service/releases/bc99059, and
@@ -58,7 +73,7 @@ if [ -s "$INUSE" ]; then sed 's/^/   /' "$INUSE"; else echo "   (none)"; fi
 # reservation whether or not anything is currently reading it.
 LINKED="$(mktemp)"
 trap 'rm -f "$INUSE" "$LINKED"' EXIT
-for d in /opt/migrapilot/*/; do
+for d in "$BASE"/*/; do
   for link in "$d/current" "$d/previous"; do
     [ -L "$link" ] || continue
     t="$(readlink -f "$link" 2>/dev/null || true)"
@@ -66,13 +81,13 @@ for d in /opt/migrapilot/*/; do
   done
 done | sort -u > "$LINKED"
 
-echo "paths referenced by a current/previous symlink anywhere under /opt/migrapilot:"
+echo "paths referenced by a current/previous symlink anywhere under $BASE:"
 if [ -s "$LINKED" ]; then sed 's/^/   /' "$LINKED"; else echo "   (none)"; fi
 
 TOTAL_FREED=0
 
 for APP in consumer brain-service; do
-  ROOT="/opt/migrapilot/$APP"
+  ROOT="$BASE/$APP"
   [ -d "$ROOT/releases" ] || continue
 
   echo
