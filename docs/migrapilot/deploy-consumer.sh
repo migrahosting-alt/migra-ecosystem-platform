@@ -234,27 +234,45 @@ step "10. THE RUNNING PRODUCTION PROCESS REPORTS THE SAME RELEASE"
 # same defect this product just fixed in its own refusals: never translate one
 # failure ("I could not reach it") into a different and wronger claim ("it is
 # serving the wrong thing").
+# 🚨 THE ADDRESS WAS PRODUCTION'S, HARD-CODED, ON EVERY TARGET.
+#
+# This line read `http://10.10.0.13:3000/api/version` — VM111. So a
+# `--target staging` deploy SSHed to the STAGING host and then asked PRODUCTION
+# what it was serving, and asserted production carried the release just put on
+# staging. Two consequences, both bad:
+#
+#   · every staging deploy failed its last step even when it had succeeded, and
+#     told the operator "PRODUCTION IS SERVING A DIFFERENT COMMIT — roll back"
+#     about a correct release, because production correctly differed;
+#   · a staging deploy reached across to production on every run. Read-only, so
+#     nothing was changed — but the target isolation this whole contract exists
+#     to guarantee was broken at the final link, which is the one that decides
+#     whether a human believes the deploy.
+#
+# It resolves from the target now, like the unit and the env files.
+VERIFY_URL="http://$DEPLOY_CONSUMER_BIND:$DEPLOY_CONSUMER_PORT/api/version"
 RUNNING=""
 for attempt in 1 2 3 4 5; do
-  RUNNING="$(ssh -o ConnectTimeout=15 "$HOST" "curl -s --max-time 8 http://10.10.0.13:3000/api/version" 2>/dev/null || true)"
+  RUNNING="$(ssh -o ConnectTimeout=15 "$HOST" "curl -s --max-time 8 $VERIFY_URL" 2>/dev/null || true)"
   [ -n "$RUNNING" ] && break
   echo "   attempt $attempt: no answer from the running service, retrying…"
   sleep 5
 done
 
 if [ -z "$RUNNING" ]; then
-  fail "COULD NOT VERIFY what production is serving — the service did not answer after 5 attempts.
+  fail "COULD NOT VERIFY what $DEPLOY_TARGET_NAME is serving — the service did not answer after 5 attempts.
    This is NOT evidence of a bad release: the symlink was swapped and the unit restarted.
    Check it yourself before deciding anything:
-     curl -s https://chat.migrateck.com/api/version
+     ssh $HOST \"curl -s $VERIFY_URL\"
    Expected: commit $COMMIT / release $REL / buildId $BUILD_ID
    Roll back ONLY if that disagrees."
 fi
 
 echo "   $RUNNING"
-echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""   || fail "PRODUCTION IS SERVING A DIFFERENT COMMIT — roll back"
-echo "$RUNNING" | grep -q "\"release\":\"$REL\""     || fail "PRODUCTION IS SERVING A DIFFERENT RELEASE — roll back"
-echo "$RUNNING" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "PRODUCTION IS SERVING A DIFFERENT BUILD — roll back"
+UP="$(printf '%s' "$DEPLOY_TARGET_NAME" | tr '[:lower:]' '[:upper:]')"
+echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""   || fail "$UP IS SERVING A DIFFERENT COMMIT — roll back"
+echo "$RUNNING" | grep -q "\"release\":\"$REL\""     || fail "$UP IS SERVING A DIFFERENT RELEASE — roll back"
+echo "$RUNNING" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "$UP IS SERVING A DIFFERENT BUILD — roll back"
 
 # ── 11. rollback stays available and is printed, not remembered ────────────
 cat <<DONE
