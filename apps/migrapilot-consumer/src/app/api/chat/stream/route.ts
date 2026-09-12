@@ -1464,9 +1464,27 @@ export async function POST(request: Request): Promise<Response> {
                * must not ride on a promise nobody waits for.
                */
               if (code === 'IMAGE_UNREADABLE') unreadableImage = true
+              /*
+               * 🚨 A FEATURE THAT IS OFF IS NOT A SERVICE THAT BROKE — and this
+               * is the path image generation actually takes.
+               *
+               * The Brain streams its refusal as an `error` FRAME, not as an
+               * HTTP failure, so the buffered mapping in `refusalOr` never sees
+               * it. Measured live on staging after both halves were deployed:
+               * the Brain sent IMAGE_GENERATION_NOT_CONFIGURED and the browser
+               * still received `brain_error`, because this branch collapsed
+               * every code it did not recognise.
+               *
+               * Read from the CODE, never from the message text.
+               */
+              const generationOff = code === 'IMAGE_GENERATION_NOT_CONFIGURED'
               explained = true
               emit('error', {
-                error: unreadableImage ? 'image_unreadable' : 'brain_error',
+                error: generationOff
+                  ? 'image_generation_not_configured'
+                  : unreadableImage
+                    ? 'image_unreadable'
+                    : 'brain_error',
                 message: typeof message === 'string' && message ? message : reasonFor('brain_error').message,
               })
               break
