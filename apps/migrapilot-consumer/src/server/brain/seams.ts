@@ -221,6 +221,19 @@ export function codingCapability(
 }
 
 /**
+ * What the engine says it can do, including what it CANNOT and why.
+ *
+ * The same call the action hub is drawn from. It exists as a seam so a chat
+ * turn answering "can you search the web?" reads the identical source the menu
+ * reads — two callers of one authority, rather than two opinions.
+ */
+export function listCapabilities(
+  deps?: GatewayDeps,
+): Promise<BrainResult<{ tools?: Array<{ id: string; available?: boolean; unavailableReason?: string }> }>> {
+  return callBrain({ kind: 'listCapabilities' }, deps)
+}
+
+/**
  * Read a durable run snapshot.
  *
  * Observation only: there is intentionally no `startCodingRun`,

@@ -44,9 +44,16 @@ import {
   setConversationGrounding,
   setConversationImages,
 } from '@/server/brain/seams'
-import { orchestrateTurn } from '@/server/brain/seams'
+import { listCapabilities, orchestrateTurn } from '@/server/brain/seams'
 import { NO_AUTHORITY } from '@migrapilot/shared-types/project-authority'
 import { MAX_EXTRACT_BYTES, listFiles, userDirectory } from '@/server/files/storage'
+import { visionCapability } from '@/server/files/visionCapability'
+import { micAvailability } from '@/server/brain/view'
+import { transcriptionCapability } from '@/server/brain/seams'
+import {
+  platformCapabilityAnswer,
+  platformCapabilityTopics,
+} from '@/features/capabilities/platformAnswer'
 import { reconcileGrounding } from '@/server/files/grounding'
 import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
@@ -149,6 +156,7 @@ export async function attributedFiles(groundedPaths: readonly string[]): Promise
  */
 const DELIBERATE_REFUSALS: readonly string[] = [
   'IMAGE_EDITING_UNAVAILABLE',
+  'IMAGE_GENERATION_NOT_CONFIGURED',
   'INSUFFICIENT_APPROVED_EVIDENCE',
   'VISION_NOT_QUALIFIED',
 ]
@@ -225,6 +233,24 @@ function refusalOr(
           parsed.error ??
           'I can understand the image, but image editing is not available in MigraPilot yet. ' +
             'I can generate a new image based on your requested change instead.',
+      }
+    }
+
+    if (parsed?.code === 'IMAGE_GENERATION_NOT_CONFIGURED') {
+      /*
+       * A FEATURE THAT IS OFF, NOT A SERVICE THAT BROKE.
+       *
+       * This used to arrive as the generic `brain_error`, so a client could not
+       * distinguish "MigraPilot is down" from "this deployment does not do
+       * that" — and only one of those is worth retrying. The Brain classifies
+       * it; this reads the classification rather than the sentence.
+       */
+      return {
+        error: 'image_generation_not_configured',
+        message:
+          parsed.error ??
+          'Image generation is not set up on this deployment, so there is nothing to run. ' +
+            'I can still describe an image, or help you write a prompt for one elsewhere.',
       }
     }
 
@@ -931,6 +957,76 @@ export async function POST(request: Request): Promise<Response> {
          */
         ...(allowance.kind === 'reserved' ? { quota: allowance.quota } : {}),
       })
+
+      /*
+       * "CAN YOU …?" IS ANSWERED BY THE PRODUCT, NOT BY THE MODEL.
+       *
+       * 🚨 THE SAME RULE AS AN ATTACHMENT LIST, ON A NEW SURFACE. Capability
+       * state is a fact the system holds exactly: the registry knows it, each
+       * entry carries the authority's own sentence, and the action hub already
+       * renders it into a menu. Asked in prose instead of clicked, it was going
+       * to an 8B model — which, measured on staging, offered web search and
+       * audio transcription that do not exist and denied file reading, image
+       * understanding and conversation memory that do.
+       *
+       * Decided BEFORE any model call, from the same authorities that draw the
+       * menu, so the menu and the answer cannot disagree.
+       */
+      const capabilityTopics = platformCapabilityTopics(prompt, {
+        hasAttachments: attachedNow.length > 0 || requestedImages.length > 0,
+      })
+      if (capabilityTopics.length > 0) {
+        const [registryResult, vision, speech] = await Promise.all([
+          listCapabilities({ principal }),
+          visionCapability().catch(() => null),
+          transcriptionCapability().then(micAvailability).catch(() => null),
+        ])
+        const { text: capabilityText } = platformCapabilityAnswer(capabilityTopics, {
+          signedIn: principal.kind === 'session',
+          /*
+           * null, not [], when the registry did not answer. An empty list would
+           * say "you have no capabilities", which is a claim; not answering is
+           * not.
+           */
+          registry:
+            registryResult.kind === 'ok'
+              ? ((registryResult.value as { tools?: Array<{ id: string; available?: boolean; unavailableReason?: string }> })
+                  ?.tools ?? []).map((t) => ({
+                  id: t.id,
+                  available: t.available === true,
+                  ...(t.unavailableReason ? { unavailableReason: t.unavailableReason } : {}),
+                }))
+              : null,
+          vision: vision ? { state: vision.state, message: vision.message } : null,
+          speech: speech
+            ? { state: speech.state, ...(speech.state === 'disabled' ? { reason: speech.reason } : {}) }
+            : null,
+        })
+        if (capabilityText) {
+          trace.set('capability_owned_answer', capabilityTopics.join('+'))
+          // Durable first, like every other answer, so a reload keeps it.
+          await appendMessage(durableId, 'assistant', capabilityText, { principal })
+          for (const chunk of capabilityText.match(/[\s\S]{1,80}/g) ?? [capabilityText]) {
+            emit('token', { text: chunk })
+          }
+          const settled = reservationId
+            ? await settleTurnFor(principal, { reservationId, producedOutput: true })
+            : null
+          emit('done', {
+            conversationId: durableId,
+            requestId: trace.id,
+            ...(settled?.quota ? { quota: settled.quota } : {}),
+          })
+          trace.finish('ok')
+          closed = true
+          try {
+            controller.close()
+          } catch {
+            /* already closed */
+          }
+          return
+        }
+      }
 
       /*
        * "REGENERATE IT" IS ANSWERED, NOT DESCRIBED.

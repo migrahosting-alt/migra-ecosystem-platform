@@ -1377,7 +1377,24 @@ async function streamGeneration(
   if (!result.ok) {
     trace?.set('generation_failure', result.code);
     trace?.finish(`generation_${result.code}`);
-    send('error', { code: 'IMAGE_GENERATION_FAILED', message: result.message });
+    /*
+     * 🚨 "NOT CONFIGURED" IS NOT A FAILURE, AND THIS LINE USED TO SAY IT WAS.
+     *
+     * Every outcome went out as IMAGE_GENERATION_FAILED — including the one
+     * where nothing was attempted because no Studio endpoint is set. Measured
+     * on staging: asking for a picture returned HTTP 200 carrying
+     * `error: brain_error`, "Image generation is not configured on this
+     * server." The sentence was right and the code said the Brain broke.
+     *
+     * The classification was already in hand — the line above writes it to the
+     * trace — so nothing here is inferred from the message text. A client can
+     * now tell an unconfigured feature from an outage, which are the two things
+     * a user would do completely different things about.
+     */
+    send('error', {
+      code: result.code === 'not_configured' ? 'IMAGE_GENERATION_NOT_CONFIGURED' : 'IMAGE_GENERATION_FAILED',
+      message: result.message,
+    });
     raw.end();
     return;
   }
