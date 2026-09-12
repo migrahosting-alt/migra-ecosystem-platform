@@ -7,11 +7,45 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-10_
+_Last updated: 2026-09-12_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## 2026-09-12 — **MigraPilot staging EXISTS**, serves `3c204aa8`, owner login works
+
+State: **DEPLOYED TO STAGING — OWNER LOGIN AVAILABLE — GMAIL FLOW BLOCKED ON GOOGLE REDIRECT**
+
+Runbook: [`STAGING_ENVIRONMENT.md`](./STAGING_ENVIRONMENT.md). Details in the JSON under
+`stagingEnvironment2026_09_12`.
+
+| Check the owner asked for | Result |
+| --- | --- |
+| Both services boot under systemd | ✅ `migrapilot-staging-brain` + `migrapilot-staging-consumer`, active |
+| Release identity reports `3c204aa8` | ✅ both, `stamped: true`, from `RELEASE.json` in the build |
+| Consumer talks to the staging Brain | ✅ traced through the Brain's own request log |
+| Health checks pass | ✅ `/health` 200; schema at migration 28, 37 tables |
+| Rollback path proven | ✅ **exercised both ways** against the production baseline |
+| Production unchanged | ✅ still `0f494d27` / `chat-platform-rc-0908`, both units active |
+| SSH tunnel access works | ✅ `ssh -N -L 127.0.0.1:3200:10.10.0.12:3000 pve` |
+| Owner sign-in on staging | ✅ real MigraAuth profile + 19 capabilities returned |
+
+Staging is **CT101** (`migrapilot-core`, 10.10.0.12) with its own units, release roots, env files,
+PostgreSQL and a **staging-only** OAuth client `migrapilot-consumer-staging_UXO9zoqUpD` (public PKCE,
+no secret) registered for exactly `http://127.0.0.1:3200/api/auth/callback`. The local development
+client was not modified.
+
+Rollback is one line per service — swap the symlink, restart the unit — and the rollback target is the
+**real production artifact** copied read-only off VM111. Rolling back made both services report
+`0f494d27`; rolling forward returned them to `3c204aa8`. `/health` stayed 200 throughout.
+
+**Not yet true of staging**, and each matters: the deploy scripts cannot run against it (no SSH path to
+CT101 — an access change only the owner should authorise), there is **no inference provider** so chat
+produces no answers, governance is unsigned, and Gmail is deliberately unwired. Nothing in Google Cloud
+was touched.
 
 ---
 

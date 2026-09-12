@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-12",
-  "updatedBy": "Claude (Opus 5) — release reconciliation: local is 65/11/3 commits ahead of production. Nothing deployed.",
+  "updatedBy": "Claude (Opus 5) — MigraPilot STAGING now EXISTS on CT101 and serves 3c204aa8. Boot, stamped release identity, consumer->Brain, health, rollback (exercised both ways against the production baseline) and OWNER LOGIN all verified. Production untouched on 0f494d27. Gmail deliberately not wired; inference not wired.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3102,5 +3102,54 @@
       "DEPLOYED TO PRODUCTION",
       "OWNER VERIFIED ON PRODUCTION"
     ]
+  },
+  "stagingEnvironment2026_09_12": {
+    "_state": "DEPLOYED TO STAGING — OWNER LOGIN AVAILABLE — GMAIL FLOW BLOCKED ON GOOGLE REDIRECT",
+    "_supersedes": "stagingEnvironmentGap — the environment now exists. That entry stays as the record of why, and of the decision that shaped it.",
+    "runbook": "docs/migrapilot/STAGING_ENVIRONMENT.md — the authority. Everything below is the summary.",
+    "host": "CT101 migrapilot-core, 10.10.0.12, an LXC on pve reached with pct exec. Node upgraded 20.20.2 -> 22.23.2 to match production exactly; Node 20 has no node:sqlite, which the Brain imports at module load, so it could not start at all.",
+    "serving": {
+      "commit": "3c204aa8b790984b59e45d2b5e3c80d6bc06e9ec",
+      "release": "staging-3c204aa8",
+      "brainBuildId": "sha256:99b11c3d21a10ab2c2df76b410cb9e5d1fad5d85906d45788bb9a1181318f5ce",
+      "consumerBuildId": "JrmsZXVpn6rLJ1n0F-beV",
+      "stamped": "true on both — /api/version answers from RELEASE.json baked into the build, never from env"
+    },
+    "layout": "Per-app release roots and symlinks, matching production: /opt/migrapilot-staging/{brain-service,consumer}/{releases,current}. Units migrapilot-staging-{brain,consumer}.service. Env /etc/migrapilot-staging/*.env mode 600. Brain 127.0.0.1:3988, consumer 10.10.0.12:3000 — the roots, units, env paths and brain port are exactly what deploy-targets.sh already declared for the staging target.",
+    "access": "ssh -N -L 127.0.0.1:3200:10.10.0.12:3000 pve  ->  http://127.0.0.1:3200",
+    "identity": {
+      "client_id": "migrapilot-consumer-staging_UXO9zoqUpD",
+      "shape": "public PKCE S256, token_auth_method none, NO SECRET MINTED",
+      "redirect": "http://127.0.0.1:3200/api/auth/callback — exactly one, matching the tunnel origin",
+      "localClientUntouched": "migrapilot-consumer-local-develo_PFi1NHdpQe still carries only its own :3000 callback; read back after the create to confirm.",
+      "backChannel": "MIGRAAUTH_API_URL=http://10.10.0.10:4120. MEASURED: CT101 -> https://auth.migrateck.com times out (000 after 10s) because the name resolves to the edge in front of its own hypervisor and hairpins; the private address answers 200. Same failure VM111 already hit.",
+      "verifiedLive": "Sign-in through the tunnel returned the real owner profile (8c32a204-…, myspeedteck@gmail.com) and /api/capabilities answered 19 capabilities — which also proves the authenticated consumer -> Brain path."
+    },
+    "database": {
+      "where": "PostgreSQL 15.19 ON CT101 — database and role migrapilot_staging.",
+      "divergesFromRecommendation": "stagingRecommendation asked for the staging DB on db-core, because CT101 has 2 GB RAM. MEASURED AFTER THE FACT: 1820 MB of 2048 available with Brain + Next + Postgres all running (Brain 154 MB, Next 137 MB, Postgres ~70 MB). The RAM concern was Ollama, which is gone. Not a blocker, but db-core remains the better target — see below.",
+      "preferredTarget": "db-core migrapilot_brain_stage already EXISTS (created 2026-09-10) and is still blocked on its role having no password. Moving staging onto it would also close the engine parity gap: db-core is PostgreSQL 16.15, CT101 is 15.19. Setting that password is an owner decision.",
+      "secret": "Generated on the host, written straight into /etc/migrapilot-staging/brain-postgres.env (mode 600). It never passed through a terminal or a transcript.",
+      "migrationFix": "Migration 4 creates role migrapilot_app, which is superuser-only, so the Brain could not migrate a database owned by an ordinary role. Provisioning creates it first as NOLOGIN NOBYPASSRLS — what the migration comment itself asks for. Schema reached version 28, 37 tables. The Brain connects as migrapilot_staging: not superuser, does not bypass RLS, and every policy is FORCE ROW LEVEL SECURITY so the table owner is subject to it too."
+    },
+    "rollbackProven": {
+      "_claim": "EXERCISED BOTH WAYS, not asserted.",
+      "operation": "ln -sfn <root>/releases/<REL> <root>/current && systemctl restart <unit> — one line per service.",
+      "releasesPresent": "staging-3c204aa8 and chat-platform-rc-0908 in both roots.",
+      "rollbackTarget": "chat-platform-rc-0908 is the PRODUCTION BASELINE — the built artifact VM111 is serving, copied read-only from it, carrying its own 0f494d27 stamp. A real prior release, which is what makes the rollback a rollback.",
+      "observed": "before 3c204aa8/staging-3c204aa8 -> after rollback 0f494d27/chat-platform-rc-0908 on BOTH services -> after roll-forward 3c204aa8/staging-3c204aa8. /health 200 in every state.",
+      "noteWorthKeeping": "The older Brain started cleanly against the NEWER schema (staging DB is at migration 28, created by 3c204aa8). A schema rollback was neither needed nor attempted, and nothing here proves one would be safe."
+    },
+    "gaps": [
+      "deploy-brain.sh --target staging CANNOT RUN. DEPLOY_HOST=migrapilot-staging-core does not resolve, and the scripts need ssh $HOST plus a privileged account; CT101 is reached by pct exec. So staging is deployed BY HAND and the scripts boot-test and identity-check steps are not being exercised. Granting it means installing an SSH key into the container — an access change for the owner to approve, not for an agent to make quietly.",
+      "DEPLOY_CONSUMER_BIND=127.0.0.1 is not satisfied: the consumer binds 10.10.0.12 so the tunnel reaches it through pve. Production binds its own LAN address too, so this matches production and the contract line is the thing out of step.",
+      "NO INFERENCE. No provider configured; /health reports gpuCapacity unavailable, reason inference-unreachable. Chat will not produce answers. Production reaches the workstation models over Tailscale; CT101 is not on Tailscale and putting it there is a network decision, not a build step.",
+      "Governance UNSIGNED — no qualification signing key, so every governed mutation is refused.",
+      "Email/Gmail DELIBERATELY ABSENT per instruction. Brain reports EMAIL CONNECT DISABLED, the ordinary pre-operator state. Nothing in Google Cloud was touched.",
+      "Project connect OFF — the PostgreSQL store has no project-binding repository and the Brain refuses to serve it from memory.",
+      "PostgreSQL 15.19 vs production 16.15.",
+      "Disk is the real ceiling: 3.6 GB free of 12 GB with two release sets installed. A third would strain it; cap retention at two or three."
+    ],
+    "productionReVerifiedAfter": "chat.migrateck.com/api/version -> 0f494d27 / chat-platform-rc-0908 / AV5gDWNOlGsz3wDMI-NIf; both VM111 symlinks still on releases/chat-platform-rc-0908; both units active. The only interaction with VM111 was READING two release directories out of it."
   }
 }
