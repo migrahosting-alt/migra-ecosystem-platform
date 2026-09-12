@@ -95,6 +95,8 @@
 !/docs/migrapilot/evidence/*/*.md
 !/docs/migrapilot/evidence/*/*.json
 !/docs/migrapilot/evidence/*/*.psv
+# Preserved source, kept as .txt so the test runner never picks it up.
+!/docs/migrapilot/evidence/*/*.txt
 
 # The exact text of every scoped elevation grant. The guard in
 # .claude/hooks/block-dangerous.sh removes each grant once its slice closes and
