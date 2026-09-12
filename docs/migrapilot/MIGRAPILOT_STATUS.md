@@ -15,6 +15,67 @@ _Last updated: 2026-09-12_
 
 ---
 
+## 2026-09-12 — **STAGING BRAIN DEPLOYED** — the locality defect is gone
+
+Evidence: [`evidence/brain-gate-2026-09-12/`](./evidence/brain-gate-2026-09-12/).
+JSON: `stagingBrainDeploy2026_09_12`.
+
+| | |
+| --- | --- |
+| Brain | `staging-f9ad3c0c` · artifact `sha256:d848483a6ae34e93…` |
+| Consumer | `staging-10796d03` |
+| Gate | **3238 / 3238, 0 failures, 0 skipped** |
+| Production | `0f494d27`, uptime unbroken since **2026-09-11 06:31:26 UTC** |
+
+### 🚨 The gate was red because of my own partial commit
+
+`55993942` — a chat-assistant commit about email grounding — **created**
+`engineerPromptGuardrails.test.ts` (51 new lines) and never touched the `engineerRuntime.ts`
+change those lines assert. The asserted string has never been committed anywhere; it lives
+uncommitted in the engineer lane, where all three tests pass. Proven both ways: 3 pass against
+the working tree, 3 fail against committed HEAD.
+
+Repaired by removing the file from HEAD. Nothing suppressed, skipped or weakened; no source
+file touched; the guardrail preserved in the engineer lane; the 51 lines kept verbatim with a
+one-line reland command.
+
+**Then a second blocker**: the deleted test *kept running*. `npm test` runs the compiled tree
+and `tsc` never removes an output whose input is gone, so the gate was enforcing a file no
+longer in the repository. A prune step now removes only source-less outputs — **179 orphans**
+on first run, nearly all from the `engine/` reorganisation.
+
+**And a third**: the boot test failed `226/NAMESPACE` on a missing `/var/log/migrapilot` — and
+aborted *before* the cutover, which is the boot test working.
+
+Also corrected: the `unifiedAgent` failure carried for days as "pre-existing and unrelated"
+**does not exist at committed HEAD**. It was a working-tree artifact too.
+
+### P0 locality — gone, proven by evidence
+
+| class | model | resident VRAM | actual |
+| --- | --- | --- | --- |
+| **deep** | **deepseek-r1:32b** | **21.4 GB** | **ON-DEVICE** |
+| **premium** | deepseek-r1:32b | 21.4 GB | **ON-DEVICE** |
+| **explicit `gpt-oss:120b-cloud`** | falls through to `llama3.1:8b` | 13.6 GB | **ON-DEVICE** |
+
+Catalog: 15 models, **cloud-tagged eligible NONE**, `hosting=remote` none. Before the deploy
+the same harness showed `deep` and `premium` selecting a **384-byte manifest with zero VRAM**
+that still generated.
+
+### The rest, live
+
+- **Provider health** — a no-inference instance of the deployed artifact reports `status:
+  error`, `inferenceProviders: unavailable`, all four `kind=stub`. The running Brain carries
+  `kind: "live"`.
+- **Typed image error** — `image_generation_not_configured`. Needed a *second* fix found only
+  by running it: the refusal streams as an SSE frame, not an HTTP failure, so the buffered
+  mapping never saw it.
+- **Capability regressions** — all nine truthful against the deployed pair.
+
+**Nothing is OWNER VERIFIED. Production not promoted.**
+
+---
+
 ## 2026-09-12 — **DEPLOYED TO STAGING VIA THE REAL PIPELINE** — ready for owner validation
 
 Evidence: [`evidence/staging-deploy-2026-09-12/`](./evidence/staging-deploy-2026-09-12/) —

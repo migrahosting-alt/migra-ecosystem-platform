@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-12",
-  "updatedBy": "Claude (Opus 5) — STAGING DEPLOYED VIA THE REAL PIPELINE. Consumer at staging-f18db0fe, full chain green (EXIT=0). Tailnet SSH ACL applied exactly as reviewed. THREE production leaks found in deploy-consumer.sh by running it. BRAIN NOT DEPLOYED — gate red from a cross-lane defect, owner chose to ship consumer only. Production untouched on 0f494d27, uptime unbroken since 2026-09-11 06:31:26 UTC. Evidence: docs/migrapilot/evidence/staging-deploy-2026-09-12/",
+  "updatedBy": "Claude (Opus 5) — STAGING BRAIN DEPLOYED. Brain staging-f9ad3c0c, consumer staging-10796d03, both through the real pipeline. Gate 3238/3238 clean. P0 LOCALITY DEFECT IS GONE: deep now selects deepseek-r1:32b, 21.4 GB resident in VRAM; gpt-oss:120b-cloud is not selectable even when named. Provider health, typed image error and all capability regressions pass live. Production untouched on 0f494d27, uptime unbroken since 2026-09-11 06:31:26 UTC. Evidence: docs/migrapilot/evidence/brain-gate-2026-09-12/",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3235,5 +3235,30 @@
       "Model attribution — appendMessage carries no modelId/providerId, so no answer on staging records what produced it."
     ],
     "🚨 notOwnerVerified": "DEPLOYED TO STAGING — READY FOR OWNER VALIDATION. Nothing here is OWNER VERIFIED and this phase does not declare it. Production was not promoted and must remain 0f494d27 / chat-platform-rc-0908."
+  },
+  "stagingBrainDeploy2026_09_12": {
+    "_state": "STAGING BRAIN DEPLOYED — READY FOR OWNER VALIDATION",
+    "evidence": "docs/migrapilot/evidence/brain-gate-2026-09-12/ — README.md is the gate diagnosis, 03-brain-deploy-results.md the results.",
+    "deployed": "Brain staging-f9ad3c0c (artifact sha256:d848483a6ae34e93ac6952710361b04bf34a3999); consumer staging-10796d03. Both EXIT=0 through the real pipeline, no manual side-path.",
+    "gate": "typecheck clean; 3238/3238 tests, 0 failures, 0 skipped, 0 todo; 5 workspace deps staged from the build and verified in both directions; schema 28/28 so rollback restores code AND schema.",
+    "🚨 gateDiagnosis": "INCORRECT LANE COUPLING VIA A PARTIAL COMMIT — AND THE PARTIAL COMMIT WAS MINE. 55993942 (a chat-assistant commit about email grounding) CREATED apps/brain-service/test/engineerPromptGuardrails.test.ts, 51 new lines, and never touched the engineerRuntime.ts change those lines assert. The string \"locate the REAL owning code\" was never committed anywhere; it exists uncommitted in the engineer lane, where all three tests pass. Proven by running the same tests against the working tree (3 pass) and against committed HEAD (3 fail). NOT a shared Brain defect, NOT a stale assumption, NOT a fixture issue. Repaired by removing the file from HEAD — nothing suppressed, skipped or weakened, no source file touched, the guardrail preserved in the engineer lane, and the 51 lines kept verbatim in the evidence with a one-line reland command.",
+    "🚨 secondBlocker_deletedTestKeptRunning": "After removing the source the gate reported the IDENTICAL 3241 tests with the IDENTICAL 3 failures. npm test is \"tsc -b && node --test dist/test/**/*.test.js\" — it runs the COMPILED tree, and tsc never removes an output whose input disappeared. The release gate was enforcing a file no longer in the repository. scripts/prune-orphaned-dist.mjs now runs after the build and removes only outputs with no source: first run removed 179 orphans, nearly all from the engine/ reorganisation that moved 52 modules into 10 domains.",
+    "thirdBlocker_bootTestNamespace": "The boot test failed 226/NAMESPACE because ReadWritePaths=/var/log/migrapilot did not exist on the staging host. The deploy aborted BEFORE the cutover, which is the boot test working. Directory created to match production; no script change.",
+    "🚨 unifiedAgentWasAlsoAWorkingTreeArtifact": "The \"pre-existing unrelated unifiedAgent failure\" carried for days does NOT exist at committed HEAD. In a clean worktree the suite is entirely green. It only failed in the working tree, where the engineer lane's uncommitted changes are present. There is no pre-existing failure to except.",
+    "p0_locality_PASSED": "All eight classes on the DEPLOYED Brain, locality from evidence (disk bytes vs advertised params, VRAM residency during generation): fast qwen2.5-coder:1.5b, balanced/automatic llama3.1:8b, coding qwen2.5-coder:14b, reasoning qwen3:8b, DEEP deepseek-r1:32b (18.5 GB on disk, 21.4 GB resident), PREMIUM deepseek-r1:32b, EXPLICIT gpt-oss:120b-cloud falls through to llama3.1:8b. Catalog: 15 models, cloud-tagged eligible NONE, hosting=remote none, hosting=on-device 15. Before the deploy the same harness showed deep and premium selecting a 384-BYTE manifest with ZERO VRAM that still generated. Declared locality now matches actual, and cost 0 is true because nothing leaves the machine.",
+    "p0_providerHealth_PASSED": "A second instance of the DEPLOYED release, no inference endpoint, spare port, running Brain untouched: status=error, inferenceProviders=unavailable, all four reachable=False kind=stub with an actionable detail. And the RUNNING Brain now carries kind:\"live\" on every provider line, so the distinction is visible in normal traffic, not only in the failure case.",
+    "item7_typedImageError_PASSED": "image_generation_not_configured end to end. NEEDED A SECOND FIX FOUND ONLY BY RUNNING IT: image generation streams its refusal as an SSE error FRAME, not an HTTP failure, so the mapping first added to refusalOr (the buffered path) never saw it — both halves were deployed and the browser still got brain_error. The frame handler now reads the CODE, never the message text (10796d03).",
+    "item8_capabilityRegressions_PASSED": "All nine prose regressions against the deployed pair: web search \"no, Web search is not set up yet\"; PDF \"yes\" with the real supported list; images \"not right now\" with the gate's own sentence (governance-blocked, not absent); email \"no\" with the engine's sentence; local files \"yes\" for the library and explicitly not for local paths; run code \"no\" while explaining/writing/reviewing is yes; memory \"yes … including after a restart\"; audio \"no\" naming the env var. No model-regenerated contradictions.",
+    "item9_productionIsolation": "Identical before and after: 0f494d27 / chat-platform-rc-0908, both symlinks, and BOTH SERVICE START TIMESTAMPS still 2026-09-11 06:31:26 UTC at 2026-09-12 22:32 UTC — over 40 hours unbroken across every deploy this phase. migrapilot_brain 200 MB unchanged.",
+    "retention": "--keep=1 applied: 759 MiB freed, 5.2 GB free. Consumer keeps active + rollback + 1 spare; Brain likewise.",
+    "ownerDecisions": [
+      "RELAND THE ENGINEER GUARDRAIL: when the engineer lane commits engineerRuntime.ts, restore the test in the SAME commit — git show 55993942:apps/brain-service/test/engineerPromptGuardrails.test.ts > that path. Content also preserved verbatim in the evidence folder.",
+      "MIGRAPILOT_ALLOW_REMOTE_MODELS — deep tier is on-device only by default now.",
+      "next-env.d.ts ordering in the consumer verify script (typecheck runs before build) — a clean checkout still cannot verify.",
+      "Vision — signing key then one signed approval.",
+      "Gmail — staging-chat.migrateck.com (DNS + TLS), then one Google Cloud redirect URI.",
+      "Cancelled-turn representation, and model attribution in appendMessage."
+    ],
+    "🚨 notOwnerVerified": "STAGING BRAIN DEPLOYED — READY FOR OWNER VALIDATION. Nothing is OWNER VERIFIED and this phase does not declare it. Production was not promoted and remains 0f494d27 / chat-platform-rc-0908."
   }
 }
