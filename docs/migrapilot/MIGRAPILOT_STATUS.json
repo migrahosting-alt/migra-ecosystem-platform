@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-12",
-  "updatedBy": "Claude (Opus 5) — FULL UI PATH AVAILABLE. Owner session live in the consumer. Six-prompt UI run remains the owner test.",
+  "updatedBy": "Claude (Opus 5) — release reconciliation: local is 65/11/3 commits ahead of production. Nothing deployed.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "READY FOR OWNER PRODUCT ACCEPTANCE — FULL UI PATH AVAILABLE. Not PASS. No RC freeze. No staging promotion.",
+    "status": "COMMITTED — NOT DEPLOYED. Production serves 0f494d27 (chat-platform-rc-0908, built 2026-09-08); local HEAD is 3c204aa8. The Gmail/chat work is 65 brain + 11 consumer + 3 shared-types commits ahead of it. No staging environment exists. Nothing deployed.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2946,6 +2946,22 @@
       },
       "secretsHygiene": "Auth code/state redacted from the consumer log and from 18 artifacts. Credential matches across the tree: 0. .env.local not tracked.",
       "notDone": "🚨 The six Gmail acceptance prompts were NOT run. They are the owner test and the only thing that can produce PASS."
+    },
+    "releaseReconciliation_2026_09_12": {
+      "_detail": "docs/migrapilot/RELEASE_RECONCILIATION_2026-09-12.md — every SHA read from the running artifact or git.",
+      "production": {
+        "host": "migrapilot-app-core / 10.10.0.13 (VM111)",
+        "consumer": "chat-platform-rc-0908 @ 0f494d27, buildId AV5gDWNOlGsz3wDMI-NIf, built 2026-09-08T14:44:37Z",
+        "brain": "chat-platform-rc-0908 @ 0f494d27, buildId sha256:d9d9c1e3…, built 2026-09-08T14:38:37Z",
+        "rollback": "consumer + brain both roll back to chat-platform-rc-0907b by symlink swap; releases present on host"
+      },
+      "localRC": "3c204aa8b790984b59e45d2b5e3c80d6bc06e9ec — recorded, NOT tagged",
+      "drift": "brain 65, consumer 11, shared-types 3. Deployed SHA is a clean ancestor — linear, no divergence. Branch is 1168 ahead of core/main with NO upstream.",
+      "whyUiDiffers": "The capability-driven action hub (abcf7659, 9fb6e3df, 0bf4efdd, d2889ae7, 2624afc3, 0e45b400, 5c2f2613, fde2defa, 270813f2, 73e2ae5e) are all DESCENDANTS of the deployed commit. Not config, not cache — the artifact predates the feature.",
+      "staging": "🚨 DOES NOT EXIST. deploy-targets.sh names migrapilot-staging-core; the host does not resolve. /opt/migrapilot/staging on VM111 is a scratch dir. brain-canary/consumer-canary are a smoke lane, not staging.",
+      "uncommittedAtRisk": "Only 3 MigraPilot files, all from another in-flight session (engineerRoutes, engineerRuntime, review-source-bundle) plus .claude/hooks/block-dangerous.sh. NO acceptance feature exists only as an uncommitted edit.",
+      "🚨 staleArtifactStamp": "apps/brain-service/dist/RELEASE.json claims 0f494d27 / rc-0908 — the SAME as production — but the local brain runs tsx from SOURCE. Owner acceptance ran against source 3c204aa8. Reading that file to answer \"what did we test?\" gives a confidently wrong answer.",
+      "notDone": "Nothing deployed. No tag. No staging target created. Production untouched."
     }
   },
   "deploymentPolicy": {
@@ -3073,5 +3089,18 @@
       "twoMistakesWorthRecording": "(1) `ssh -n` redirects stdin from /dev/null, so the first ALTER ROLE silently applied nothing — caught only because I verified rolpassword rather than trusting empty output. (2) The db-core hook exception refuses any command also mentioning pve/pct exec, so generation and application must stay in separate invocations."
     },
     "ollama": "Stopped and disabled only. Packages deliberately NOT removed, per Bonex — the runtime memory is already reclaimed and uninstalling adds destructive work for little value."
+  },
+  "releaseStates": {
+    "_authority": "⭐ STANDING LIFECYCLE. Build -> commit -> deploy -> owner verify -> only then complete. A feature is never complete on local validation alone.",
+    "states": [
+      "LOCAL IMPLEMENTATION",
+      "COMMITTED",
+      "READY FOR STAGING",
+      "DEPLOYED TO STAGING",
+      "OWNER VERIFIED ON STAGING",
+      "READY FOR PRODUCTION",
+      "DEPLOYED TO PRODUCTION",
+      "OWNER VERIFIED ON PRODUCTION"
+    ]
   }
 }
