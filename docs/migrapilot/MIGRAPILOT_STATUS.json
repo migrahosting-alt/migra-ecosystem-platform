@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
-  "updated": "2026-09-11",
-  "updatedBy": "Claude (Opus 5) — BACKEND/API ACCEPTANCE CANDIDATE. UI not tested; no promotion; no RC freeze.",
+  "updated": "2026-09-12",
+  "updatedBy": "Claude (Opus 5) — FULL UI PATH AVAILABLE. Owner session live in the consumer. Six-prompt UI run remains the owner test.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -2503,7 +2503,7 @@
   },
   "migraEmailProgress": {
     "_authority": "Bonex work order, 2026-09-08. Gmail is the first provider, never the product contract.",
-    "status": "READY FOR OWNER PRODUCT ACCEPTANCE — BACKEND PATH ONLY. See acceptanceScope.",
+    "status": "READY FOR OWNER PRODUCT ACCEPTANCE — FULL UI PATH AVAILABLE. Not PASS. No RC freeze. No staging promotion.",
     "suiteGate": {
       "brain": "3050/3050 pass, 0 fail, 0 skipped (was 3016; +25 Gmail transport tests, 3 mutations caught)",
       "consumer": "1171/1171 pass, 0 fail, 0 skipped (unchanged this batch)",
@@ -2921,12 +2921,31 @@
       "/api/ai/chat path": "READY FOR OWNER ACCEPTANCE",
       "capability-owned rendering": "READY FOR OWNER ACCEPTANCE",
       "Gmail six-step workflow": "READY FOR OWNER ACCEPTANCE",
-      "UI / consumer app": "🚨 NOT TESTED / BLOCKED — auth+config; never exercised end to end in the real user surface",
+      "UI / consumer app": "AVAILABLE — authenticated owner session established; six-prompt UI run NOT performed (owner test)",
       "production / staging promotion": "🚨 NOT AUTHORIZED",
       "RC freeze": "🚨 NOT AUTHORIZED",
       "whyThisIsNotPass": "The six steps were driven through the same /api/ai/chat surface the UI calls, with owner scope headers — which is evidence about the BACKEND PATH and nothing more. No rendered answer, no attachment list, no spreadsheet values and no thread formatting have been seen in the actual MigraPilot UI.",
       "whatMovesItToPass": "The OWNER runs the same six prompts against the same real mailbox from the consumer UI, in a legitimately authenticated session, and confirms: rendered answer, attachment list, exact spreadsheet values, thread summary formatting, contextual follow-up — plus NO hidden notices, stale headings, missing facts or fabricated filenames. Only then: OWNER PRODUCT ACCEPTANCE — PASS.",
       "nextJob": "🚨 NOT more backend tuning. Get the consumer into a legitimate authenticated state without weakening anything, then run the six steps through the real UI."
+    },
+    "consumerOAuth_2026_09_12": {
+      "audit": "GET /v1/clients as the signed-in owner: 200, authoritative JSON, 0 clients. 🚨 SCOPED, NOT GLOBAL — the route is listVisibleClientsForUser; the admin route /v1/admin/clients is 404 on this deployment (both prefixes), so no global view existed. Basis for creation recorded honestly.",
+      "identity": "Signed in as myspeedteck@gmail.com — verified, name \"Bonex Petit-Frere\". Different from the migrahosting@gmail.com on session record; confirmed as the owner before creating anything.",
+      "created": {
+        "client_id": "migrapilot-consumer-local-develo_PFi1NHdpQe",
+        "via": "POST /v1/clients — the narrow per-client path. seed.ts NOT used. No bulk update.",
+        "client_type": "web — 🚨 \"public\" is not a value in this API (enum: web|spa|native|service). Public-ness is expressed by token_auth_method=none, which makes the module mint NO secret. Verified: secretReturned=false.",
+        "readBack": "GET /v1/clients/{id}: redirect_uris, allowed_scopes, requires_pkce, token_auth_method, is_active ALL exact. 0 mismatches. Registry now holds exactly 1 client."
+      },
+      "envLocal": "apps/migrapilot-consumer/.env.local — five values, mode 0600, gitignored, never staged. APP_SESSION_SECRET generated straight into the file and never printed.",
+      "loginRoundTrip": {
+        "authorize": "host auth.migrateck.com, exact redirect_uri, scope \"openid profile email offline_access\", code_challenge_method=S256, 43-char challenge, state present",
+        "callback": "302 after a real 1.2s token exchange",
+        "session": "Authenticated owner session live: the app shell renders \"BP Bonex Petit-Frere\" from the server session",
+        "redHerring": "🚨 The log line migrapilot.auth.return {\"cookiePresent\":false} is about the ?next= DESTINATION cookie, not the session or the PKCE transaction. Reading it as a failed login would have been wrong."
+      },
+      "secretsHygiene": "Auth code/state redacted from the consumer log and from 18 artifacts. Credential matches across the tree: 0. .env.local not tracked.",
+      "notDone": "🚨 The six Gmail acceptance prompts were NOT run. They are the owner test and the only thing that can produce PASS."
     }
   },
   "deploymentPolicy": {
