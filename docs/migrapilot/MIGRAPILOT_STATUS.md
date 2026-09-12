@@ -15,6 +15,68 @@ _Last updated: 2026-09-12_
 
 ---
 
+## 2026-09-12 — **DEPLOYED TO STAGING VIA THE REAL PIPELINE** — ready for owner validation
+
+Evidence: [`evidence/staging-deploy-2026-09-12/`](./evidence/staging-deploy-2026-09-12/) —
+the ACL diff recorded **before** applying, results after. JSON: `stagingDeploy2026_09_12`.
+
+**Consumer: `staging-f18db0fe`, buildId `D2m2JUTOA3I7J07_RG6Ru`, full chain `EXIT=0`** —
+committed source → artifact → workspace-dep hashes verified both directions → transfer →
+release directory → boot test on `:3097` with identity match → symlink → systemd restart →
+runtime reports the same release.
+
+**Brain: NOT deployed.** Its gate is red at HEAD for a cross-lane reason — commit `55993942`
+swept in the engineer lane's `engineerPromptGuardrails.test.ts` without the `engineerRuntime.ts`
+change it tests, which is still uncommitted. You chose: ship consumer only, touch nobody's
+in-flight work. **So the locality and provider-health fixes are committed and NOT live.**
+
+### 🚨 Three production leaks in `deploy-consumer.sh`, all found by *running* it
+
+1. the cutover restart **and the printed rollback command** named production's unit
+2. the boot test mounted production's env files and service account
+3. **the final verification curled production** (`10.10.0.13:3000`) and asserted it carried the
+   staging release — so every staging deploy failed after succeeding, told the operator to roll
+   back a correct release, and reached across to production on every run
+
+All three fixed. Read-only throughout: production's services have **not restarted since
+2026-09-11 06:31:26 UTC**, through the entire phase.
+
+Plus: `docs/migrapilot/workspace-digest.mjs` is invoked by every release and was **never tracked
+by git** — a clean checkout could not deploy at all.
+
+### P0 validations
+
+- **Locality** — proven from evidence, not labels. On staging's (pre-fix) Brain, `deep` *and*
+  `profile=premium` both selected `gpt-oss:120b-cloud`: **384 bytes on disk, zero VRAM
+  resident**, and it still generated — while declaring `provider: local, cost 0`. Against the
+  fixed registry on the same live catalog it is **not eligible at all**, and naming it
+  explicitly falls through to an on-device 30B.
+- **Provider health** — the no-inference state, recreated safely on a spare port: `status:
+  error`, `inferenceProviders: unavailable`, all four `reachable=false kind=stub`. Was `ok` with
+  all four reachable.
+- **Deployment isolation** — target, release root, unit, symlink and generated rollback all
+  resolve to staging. Rollback run new → previous → new, HTTP 200 throughout.
+
+### P1, live on staging
+
+- The 28.6 MB plain-ASCII file now says **`file_too_large_to_read`**, naming the 25 MB limit.
+  The ceiling was not weakened.
+- **Capability questions are answered by the product**, before any model call:
+  *"Searching the web — no. Web search is not set up yet."* · *"Understanding images — not right
+  now… no vision model has been approved for use."* · *"Remembering earlier conversations —
+  yes… including after a restart."* Four states kept distinct, because "no" hides the one that
+  is actionable.
+
+### ⭐ Architectural rule promoted
+
+**A provider label is not a locality guarantee.** Execution provider, execution location,
+billing class and data-locality policy are four separate facts. `gpt-oss:120b-cloud` is why
+they cannot be one `provider: local` field.
+
+**Nothing is OWNER VERIFIED. Production remains `0f494d27`.**
+
+---
+
 ## 2026-09-12 (overnight) — chat-assistant audit: **79/80**, four fixes, production untouched
 
 Full report: [`OVERNIGHT_2026-09-12.md`](./OVERNIGHT_2026-09-12.md). JSON: `overnightAudit2026_09_12`.
