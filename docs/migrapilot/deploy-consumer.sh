@@ -55,6 +55,19 @@ APP="$REPO/apps/migrapilot-consumer"
 # Resolved from the named target — never a literal in this file again.
 HOST="$DEPLOY_HOST"
 ROOT="$DEPLOY_CONSUMER_ROOT"
+# 🚨 THE UNIT IS PART OF THE TARGET, AND IT WAS THE ONE THING STILL HARD-CODED.
+#
+# The production unit name sat as a literal in the cutover restart AND in the
+# rollback command this script prints. deploy-targets.sh exists so a staging
+# deploy cannot touch a production runtime, and this was the hole in it:
+# `--target staging` would copy the release into the staging root, swap the
+# staging symlink, and then restart a unit name that only exists on production.
+#
+# The rollback line mattered more than the restart. It is the command an
+# operator copies at the worst moment, and against staging it named a unit that
+# is not there — so the symlink would go back and nothing would be restarted,
+# leaving the release being rolled back FROM still serving.
+UNIT="$DEPLOY_CONSUMER_UNIT"
 
 printf '\n== deploying to %s (%s), db authority %s\n' \
   "$DEPLOY_TARGET_NAME" "$HOST" "$DEPLOY_DB_AUTHORITY"
@@ -198,8 +211,8 @@ step "8. activating the release"
 ssh "$HOST" "sudo ln -sfn $ROOT/releases/$REL $ROOT/current"
 echo "   current -> $(ssh "$HOST" "readlink $ROOT/current")"
 
-step "9. restarting production against it"
-ssh "$HOST" "sudo systemctl restart migrapilot-consumer.service && sleep 6 && systemctl is-active migrapilot-consumer.service"
+step "9. restarting the target against it"
+ssh "$HOST" "sudo systemctl restart $UNIT && sleep 6 && systemctl is-active $UNIT"
 
 # ── 10. the running process reports the same release ───────────────────────
 step "10. THE RUNNING PRODUCTION PROCESS REPORTS THE SAME RELEASE"
@@ -254,7 +267,7 @@ DEPLOYED — and proven, link by link:
   RUNNING PROCESS  reports commit $SHORT / release $REL / buildId $BUILD_ID
 
 11. rollback:
-  ssh $HOST "sudo ln -sfn $PREVIOUS $ROOT/current && sudo systemctl restart migrapilot-consumer.service"
+  ssh $HOST "sudo ln -sfn $PREVIOUS $ROOT/current && sudo systemctl restart $UNIT"
 
 NOT ACCEPTED. This script proves what is RUNNING; it does not prove the product
 is correct. Hand back for real-system retest.

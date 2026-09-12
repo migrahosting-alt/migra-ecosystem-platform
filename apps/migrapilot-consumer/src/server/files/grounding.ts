@@ -31,6 +31,21 @@ export interface GroundingReconciliation {
    * `missing` because the file has not been deleted — it simply has no readable content.
    */
   unreadable: string[]
+  /**
+   * The subset of `unreadable` that holds no chunks BECAUSE IT IS TOO LARGE.
+   *
+   * 🚨 THE SAME ZERO, A COMPLETELY DIFFERENT SENTENCE. A file above the extract
+   * ceiling is never handed to the parser, so the index holds nothing for it and
+   * it is indistinguishable here from a genuinely empty document. Measured on
+   * staging: a 28.6 MB file of plain repeated ASCII produced
+   * "No readable content was found in huge.txt" — a confident falsehood about a
+   * file the user can open and read themselves.
+   *
+   * Kept separate for the same reason `indexUnavailable` is: the truthful
+   * sentence is about the LIMIT, not about the file's contents, and only one of
+   * those is something the user can act on.
+   */
+  tooLarge: string[]
   /** Names dropped because the file no longer exists. */
   missing: string[]
   /**
@@ -104,7 +119,7 @@ async function approvedIndexState(): Promise<{ approved: boolean; counts: Record
 
 export async function reconcileGrounding(requested: string[]): Promise<GroundingReconciliation> {
   if (requested.length === 0) {
-    return { available: [], missing: [], unreadable: [], indexUnavailable: false, searchable: false, grounded: false, libraryUnreadable: false }
+    return { available: [], missing: [], unreadable: [], tooLarge: [], indexUnavailable: false, searchable: false, grounded: false, libraryUnreadable: false }
   }
 
   /*
@@ -128,6 +143,7 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
       available: [],
       missing: [],
       unreadable: [],
+      tooLarge: [],
       indexUnavailable: false,
       searchable: false,
       grounded: false,
@@ -166,10 +182,20 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
    */
   const indexUnavailable = state.contradictory
 
+  /*
+   * Read from the SAME listing that decided `available`, so the two can never
+   * disagree about a file. `tooLargeToProcess` is set by the storage layer from
+   * the file's own size against the extract ceiling — this only narrows it to
+   * the files this turn actually asked about and could not read.
+   */
+  const oversize = new Set(listed.filter((f) => f.tooLargeToProcess).map((f) => f.name))
+  const tooLarge = (indexUnavailable ? [] : unreadable).filter((name) => oversize.has(name))
+
   return {
     available,
     missing,
     unreadable: indexUnavailable ? [] : unreadable,
+    tooLarge,
     indexUnavailable,
     searchable,
     grounded: available.length > 0 && searchable && !indexUnavailable,

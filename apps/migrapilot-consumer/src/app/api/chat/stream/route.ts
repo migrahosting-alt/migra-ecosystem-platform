@@ -46,7 +46,7 @@ import {
 } from '@/server/brain/seams'
 import { orchestrateTurn } from '@/server/brain/seams'
 import { NO_AUTHORITY } from '@migrapilot/shared-types/project-authority'
-import { listFiles, userDirectory } from '@/server/files/storage'
+import { MAX_EXTRACT_BYTES, listFiles, userDirectory } from '@/server/files/storage'
 import { reconcileGrounding } from '@/server/files/grounding'
 import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
@@ -185,6 +185,12 @@ function refusalOr(
    * speak over it.
    */
   hasTableEvidence = false,
+  /**
+   * The subset of `unreadable` that is unreadable because it is TOO LARGE.
+   *
+   * Separate because the sentence is about the ceiling, not the contents.
+   */
+  tooLarge: readonly string[] = [],
 ): {
   error: string
   message: string
@@ -315,6 +321,30 @@ function refusalOr(
               `labels and numeric values — but general document-style text search inside ` +
               `spreadsheets is not available yet, so this question cannot be answered that way. ` +
               `Ask about a total, a column or a sheet, or attach a CSV if you need its text searched.`,
+          }
+        }
+
+        /*
+         * 🚨 TOO LARGE IS NOT EMPTY, for exactly the reason a spreadsheet is not
+         * empty. A file above the extract ceiling is never handed to the parser,
+         * so it holds zero chunks and arrives here looking identical to a blank
+         * document. Measured on staging: 28.6 MB of plain repeated ASCII was
+         * described as having "no readable content" — a claim the user can
+         * disprove by opening the file, and one that offers them nothing to do.
+         *
+         * The limit is named, because "make it smaller" is only actionable if
+         * you know smaller than what.
+         */
+        const oversized = unreadable.filter((name) => tooLarge.includes(name))
+        if (oversized.length === unreadable.length) {
+          const names = oversized.join(', ')
+          const limitMb = Math.floor(MAX_EXTRACT_BYTES / 1_048_576)
+          return {
+            error: 'file_too_large_to_read',
+            message:
+              `${names} is stored and intact, but it is larger than the ${limitMb} MB that ` +
+              `MigraPilot can read from a single document, so nothing was indexed from it. ` +
+              `Attach a smaller file, or split this one and attach the part you need.`,
           }
         }
 
@@ -664,6 +694,7 @@ export async function POST(request: Request): Promise<Response> {
         available: [] as string[],
         missing: [] as string[],
         unreadable: [] as string[],
+        tooLarge: [] as string[],
         indexUnavailable: false,
         libraryUnreadable: false,
       }
@@ -1221,6 +1252,7 @@ export async function POST(request: Request): Promise<Response> {
           reconciled.available,
           reconciled.indexUnavailable,
           Boolean(tableEvidence),
+          reconciled.tooLarge,
         )
 
         /*
