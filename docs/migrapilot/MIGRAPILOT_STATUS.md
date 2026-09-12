@@ -15,6 +15,56 @@ _Last updated: 2026-09-12_
 
 ---
 
+## 2026-09-12 (overnight) — chat-assistant audit: **79/80**, four fixes, production untouched
+
+Full report: [`OVERNIGHT_2026-09-12.md`](./OVERNIGHT_2026-09-12.md). JSON: `overnightAudit2026_09_12`.
+
+Measured against **`3c204aa8`**, the release staging actually serves. **Tonight's fixes are
+committed, not deployed** — staging still runs the pre-fix build.
+
+**Endurance** 79/80 across 80 real turns through the product path. First token **p50 655 ms**,
+p95 1249 ms. Multi-turn context 5/5. History survived a consumer restart, a Brain restart and a
+container restart: 96/96.
+
+### Three things were describing themselves wrongly
+
+1. 🚨 **`tier: deep` sent user prompts off-device.** `gpt-oss:120b-cloud` is a 384-byte Ollama
+   Cloud manifest advertising 116.8 B parameters; it wins the deep tier outright and the engine
+   reported `provider: local` under an on-device, zero-cost declaration. 335 input tokens left
+   the machine. **Fixed** — excluded unless `MIGRAPILOT_ALLOW_REMOTE_MODELS=1`.
+2. 🚨 **A Brain with no inference reported `status: ok`** with all four providers reachable —
+   `StubProvider.isAvailable()` returned `true` unconditionally. **Fixed**, with `kind: live|stub`
+   now on every health line.
+3. **A 28.6 MB file of plain text was told it had "no readable content"** when the truth was
+   "too large to read". **Fixed** — it names the limit now.
+
+Plus: `deploy-consumer.sh` hard-coded the **production** unit name in its cutover restart *and*
+in the rollback command it prints. **Fixed.**
+
+### The biggest gap is not fixed, deliberately
+
+🚨 **The assistant misdescribes its own capabilities in both directions.** It offers web search
+and audio transcription it does not have, and denies file reading, image understanding and
+memory that it does — while the action hub beside it states every one of those correctly. The
+registry knows the exact answer; a model is being asked to regenerate it. Answering capability
+questions from the registry is a feature, not a narrow defect, so it was recorded rather than
+built overnight.
+
+### Readiness, in one line each
+
+- **Attachments** — txt/csv/json/pdf go all the way to *understood*, with citations and exact
+  values. Images stop at *stored*.
+- **Vision** — the gap is **governance**: 4 vision models installed, routing works, but staging's
+  governance is unsigned so no approval can be recorded here.
+- **Web search** — NOT CONFIGURED by design; needs a self-hosted SearXNG, no paid service.
+- **Gmail** — blocked on an **HTTPS origin**, not on code: `NODE_ENV=production` refuses
+  `http://127.0.0.1:3200`. Needs `staging-chat.migrateck.com`, then one Google Cloud redirect URI.
+- **Source** — the branch was on no remote. A verified 67 MB bundle now sits on a second machine.
+
+**Nothing is OWNER VERIFIED.** That is yours to declare.
+
+---
+
 ## 2026-09-12 — **MigraPilot staging parity**: real inference, real database, real identity
 
 State: **STAGING PARITY READY — GMAIL INTEGRATION PENDING**
