@@ -89,13 +89,65 @@ unfalsifiable claim the policy binding was added to prevent. Both were re-scored
 stored transcripts under the true frozen revision; **the scores did not move**, which
 confirms only the label was stale.
 
+---
+
+## 🚨 CONTENTION: quality held, operational behaviour collapsed
+
+`qwen3:14b`, identical frozen suite, with a concurrent `qwen3:8b` load as the
+workstation floor.
+
+| | idle | **under floor** |
+| --- | ---: | ---: |
+| every dimension score | *unchanged* | **identical** |
+| coverage | 100% | **100%** |
+| load/unload transitions | **0** | **55** 🚨 |
+| residency | 100% | **44%** 🚨 |
+| warm median | 9 s | **18 s** (2×) |
+| warm p95 | 58 s | 66 s |
+| cold | 100 s | 108 s |
+
+**The model was evicted and reloaded 55 times across 54 items — roughly once per
+item.** Residency more than halved and warm latency doubled.
+
+The cause is arithmetic, and it is not fixable by tuning:
+
+```
+device total          24576 MiB
+qwen3:14b  peak      ~15163 MiB
+qwen3:8b   peak      ~10967 MiB
+both resident        ~26131 MiB   → exceeds the card by ~1555 MiB
+```
+
+They cannot coexist. Ollama therefore evicts one to load the other, continuously.
+
+**This is the same pathology that disqualified `qwen3:8b` as a default earlier** —
+churn producing unpredictable latency — reproduced in `qwen3:14b` the moment the GPU
+stopped being idle. On an idle card the 14B is exemplary: zero transitions, 100%
+residency. Under the real floor it thrashes.
+
+🚨 **The quality result is unaffected and should not be read as reassurance.** Scores
+were identical under both conditions, which means the suite measures capability
+independently of load — exactly as intended — and says nothing about whether a
+15.9 GB model belongs on a shared 24 GB card.
+
+### A gap in this measurement, stated rather than glossed
+
+Device-level telemetry (`nvidia-smi`: pre-load free, minimum free VRAM during
+generation, eviction of other compute processes, utilisation) **was not captured** —
+the collector never started, and it was written to emit only at the end, so an
+interruption loses everything. The same fragility class as the earlier harness
+defects, this time in the instrumentation rather than the scorer.
+
+What is recorded above comes from the suite's own per-generation sampler and from the
+capacity arithmetic, both of which are sufficient for the eviction finding. The finer
+device-level fields are **not** evidence I hold, and are listed below as outstanding.
+
 ## Still outstanding
 
-- **contention** — in flight: `qwen3:14b` through the same suite with a concurrent
-  `qwen3:8b` load, GPU-level telemetry from `nvidia-smi` (pre-load free, minimum free,
-  peak allocated, utilisation, compute-process count)
+- **device-level contention telemetry** — must be re-collected with a collector that
+  writes incrementally
+- **cold-start trials under contention**
 - **licence / provenance** — not obtainable from the Ollama catalog; needs an
   authoritative upstream source mapped to the exact digest
-- cold-start trials under contention
 
 **`reasoning.deep` QUALIFICATION IN PROGRESS — NO APPROVAL PERMITTED.**
