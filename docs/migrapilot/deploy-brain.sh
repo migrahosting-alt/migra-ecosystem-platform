@@ -301,6 +301,15 @@ fi
 step "11. activating the release"
 ssh -n "$HOST" "sudo ln -sfn $ROOT/releases/$REL $ROOT/current"
 echo "   current -> $(ssh -n "$HOST" "readlink $ROOT/current")"
+# 🚨 THE ROLLBACK TARGET IS A FACT, SO RECORD IT.
+#
+# This script already VALIDATES the rollback target before cutover, but nothing
+# wrote it down, so `release-retention.sh` still had to infer it by recency —
+# and an aborted deploy's leftover directory can therefore take the rollback
+# slot and be refused for pruning. Written AFTER the swap, so a failed
+# activation cannot leave a rollback pointer to a release that never served.
+ssh -n "$HOST" "sudo ln -sfn $PREVIOUS $ROOT/previous"
+echo "   previous -> $PREVIOUS"
 
 step "12. restarting production against it"
 ssh -n "$HOST" "sudo systemctl restart $UNIT && sleep 8 && systemctl is-active $UNIT"

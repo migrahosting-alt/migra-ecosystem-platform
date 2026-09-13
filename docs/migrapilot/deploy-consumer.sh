@@ -115,6 +115,22 @@ echo "   rollback target: $PREVIOUS"
 # first — but never the one production is actually serving.
 [ "$PREVIOUS" = "$ROOT/releases/$REL" ] \
   && fail "$REL is the currently-serving release; refusing to restage it underneath production"
+# 🚨 A DIRECTORY IS NOT A WAY BACK.
+#
+# The Brain script has always checked this and this one never did. The gap was
+# found the expensive way on staging: an aborted deploy left a 491 MB release
+# holding `.next` and `package.json` but NO node_modules, and because nothing
+# records the rollback target, retention inferred it as "the most recent release
+# that is not the active one" — so the unbootable directory took the rollback
+# slot AND was protected from pruning. Rolling back to it would have swapped the
+# symlink, restarted the unit, and served nothing.
+ROLLBACK_OK="$(ssh -n "$HOST" "test -d '$PREVIOUS' \
+  && test -d '$PREVIOUS/.next' \
+  && test -f '$PREVIOUS/node_modules/next/dist/bin/next' \
+  && test -f '$PREVIOUS/package.json' && echo yes || echo no")"
+[ "$ROLLBACK_OK" = "yes" ] \
+  || fail "the rollback target $PREVIOUS is missing .next, node_modules or package.json. Deploying now would leave no validated way back."
+echo "   rollback target is complete and servable"
 ssh -n "$HOST" "sudo -n rm -rf --one-file-system $ROOT/releases/$REL"
 ssh -n "$HOST" "sudo mkdir -p $ROOT/releases/$REL && sudo chown \$(id -un):\$(id -gn) $ROOT/releases/$REL"
 tar -C "$APP" -czf - --exclude='.next/cache' .next package.json next.config.ts public \
@@ -210,6 +226,18 @@ fi
 step "8. activating the release"
 ssh "$HOST" "sudo ln -sfn $ROOT/releases/$REL $ROOT/current"
 echo "   current -> $(ssh "$HOST" "readlink $ROOT/current")"
+# 🚨 THE ROLLBACK TARGET IS A FACT, SO RECORD IT.
+#
+# Nothing wrote this, so `release-retention.sh` had to infer the rollback target
+# as "the most recent release that is not the active one" — recency, not
+# validity. That is how an aborted deploy's unbootable directory came to occupy
+# the rollback slot and be REFUSED for pruning, while the genuinely good
+# previous release was kept only by the most-recent rule and would have been
+# pruned next. Retention already prefers a durable pointer when one exists; this
+# is the writer that was missing, and it is written AFTER the swap so a failed
+# activation cannot leave a rollback pointer to a release that never served.
+ssh "$HOST" "sudo ln -sfn $PREVIOUS $ROOT/previous"
+echo "   previous -> $PREVIOUS"
 
 step "9. restarting the target against it"
 ssh "$HOST" "sudo systemctl restart $UNIT && sleep 6 && systemctl is-active $UNIT"

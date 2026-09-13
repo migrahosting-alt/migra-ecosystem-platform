@@ -92,6 +92,8 @@ case "$cmd" in
   *"systemd-run"*)                  [ "${STUB_BOOT_START_FAIL:-0}" = "1" ] && exit 4; : ;;
   *"is-active"*)                    [ "${STUB_BOOT_ACTIVE:-1}" = "1" ] || exit 5; echo active ;;
   *"journalctl"*)                   echo "(stub journal)" ;;
+  # The rollback-target completeness probe: `test -d … && test -f … && echo yes`.
+  *"echo yes || echo no"*)          echo "${STUB_ROLLBACK_OK:-yes}" ;;
   *"-w '%{http_code}'"*)            echo "${STUB_HEALTH:-200}" ;;
   *"/api/version"*)
       printf '{"buildId":"%s","commit":"%s","release":"%s","builtAt":"x","stamped":true}\n' \
@@ -175,7 +177,15 @@ expect "boot artifact reports another buildId" failure STUB_ID_BUILD=some-other-
 # 6. the guards that refuse before any work
 expect "refuses to restage the live release"   failure STUB_PREVIOUS=__SELF__
 
-# 7. and the one path that is allowed to say DEPLOYED
+# 7. 🚨 A DIRECTORY IS NOT A WAY BACK.
+#
+# Found on staging: an aborted deploy left a 491 MB release with .next and
+# package.json but no node_modules sitting in the rollback slot. Deploying over
+# a rollback target that cannot serve leaves no validated way back, which is the
+# one failure a deploy script exists to prevent.
+expect "rollback target cannot serve"          failure STUB_ROLLBACK_OK=no
+
+# 8. and the one path that is allowed to say DEPLOYED
 expect "a complete deploy reports success"     success
 
 printf '\n  %s passed, %s failed\n\n' "$PASS" "$FAIL"
