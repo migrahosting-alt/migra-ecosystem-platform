@@ -114,6 +114,22 @@ for APP in consumer brain-service; do
   # Newest first. Order only — selection happens against the keep-set below.
   mapfile -t ORDERED < <(ls -1dt "$ROOT"/releases/*/ 2>/dev/null | while read -r d; do readlink -f "$d"; done)
 
+  # 🚨 RECENCY IS NOT PROOF OF VIABILITY, AND THE SPARE SLOT IS WHERE THAT BIT.
+  #
+  # The spare exists so there is an EXTRA way back. An aborted deploy leaves the
+  # NEWEST directory on disk, so it took that slot and was protected — while a
+  # complete, boot-tested release one position behind it became a prune
+  # candidate. Measured on staging: `exitprobe`, 491 MB with .next and
+  # package.json and no node_modules, held the spare slot ahead of a good release.
+  #
+  # node_modules is the one signal common to both apps: neither a Next release
+  # nor a Brain release can start without it. Deliberately narrow — a release
+  # that merely LOOKS odd is still kept, because a false negative here deletes
+  # something good, while a false positive only keeps a useless directory one
+  # cycle longer. ACTIVE, ROLLBACK, IN USE and LINKED are all decided BEFORE
+  # this, so nothing serving can ever be reclassified by it.
+  servable() { [ -d "$1/node_modules" ]; }
+
   KEPT=0
   CANDIDATES=()
   for R in "${ORDERED[@]}"; do
@@ -122,6 +138,7 @@ for APP in consumer brain-service; do
     elif [ "$R" = "$ROLLBACK" ]; then reason="ROLLBACK TARGET"
     elif grep -qxF "$R" "$INUSE"; then reason="IN USE by a running process"
     elif grep -qxF "$R" "$LINKED"; then reason="TARGET of a current/previous symlink"
+    elif ! servable "$R"; then reason=""  # cannot boot — it is not a spare
     elif [ "$KEPT" -lt "$KEEP_EXTRA" ]; then reason="within the $KEEP_EXTRA most recent"; KEPT=$((KEPT+1))
     fi
     if [ -n "$reason" ]; then
@@ -137,7 +154,13 @@ for APP in consumer brain-service; do
     echo "  ${#CANDIDATES[@]} prune candidate(s):"
     for R in "${CANDIDATES[@]}"; do
       sz="$(du -sh "$R" 2>/dev/null | cut -f1)"
-      printf '    %-56s %6s\n' "$(basename "$R")" "$sz"
+      # Say WHY, not just how big. An unbootable leftover and a superseded
+      # release are both prunable and are not the same thing to a reader.
+      if servable "$R"; then
+        printf '    %-56s %6s\n' "$(basename "$R")" "$sz"
+      else
+        printf '    %-56s %6s  (no node_modules — cannot boot)\n' "$(basename "$R")" "$sz"
+      fi
     done
   fi
 
