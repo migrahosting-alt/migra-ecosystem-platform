@@ -220,14 +220,51 @@ beside the four product limits questions that must always resolve.
 ## Release chain
 
 ```
-expected commit  12957cc7
-built artifact   buildId <from deploy log>
-boot-tested      identity matched on a spare port
-activated        current -> capability-intent-09132
-RUNNING PROCESS  reports the same commit / release / buildId
+expected commit  2d1793e9
+built artifact   buildId UUOCgvduJcRE8WlIolPTB
+boot-tested      identity matched on port 3097
+activated        current -> capability-intent-09133
+RUNNING PROCESS  reports commit 2d1793e9 / release capability-intent-09133
+                 / buildId UUOCgvduJcRE8WlIolPTB
 ```
 
-Production remains `0f494d27` / `chat-platform-rc-0908`, untouched.
+Two earlier attempts are part of the record. `capability-intent-09132` **aborted at step 1**
+because `docs/migrapilot` was dirty with the evidence edits — the guard working. Its wrapper
+still reported exit 0, so the check that caught it was reading `/api/version` and seeing the
+**old** release, not the exit code. Proving what is running is the only link that cannot be
+faked.
+
+### Production, confirmed untouched after the deploy
+
+```
+/opt/migrapilot/consumer/releases/chat-platform-rc-0908
+/opt/migrapilot/brain-service/releases/chat-platform-rc-0908
+ActiveEnterTimestamp=Fri 2026-09-11 06:31:26 UTC   (consumer)
+ActiveEnterTimestamp=Fri 2026-09-11 06:31:26 UTC   (brain)
+```
+
+Both symlinks unchanged and **both service start timestamps unbroken since 2026-09-11**.
+
+---
+
+## Final confirmation on `capability-intent-09133`
+
+| | |
+| --- | --- |
+| capability-owned | **6 / 6** — 178–597 ms |
+| reached the model | **4 / 4** — 718–2295 ms |
+
+```
+What are the limits on the files I can attach?
+  → …Up to 256 MB per file, and text is read from the first 25 MB of it.   [184 ms]
+How many files can I keep?
+  → …You can keep up to 2,000 files.                                        [250 ms]
+How many files can I keep in Dropbox?
+  → "Dropbox has a limit of 3 billion files in your account…"               [718 ms, model]
+```
+
+**25 MB**, matching the `file_too_large_to_read` message exactly. And the nearly identical
+Dropbox phrasing still goes to the model, which is the guard the limits frame needed.
 
 ---
 
