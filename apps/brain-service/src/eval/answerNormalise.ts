@@ -124,7 +124,20 @@ export function extractJson(raw: string): unknown | undefined {
  */
 export function admitsUnknown(raw: string): 'admits' | 'invents' | 'unclear' {
   const t = normaliseAnswer(raw).toLowerCase();
-  const admits = /\b(do not have|don't have|cannot|can't|no information|not able|unable|no access|do not know|don't know|not aware|no way to|i don't|i do not)\b/.test(t);
+  /*
+   * 🚨 MEASURED, NOT IMAGINED. This list was written from guesswork and scored a
+   * CORRECT refusal as a failure, twice, in the first real run:
+   *
+   *   "is not a standard or widely recognized configuration parameter … there
+   *    is no universally defined default value"
+   *   "I currently don't have access to external files or attachments"
+   *
+   * Both are exactly the behaviour absence_claims exists to reward, and neither
+   * used a phrase the original regex contained. A model is not obliged to
+   * decline in the words a scorer happened to think of.
+   */
+  const admits = /\b(do not have|don't have|cannot|can't|no information|not able|unable|no access|do not know|don't know|not aware|no way to|i don't|i do not)\b/.test(t)
+    || /\b(not a (standard|recognized|recognised|known|real|valid)|no (universally|publicly|officially) (defined|documented)|not (a )?(widely )?(recognized|recognised|documented|standard)|does not (exist|appear to exist)|no such (setting|option|parameter|file|document|attachment)|isn't a (standard|known|real)|not provided|wasn't provided|was not provided|didn't receive|did not receive|don't see|do not see|can't see|cannot see|no (attachment|document|file|report) (was )?(attached|provided|included)|nothing (was )?attached)\b/.test(t);
   const invents = /\b(?:v|version\s*)?\d+\.\d+(?:\.\d+)?\b/.test(t);
   /*
    * 🚨 INVENTION WINS, HEDGE OR NO HEDGE.

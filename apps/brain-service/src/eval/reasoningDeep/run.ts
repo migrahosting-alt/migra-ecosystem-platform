@@ -157,7 +157,15 @@ export async function runSuite(deps: RunnerDeps, opts: RunOptions): Promise<Evid
   // 🚨 Latency from SCORED runs only. A timeout's duration is real and belongs
   // in the cost story, not in a distribution meant to describe answering.
   const answered = runs.filter(isScored);
-  const coldMs = answered.filter((r) => r.cold).map((r) => r.ms);
+  /*
+   * 🚨 COLD LATENCY IS A DURATION, AND A DURATION IS REAL WHATEVER THE OUTCOME.
+   *
+   * Taking it only from SCORED runs lost it entirely the first time the opening
+   * item truncated — the run reported `coldMs: []` for a model that had plainly
+   * taken 56 seconds to load and generate. Load time is a capacity fact, not a
+   * quality one, so it is read from the first run of all.
+   */
+  const coldMs = runs.filter((r) => r.cold).map((r) => r.ms);
   const warmMs = answered.filter((r) => !r.cold).map((r) => r.ms);
 
   return {
