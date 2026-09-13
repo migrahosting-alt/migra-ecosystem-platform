@@ -124,12 +124,16 @@ echo "   rollback target: $PREVIOUS"
 # that is not the active one" — so the unbootable directory took the rollback
 # slot AND was protected from pruning. Rolling back to it would have swapped the
 # symlink, restarted the unit, and served nothing.
-ROLLBACK_OK="$(ssh -n "$HOST" "test -d '$PREVIOUS' \
-  && test -d '$PREVIOUS/.next' \
-  && test -f '$PREVIOUS/node_modules/next/dist/bin/next' \
-  && test -f '$PREVIOUS/package.json' && echo yes || echo no")"
+#
+# The predicate comes from scripts/release-completeness.sh so that this check,
+# the Brain's, and release-retention.sh cannot drift apart — and so that a
+# change of release format (a bundled standalone artifact carries no
+# node_modules) moves in one place instead of being rediscovered here.
+# shellcheck source=../../scripts/release-completeness.sh
+. "$REPO/scripts/release-completeness.sh"
+ROLLBACK_OK="$(ssh -n "$HOST" "$(release_completeness_test consumer "$PREVIOUS") && echo yes || echo no")"
 [ "$ROLLBACK_OK" = "yes" ] \
-  || fail "the rollback target $PREVIOUS is missing .next, node_modules or package.json. Deploying now would leave no validated way back."
+  || fail "the rollback target $PREVIOUS cannot serve — a consumer release needs $(release_requirements consumer). Deploying now would leave no validated way back."
 echo "   rollback target is complete and servable"
 ssh -n "$HOST" "sudo -n rm -rf --one-file-system $ROOT/releases/$REL"
 ssh -n "$HOST" "sudo mkdir -p $ROOT/releases/$REL && sudo chown \$(id -un):\$(id -gn) $ROOT/releases/$REL"

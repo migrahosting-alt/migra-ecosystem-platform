@@ -160,12 +160,14 @@ echo "   rollback target: $PREVIOUS"
 [ "$PREVIOUS" = "$ROOT/releases/$REL" ] \
   && fail "$REL is the currently-serving release; refusing to restage it underneath production"
 # Not "it exists" — it must be a release that could actually SERVE.
-ROLLBACK_OK="$(ssh -n "$HOST" "test -d '$PREVIOUS' \
-  && test -f '$PREVIOUS/dist/src/server.js' \
-  && test -d '$PREVIOUS/node_modules' \
-  && test -f '$PREVIOUS/package.json' && echo yes || echo no")"
+#
+# Same single definition the consumer script and release-retention.sh use, so
+# "can this release serve?" has one answer across the whole release system.
+# shellcheck source=../../scripts/release-completeness.sh
+. "$REPO/scripts/release-completeness.sh"
+ROLLBACK_OK="$(ssh -n "$HOST" "$(release_completeness_test brain "$PREVIOUS") && echo yes || echo no")"
 [ "$ROLLBACK_OK" = "yes" ] \
-  || fail "the rollback target $PREVIOUS is missing its entrypoint, node_modules or package.json. Deploying now would leave no validated way back."
+  || fail "the rollback target $PREVIOUS cannot serve — a brain release needs $(release_requirements brain). Deploying now would leave no validated way back."
 echo "   rollback target is complete and servable"
 ROLLBACK_CMD="ssh $HOST \"sudo ln -sfn $PREVIOUS $ROOT/current && sudo systemctl restart $UNIT\""
 

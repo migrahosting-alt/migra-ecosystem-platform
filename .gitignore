@@ -31,6 +31,12 @@
 !/scripts/install-brain-deploy-runner.sh
 !/scripts/consumer-release.sh
 !/scripts/release-retention.sh
+# The single definition of "can this release actually serve?", shared by
+# release-retention.sh and BOTH deploy scripts. Untracked it would break a
+# clean clone the moment a deploy sourced it — and retention refuses to run
+# without it, so it is not optional tooling.
+!/scripts/release-completeness.sh
+!/scripts/test-release-completeness.sh
 # The proxy's upload ceiling is production configuration that the app's own
 # MAX_UPLOAD_MB must agree with, so the script that sets it and the probe that
 # proves it belong beside the code rather than in someone's shell history.

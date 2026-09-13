@@ -24,6 +24,25 @@
 #
 set -euo pipefail
 
+# ── the completeness predicate, defined once ───────────────────────────────
+#
+# 🚨 FAIL CLOSED, AND "CLOSED" FOR A PRUNING TOOL MEANS DELETING NOTHING.
+#
+# This script is installed at /usr/local/bin, so the library must be installed
+# beside it. If it is absent we do NOT fall back to an inlined guess: an
+# out-of-date private copy of this predicate is exactly how the same question
+# came to have three different answers, and the cost of being wrong here is a
+# deleted release. Refusing to run is free.
+_COMPLETENESS="$(dirname "$0")/release-completeness.sh"
+if [ ! -r "$_COMPLETENESS" ]; then
+  echo "refusing to run — release-completeness.sh is not installed beside this script." >&2
+  echo "  expected: $_COMPLETENESS" >&2
+  echo "  it defines which releases can serve; without it nothing may be pruned." >&2
+  exit 3
+fi
+# shellcheck source=./release-completeness.sh
+. "$_COMPLETENESS"
+
 APPLY=0
 KEEP_EXTRA=5
 BASE=/opt/migrapilot
@@ -122,13 +141,14 @@ for APP in consumer brain-service; do
   # candidate. Measured on staging: `exitprobe`, 491 MB with .next and
   # package.json and no node_modules, held the spare slot ahead of a good release.
   #
-  # node_modules is the one signal common to both apps: neither a Next release
-  # nor a Brain release can start without it. Deliberately narrow — a release
-  # that merely LOOKS odd is still kept, because a false negative here deletes
-  # something good, while a false positive only keeps a useless directory one
-  # cycle longer. ACTIVE, ROLLBACK, IN USE and LINKED are all decided BEFORE
-  # this, so nothing serving can ever be reclassified by it.
-  servable() { [ -d "$1/node_modules" ]; }
+  # The predicate itself lives in release-completeness.sh — ONE definition,
+  # shared with both deploy scripts, so "can this serve?" cannot be answered
+  # three different ways again. It is deliberately permissive: a release that
+  # merely LOOKS odd is still kept, because a false negative here deletes
+  # something good while a false positive keeps a useless directory one cycle
+  # longer. ACTIVE, ROLLBACK, IN USE and LINKED are all decided BEFORE this, so
+  # nothing serving can ever be reclassified by it.
+  servable() { release_is_complete "$1"; }
 
   KEPT=0
   CANDIDATES=()

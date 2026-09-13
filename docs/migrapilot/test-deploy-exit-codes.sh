@@ -44,9 +44,13 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 # ── the synthetic repository ───────────────────────────────────────────────
-mkdir -p "$T/docs/migrapilot" "$T/apps/migrapilot-consumer/.next" \
+mkdir -p "$T/docs/migrapilot" "$T/scripts" "$T/apps/migrapilot-consumer/.next" \
          "$T/apps/migrapilot-consumer/src/server/tables" "$T/apps/migrapilot-consumer/public"
 cp "$HERE/deploy-consumer.sh" "$HERE/deploy-targets.sh" "$T/docs/migrapilot/"
+# The completeness predicate the deploy sources — one definition, shared with
+# release-retention.sh. Copied rather than stubbed: the point of the harness is
+# to exercise the REAL check.
+cp "$HERE/../../scripts/release-completeness.sh" "$T/scripts/"
 # stage-workspace-deps.sh is its own contract with its own tests; here it only
 # has to succeed or fail on command, so the harness owns a stub of it.
 cat > "$T/docs/migrapilot/stage-workspace-deps.sh" <<'STAGE'
@@ -184,6 +188,15 @@ expect "refuses to restage the live release"   failure STUB_PREVIOUS=__SELF__
 # a rollback target that cannot serve leaves no validated way back, which is the
 # one failure a deploy script exists to prevent.
 expect "rollback target cannot serve"          failure STUB_ROLLBACK_OK=no
+
+# 7b. 🚨 FAIL CLOSED WHEN THE PREDICATE ITSELF IS MISSING.
+#
+# The completeness definition is shared, so a deploy run without it cannot know
+# whether its rollback target can serve. Guessing — or silently falling back to
+# an inlined copy — is how one fact came to have three answers. Refusing is free.
+mv "$T/scripts/release-completeness.sh" "$T/scripts/release-completeness.sh.hidden"
+expect "aborts when the shared predicate is absent" failure
+mv "$T/scripts/release-completeness.sh.hidden" "$T/scripts/release-completeness.sh"
 
 # 8. and the one path that is allowed to say DEPLOYED
 expect "a complete deploy reports success"     success
