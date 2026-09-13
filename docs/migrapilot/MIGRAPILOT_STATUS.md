@@ -15,6 +15,66 @@ _Last updated: 2026-09-12_
 
 ---
 
+## 2026-09-13 — **CAPABILITY SELF-DESCRIPTION P0** — an intent, not a phrase
+
+Evidence: [`evidence/capability-intent-2026-09-13/`](./evidence/capability-intent-2026-09-13/).
+JSON: `capabilityIntentP0_2026_09_13`. Staging `capability-intent-09131` (`7f230b5b` + `d90a4e8a`).
+
+### 🚨 The mechanism was right. The detector was a list of phrases.
+
+Owner validation broke it in one sitting:
+
+| asked | answered | the truth |
+| --- | --- | --- |
+| *"Will you remember this conversation after the service restarts?"* | "each conversation is ephemeral" | durable in PostgreSQL |
+| *"What audio or transcription support is currently available?"* | invented MP3/WAV/AAC playback, TTS, STT, third-party transcription | no speech runtime exists |
+
+The second **never says "you" at all** — no phrase list organised around self-reference could
+catch it. Confirmed at the time by rephrasing: *"Do you remember previous conversations after a
+restart?"* returned the correct answer. Same authorities, same renderer, only the detector differed.
+
+### The invariant
+
+> Any question whose factual answer is about MigraPilot's own current capabilities,
+> configuration, availability, persistence, limits or supported modalities must resolve from
+> authoritative capability state before model commentary is allowed. The model may explain the
+> facts; it must never originate them.
+
+Three independent axes, all required — **SUBJECT** (explicit, or *implicit* via "is X
+supported/enabled/configured/approved?", which is the route that carries the owner's second
+phrasing) × **FACET** (ability · availability · persistence · current-state · configuration ·
+limits · modality · negative-indirect) × **TOPIC**. Guards cover explanation, advice, production
+requests, and the two nouns that collide hardest with ordinary subjects (*computer memory*,
+*audio format*).
+
+Two refusals worth keeping: **low confidence does not guess** — an unresolved capability returns
+no topic and the model answers, because a wrong fact in the product's authoritative voice is
+worse than prose; and **a registry that did not answer is not an empty registry** — it now says
+*"not verified"*, not *"not offered here"*.
+
+### Verified on the deployed product, not the module
+
+Through the owner's browser session to `/api/chat/stream`:
+
+| | result |
+| --- | --- |
+| the two owner-failing phrasings | **capability-owned**, 334 ms / 180 ms, authorities' own sentences |
+| paraphrase matrix | **22 / 22** capability-owned, 170–474 ms |
+| negatives | **6 / 6** reached the model, 1.1–8.2 s |
+
+**The latency split is itself the evidence** — the two populations do not overlap.
+
+### And a defect only the live run found
+
+*"What are the limits on the files I can attach?"* routed correctly, then answered with the
+format list. True, and not an answer. The numbers now come from the attachment authority through
+the snapshot; no limits supplied means no sentence about limits, so the fix for a true-but-useless
+answer does not become an invented one.
+
+1246 / 1246 tests, 0 skipped. **Nothing OWNER VERIFIED. Production untouched on `0f494d27`.**
+
+---
+
 ## 2026-09-12 — **STAGING BRAIN DEPLOYED** — the locality defect is gone
 
 Evidence: [`evidence/brain-gate-2026-09-12/`](./evidence/brain-gate-2026-09-12/).
