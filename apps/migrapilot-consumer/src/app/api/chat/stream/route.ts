@@ -57,6 +57,7 @@ import {
 import { reconcileGrounding } from '@/server/files/grounding'
 import { listProcessing, readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
 import { describeReadFailures, type ReadFailure } from '@/features/attachments/readFailure'
+import { documentReaderCapability, UNKNOWN_READER } from '@/server/files/documentReaderCapability'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import { reserveTurnFor, settleTurnFor } from '@/server/anonymous/turnQuota'
 import type { Principal } from '@/server/tenancy/principal'
@@ -1003,10 +1004,13 @@ export async function POST(request: Request): Promise<Response> {
         hasAttachments: attachedNow.length > 0 || requestedImages.length > 0,
       })
       if (capabilityTopics.length > 0) {
-        const [registryResult, vision, speech] = await Promise.all([
+        const [registryResult, vision, speech, reader] = await Promise.all([
           listCapabilities({ principal }),
           visionCapability().catch(() => null),
           transcriptionCapability().then(micAvailability).catch(() => null),
+          // Unreachable is not unavailable: the client already returns an
+          // all-`unknown` reader, which produces no claim either way.
+          documentReaderCapability().catch(() => UNKNOWN_READER),
         ])
         const { text: capabilityText } = platformCapabilityAnswer(capabilityTopics, {
           signedIn: principal.kind === 'session',
@@ -1028,6 +1032,13 @@ export async function POST(request: Request): Promise<Response> {
           // The attachment authority's own numbers, so "what are the limits?"
           // answers with the limit that is actually enforced.
           limits: { maxFileBytes: MAX_FILE_BYTES, maxFiles: MAX_FILES, maxExtractBytes: MAX_EXTRACT_BYTES },
+          // 🚨 Declared format support is not capability. What this host can
+          // actually read decides whether "PDF" is a yes or a partly.
+          documentReader: {
+            pdfTextExtraction: reader.pdfTextExtraction,
+            pdfPageRendering: reader.pdfPageRendering,
+            pdfOcr: reader.pdfOcr,
+          },
           speech: speech
             ? { state: speech.state, ...(speech.state === 'disabled' ? { reason: speech.reason } : {}) }
             : null,

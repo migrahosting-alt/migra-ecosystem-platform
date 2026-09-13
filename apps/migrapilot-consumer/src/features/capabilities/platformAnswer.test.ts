@@ -568,3 +568,89 @@ test('"How many files can I keep?" is a limits question, not a question for the 
   const withLimits: PlatformCapabilitySnapshot = { ...STAGING, limits: { maxFiles: 2000 } }
   assert.match(platformCapabilityFact('files', withLimits).detail, /You can keep up to 2,000 files\./)
 })
+
+/* ── 🚨 declared format support is not capability ───────────────────────── *
+ *
+ * Measured on staging: "Reading documents you attach — yes. PDF, CSV, …" was
+ * half false. A text-layer PDF read fine and a SCANNED PDF could not be read at
+ * all, because pdfinfo/pdftoppm/tesseract are not installed there.
+ *
+ * The invariant: a capability must not be advertised as simply AVAILABLE when a
+ * material sub-path required for common inputs is UNAVAILABLE.
+ */
+
+const READER_FULL = {
+  pdfTextExtraction: 'available' as const,
+  pdfPageRendering: 'available' as const,
+  pdfOcr: 'available' as const,
+}
+const READER_STAGING = {
+  pdfTextExtraction: 'available' as const,
+  pdfPageRendering: 'unavailable' as const,
+  pdfOcr: 'unavailable' as const,
+}
+
+test('a host with no page renderer answers PARTLY, not yes', () => {
+  const snap: PlatformCapabilitySnapshot = { ...STAGING, documentReader: READER_STAGING }
+  const fact = platformCapabilityFact('documents', snap)
+  assert.equal(fact.state, 'partial')
+  const text = renderPlatformCapabilities([fact])
+  assert.match(text, /Reading documents you attach — partly\./)
+  // It must still say what DOES work…
+  assert.ok(text.includes('PDF, CSV, JSON'))
+  // …and name the input that does not, and why.
+  assert.match(text, /Scanned or image-only PDFs cannot be read on this server/)
+  assert.match(text, /page renderer\b/)
+  assert.doesNotMatch(text, /— yes\./)
+})
+
+test('a host with the renderer installed is a plain yes', () => {
+  const fact = platformCapabilityFact('documents', { ...STAGING, documentReader: READER_FULL })
+  assert.equal(fact.state, 'available')
+  assert.doesNotMatch(fact.detail, /Scanned or image-only/)
+})
+
+test('🚨 an UNMEASURED reader produces no claim about scanned PDFs', () => {
+  // Not knowing is not evidence of absence — the same rule as a registry that
+  // did not answer.
+  const fact = platformCapabilityFact('documents', STAGING)
+  assert.equal(fact.state, 'available')
+  assert.doesNotMatch(fact.detail, /Scanned or image-only/)
+
+  const unknown: PlatformCapabilitySnapshot = {
+    ...STAGING,
+    documentReader: { pdfTextExtraction: 'unknown', pdfPageRendering: 'unknown', pdfOcr: 'unknown' },
+  }
+  assert.equal(platformCapabilityFact('documents', unknown).state, 'available')
+  assert.doesNotMatch(platformCapabilityFact('documents', unknown).detail, /Scanned or image-only/)
+})
+
+test('the renderer is named before the recogniser, because it is the gate', () => {
+  // Without rasterised pages OCR cannot be entered at all, so naming the
+  // recogniser would point at the wrong missing piece.
+  const bothGone: PlatformCapabilitySnapshot = { ...STAGING, documentReader: READER_STAGING }
+  assert.match(platformCapabilityFact('documents', bothGone).detail, /page renderer is not available/)
+
+  const ocrOnly: PlatformCapabilitySnapshot = {
+    ...STAGING,
+    documentReader: { pdfTextExtraction: 'available', pdfPageRendering: 'available', pdfOcr: 'unavailable' },
+  }
+  assert.match(platformCapabilityFact('documents', ocrOnly).detail, /text recogniser is not available/)
+})
+
+test('the overview carries the same partial verdict, not a cheerful yes', () => {
+  const snap: PlatformCapabilitySnapshot = { ...STAGING, documentReader: READER_STAGING }
+  const text = platformCapabilityAnswer(['overview'], snap).text
+  assert.match(text, /Reading documents you attach — partly\./)
+})
+
+test('a limits question on a renderer-less host still answers, and still qualifies', () => {
+  const snap: PlatformCapabilitySnapshot = {
+    ...STAGING,
+    documentReader: READER_STAGING,
+    limits: { maxFileBytes: 256 * 1024 * 1024, maxExtractBytes: 25 * 1024 * 1024, maxFiles: 2000 },
+  }
+  const detail = platformCapabilityFact('documents', snap).detail
+  assert.match(detail, /Up to 256 MB per file/)
+  assert.match(detail, /Scanned or image-only PDFs/)
+})

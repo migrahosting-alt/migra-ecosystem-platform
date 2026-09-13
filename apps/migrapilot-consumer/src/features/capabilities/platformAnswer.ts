@@ -66,7 +66,24 @@ export type PlatformTopic =
   | 'image-generation'
   | 'overview'
 
-export type PlatformCapabilityState = 'available' | 'blocked' | 'not-configured' | 'unavailable'
+export type PlatformCapabilityState =
+  | 'available'
+  /**
+   * 🚨 WORKS FOR SOME INPUTS, NOT FOR OTHERS — AND THE DIFFERENCE IS MATERIAL.
+   *
+   * Measured on staging: "Reading documents you attach — yes. PDF, CSV, …" was
+   * half false. A PDF with a text layer read fine; a SCANNED PDF could not be
+   * read at all, because pdfinfo/pdftoppm/tesseract are not installed there. A
+   * scanned PDF is not an exotic input — it is what "PDF" means to most people
+   * holding a document.
+   *
+   * The invariant: a capability must not be advertised as simply AVAILABLE when
+   * a material sub-path required for common inputs is UNAVAILABLE.
+   */
+  | 'partial'
+  | 'blocked'
+  | 'not-configured'
+  | 'unavailable'
 
 export interface PlatformCapabilityFact {
   topic: PlatformTopic
@@ -107,6 +124,20 @@ export interface PlatformCapabilitySnapshot {
    * drifts the first time the env var changes.
    */
   limits?: { maxFileBytes?: number; maxFiles?: number; maxExtractBytes?: number }
+  /**
+   * What the document reader can actually do on this deployment.
+   *
+   * 🚨 DECLARED FORMAT SUPPORT IS NOT CAPABILITY. Capability is declared support
+   * AND runtime dependencies AND configuration, and only the first was ever
+   * consulted here. Omitted means not measured — and an unmeasured sub-path is
+   * never reported as missing, for the same reason a registry that did not
+   * answer is not an empty registry.
+   */
+  documentReader?: {
+    pdfTextExtraction: 'available' | 'unavailable' | 'unknown'
+    pdfPageRendering: 'available' | 'unavailable' | 'unknown'
+    pdfOcr: 'available' | 'unavailable' | 'unknown'
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -571,6 +602,30 @@ function documentLimits(snapshot: PlatformCapabilitySnapshot): string {
   return ` Up to ${perFile ?? extract} per file.`
 }
 
+/**
+ * The sentence about scanned PDFs, composed from what the reader reported.
+ *
+ * 🚨 COMPOSED, NOT STORED. Nothing here is a fixed sentence about a fixed host:
+ * the caveat exists only while a sub-path is measurably unavailable, names the
+ * input it affects, and disappears on a deployment where the renderer is
+ * installed. An UNKNOWN sub-path produces no caveat at all — not knowing is not
+ * evidence of absence.
+ */
+function scannedPdfLimitation(snapshot: PlatformCapabilitySnapshot): string {
+  const reader = snapshot.documentReader
+  if (!reader) return ''
+  const rendering = reader.pdfPageRendering
+  const ocr = reader.pdfOcr
+  if (rendering !== 'unavailable' && ocr !== 'unavailable') return ''
+  // Rendering is the gate: without it OCR cannot be entered at all, so it is
+  // named first and alone when both are missing.
+  const missing = rendering === 'unavailable' ? 'page renderer' : 'text recogniser'
+  return (
+    `Scanned or image-only PDFs cannot be read on this server right now — the ${missing} ` +
+    `is not available, so there is no way to turn their pages into text.`
+  )
+}
+
 const SIGN_IN = 'Sign in and this becomes available — it needs an account to hold your files.'
 
 /** Resolve one topic against the authorities. Never guesses. */
@@ -580,10 +635,14 @@ export function platformCapabilityFact(
 ): PlatformCapabilityFact {
   const label = LABELS[topic]
   switch (topic) {
-    case 'documents':
-      return snapshot.signedIn
-        ? { topic, label, state: 'available', detail: `PDF, CSV, JSON, Markdown, plain text, code and .xlsx spreadsheets. Attach one and ask about it — answers cite the file and the lines they came from.${documentLimits(snapshot)}` }
-        : { topic, label, state: 'blocked', detail: SIGN_IN }
+    case 'documents': {
+      if (!snapshot.signedIn) return { topic, label, state: 'blocked', detail: SIGN_IN }
+      const base = `PDF, CSV, JSON, Markdown, plain text, code and .xlsx spreadsheets. Attach one and ask about it — answers cite the file and the lines they came from.${documentLimits(snapshot)}`
+      const scanned = scannedPdfLimitation(snapshot)
+      return scanned
+        ? { topic, label, state: 'partial', detail: `${base} ${scanned}` }
+        : { topic, label, state: 'available', detail: base }
+    }
 
     case 'files':
       return snapshot.signedIn
@@ -665,6 +724,8 @@ export function platformCapabilityFact(
 
 const VERDICT: Record<PlatformCapabilityState, string> = {
   available: 'yes',
+  // Not "yes". That was the defect.
+  partial: 'partly',
   blocked: 'not right now',
   'not-configured': 'no',
   unavailable: 'no',

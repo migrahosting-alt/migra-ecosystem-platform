@@ -184,6 +184,7 @@ export type BrainOperation =
    * only the Brain knows the second one.
    */
   | { kind: 'visionCapability' }
+  | { kind: 'documentReaderCapability' }
   | { kind: 'createDocsIndex'; root: string }
   | { kind: 'syncIndex'; indexId: string }
   | { kind: 'indexStatus'; indexId: string }
@@ -779,6 +780,9 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
 
     case 'visionCapability':
       return { method: 'GET', path: '/api/ai/vision-registry' }
+
+    case 'documentReaderCapability':
+      return { method: 'GET', path: '/api/ai/document-reader' }
 
     case 'createDocsIndex':
       // `root` is a path, which is exactly the thing this module exists to keep

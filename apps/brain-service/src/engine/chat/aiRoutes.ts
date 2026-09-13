@@ -65,6 +65,7 @@ import { renderTextGlyph } from '../media/glyphRender.js';
 import type { IndexService } from '../rag/indexService.js';
 import { auditStore } from '../observability/auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, approvedByCapability, type VisionGateDeps } from '../media/visionGate.js';
+import { documentReaderCapability } from '../rag/documentReaderCapability.js';
 import { resolveFamiliesForSurface, resolveFamily } from '../models/modelFamilyResolver.js';
 import { decideOrchestration } from '../orchestration/decide.js';
 import type { OrchestrationRequest } from '@migrapilot/shared-types/orchestration-decision';
@@ -451,6 +452,17 @@ export function registerAiRoutes(
       }),
     };
   });
+
+  /*
+   * WHAT THIS HOST CAN ACTUALLY READ — measured, not declared.
+   *
+   * The consumer answered "Reading documents you attach — yes. PDF, …" from a
+   * hard-coded format list. On a host without pdfinfo/pdftoppm/tesseract that
+   * sentence is half false: a text-layer PDF reads, a scanned one cannot be
+   * read at all. Declared support is not capability; capability is declared
+   * support AND runtime dependencies AND configuration.
+   */
+  app.get('/api/ai/document-reader', async () => documentReaderCapability());
 
   app.get('/api/ai/vision-registry', async () => {
     const vision = (await reg.list()).filter((m) => m.capabilities.vision);
