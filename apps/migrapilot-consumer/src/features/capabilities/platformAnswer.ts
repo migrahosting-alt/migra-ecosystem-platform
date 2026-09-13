@@ -100,61 +100,389 @@ export interface PlatformCapabilitySnapshot {
 }
 
 /* ------------------------------------------------------------------ *
- * Recognising the question
- * ------------------------------------------------------------------ */
-
-/**
- * A self-referential frame. Without one of these it is not a question about
- * the product — "explain how web search works" is a request for an
- * explanation, and answering it with a capability table would be worse than
- * the model's prose.
- */
-const SELF_FRAME =
-  /\b(can|could|are)\s+you\b|\bdo\s+you\s+(have|support|remember|know how)\b|\bable\s+to\b|\byou\s+can'?t\b|\bwhat\s+can\s+you\s+do\b|\bwhat\s+are\s+you\s+able\b|\bwhat\s+can\s+migrapilot\b/i
-
-/**
- * Topic keywords.
+ * Recognising the question — a classifier, not a list of phrases
+ * ------------------------------------------------------------------ *
  *
- * 🚨 DELIBERATELY NARROW. A false positive answers a real question with a
- * capability table, which is a worse failure than the one being fixed — so
- * every pattern here names the FEATURE, not a subject the feature is about.
+ * 🚨 WHY THIS IS NO LONGER PHRASE-MATCHED
+ *
+ * The first version recognised self-referential PHRASES ("can you", "do you
+ * have"). Owner validation on staging broke it in a single sitting with two
+ * ordinary questions it had never been shown:
+ *
+ *   "Will you remember this conversation after the service restarts?"
+ *     → the model answered "I do not maintain a persistent memory of
+ *        individual conversations between service restarts … each conversation
+ *        is ephemeral." Conversations are durable in PostgreSQL.
+ *
+ *   "What audio or transcription support is currently available?"
+ *     → the model invented "Audio Playback — MP3, WAV, AAC. Text-to-Speech.
+ *        Speech-to-Text. Transcription Services: integration with third-party
+ *        tools." None of that exists on any deployment.
+ *
+ * Rephrased as "Do you remember previous conversations after a restart?" the
+ * first one produced the correct capability-owned answer — so the mechanism
+ * was right and only the detector was wrong. Adding those two strings would
+ * have fixed exactly those two strings.
+ *
+ * THE INVARIANT THIS LAYER IMPLEMENTS:
+ *
+ *   Any question whose factual answer is about MigraPilot's own current
+ *   capabilities, configuration, availability, persistence, limits or
+ *   supported modalities must resolve from authoritative capability state
+ *   before model commentary is allowed. The model may explain the facts; it
+ *   must never originate them.
+ *
+ * THREE INDEPENDENT AXES, ALL THREE REQUIRED:
+ *
+ *   SUBJECT  is this about THIS product? — explicitly ("you", "MigraPilot",
+ *            "this service"), or implicitly by asking whether a feature is
+ *            supported / enabled / configured / currently available, which is
+ *            a property only a system has.
+ *   FACET    is it asking about STATE rather than about the world? — ability,
+ *            availability, persistence, current-state, configuration, limits,
+ *            modality, negative/indirect.
+ *   TOPIC    which capability.
+ *
+ * Requiring all three is what keeps ordinary knowledge ordinary. "How does
+ * computer memory work?" and "What audio format is best for podcasts?" both
+ * name a capability noun and neither is a capability question: no self
+ * subject, and the facet is explanation and advice, not state.
  */
-const TOPIC_PATTERNS: ReadonlyArray<{ topic: PlatformTopic; pattern: RegExp }> = [
-  { topic: 'web-search', pattern: /\b(search|browse|google|look\s*up)\b.{0,20}\b(web|internet|online|news)\b|\bweb\s*search\b|\bbrowse\s+the\s+(web|internet)\b/i },
-  { topic: 'images', pattern: /\b(see|look at|view|analyse|analyze|read|understand|describe)\b.{0,24}\b(image|images|picture|pictures|photo|photos|screenshot|chart)\b|\bvision\b/i },
-  { topic: 'image-generation', pattern: /\b(make|create|generate|draw|paint)\b.{0,24}\b(image|picture|photo|illustration|logo|drawing)\b/i },
-  { topic: 'documents', pattern: /\b(read|open|parse|understand|analyse|analyze|summari[sz]e)\b.{0,24}\b(pdf|pdfs|document|documents|docx|spreadsheet|csv|xlsx|attachment|attachments)\b|\battach\b.{0,20}\b(pdf|document|file)\b/i },
-  { topic: 'audio', pattern: /\btranscrib|\b(audio|voice|speech|recording|microphone|dictat)/i },
-  { topic: 'memory', pattern: /\bremember\b|\brecall\b|\b(previous|earlier|past|last)\s+(conversation|conversations|chat|chats|session)|\bconversation\s+history\b/i },
-  { topic: 'files', pattern: /\b(access|open|read|see|get)\b.{0,24}\b(my\s+files|my\s+file|my\s+computer|my\s+drive|local\s+file|file\s+system)\b/i },
-  { topic: 'email', pattern: /\b(e-?mail|inbox|gmail|mailbox)\b/i },
-  { topic: 'code-execution', pattern: /\b(run|execute)\b.{0,20}\b(code|script|command|program|terminal|shell)\b|\bterminal\b|\bshell\s+command\b/i },
+
+/** The question family a prompt belongs to. Several can apply at once. */
+export type CapabilityFacet =
+  | 'ability'
+  | 'availability'
+  | 'persistence'
+  | 'current-state'
+  | 'configuration'
+  | 'limits'
+  | 'modality'
+  | 'negative-indirect'
+
+/** Who the question is about. */
+export type CapabilitySubject = 'self-explicit' | 'self-implicit' | 'none'
+
+export interface CapabilityIntent {
+  subject: CapabilitySubject
+  facets: CapabilityFacet[]
+  topics: PlatformTopic[]
+  /**
+   * `high`   a topic resolved — answer from capability state.
+   * `low`    it is a question about this product, but which capability is not
+   *          safely classifiable. DO NOT fabricate and do not guess a topic:
+   *          the model answers, exactly as it would for ordinary prose.
+   * `none`   not a capability question at all.
+   */
+  confidence: 'high' | 'low' | 'none'
+  /** Why, in one phrase — for evidence records and for debugging a miss. */
+  reason: string
+}
+
+/* ── axis 1: subject ─────────────────────────────────────────────────── */
+
+/** Names this product, the assistant, or the deployment it runs on. */
+const SELF_REFERENCE =
+  /\byou\b|\byour\b|\byou'?(?:re|ve|ll|d)\b|\bmigrapilot\b|\bthis\s+(?:assistant|ai|app|chat|tool|product|service|system|platform|deployment|server|instance)\b|\bthe\s+(?:assistant|app|chat|service|system|platform|deployment|product|server)\b/i
+
+/**
+ * Implicit self-reference: a state predicate applied to a feature.
+ *
+ * "Is X supported?", "What X support is currently available?" — nothing but a
+ * system HAS a feature that is supported, enabled or configured, and in a chat
+ * with no other named system that system is this one. This is the route that
+ * carries "What audio or transcription support is currently available?", which
+ * never says "you" at all.
+ */
+const FEATURE_STATE_FRAMES: readonly RegExp[] = [
+  /\b(?:is|are|does|do|has|have)\b[^?.!]{0,60}?\b(?:available|enabled|disabled|configured|set\s*up|supported|turned\s+(?:on|off)|switched\s+(?:on|off)|active|working|live|offered|installed|connected|approved|allowed|permitted|granted|hooked\s+up)\b/i,
+  /\b(?:what|which|how\s+much|how\s+many)\b[^?.!]{0,80}?\b(?:support|capabilit(?:y|ies)|features?|limits?|formats?|file\s*types?|modalities)\b[^?.!]{0,60}?\b(?:available|supported|enabled|configured|currently|offered|exist|in\s+place|there)\b/i,
+  /\bis\s+there\b[^?.!]{0,60}?\b(?:support|a\s+way|an\s+option|any\s+way)\b/i,
+  /\b(?:currently|right\s+now|at\s+the\s+moment|as\s+of\s+now|on\s+this\s+(?:server|deployment|instance|machine))\b[^?.!]{0,60}?\b(?:available|supported|enabled|configured|set\s*up|working|offered)\b/i,
+  // Persistence of the user's own data is a property of the system holding it.
+  /\b(?:is|are|does|do|will|can)\b[^?.!]{0,60}?\b(?:retained|kept|saved|stored|persist\w*|preserved|remembered|survives?)\b/i,
+  // "Does X work here?" — but never "HOW does X work", which is an explanation.
+  /\b(?:does|do|is|are)\b[^?.!]{0,40}?\bworks?\s+(?:yet|now|here|at\s+all)\b/i,
+  // "Is X … yet?" — "yet" asks about a state that is expected to change.
+  /\b(?:is|are|does|do|has|have|can)\b[^?.!]{0,50}?\byet\b/i,
+  // "What are the limits on …?" — a limit belongs to whatever enforces it.
+  /\b(?:what|which)\s+(?:are\s+)?(?:the\s+)?(?:limits?|limitations?|restrictions?|maximum|max)\b/i,
 ]
 
-const OVERVIEW =
-  /\bwhat\s+can\s+you\s+(actually\s+)?do\b|\bwhat\s+are\s+you\s+able\s+to\s+do\b|\bwhat\s+can\s+migrapilot\s+do\b|\bwhat\s+are\s+your\s+capabilities\b/i
+/**
+ * Another vendor is named, so an implicit "is it supported?" is about THEM.
+ * Only applied to implicit subjects: "can you do what ChatGPT does?" is still
+ * a question about this product.
+ */
+const OTHER_PRODUCT =
+  /\b(?:chatgpt|gpt-?[0-9]|openai|claude|gemini|bard|copilot|cursor|notion|slack|excel|word|powerpoint|photoshop|acrobat|adobe|google\s+docs|microsoft|salesforce)\b/i
+
+/* ── axis 2: facet ───────────────────────────────────────────────────── */
+
+const FACET_PATTERNS: ReadonlyArray<{ facet: CapabilityFacet; pattern: RegExp }> = [
+  {
+    facet: 'ability',
+    pattern:
+      /\b(?:can|could|will|would)\s+(?:you|it|this|migrapilot)\b|\bare\s+you\s+able\b|\bable\s+to\b|\bcapable\s+of\b|\bis\s+it\s+possible\b|\bdo(?:es)?\s+(?:you|it|this|migrapilot)\s+(?:support|handle|allow|do|offer)\b|\bdo\s+you\s+have\b/i,
+  },
+  {
+    facet: 'availability',
+    pattern:
+      /\b(?:available|availability|enabled|disabled|turned\s+(?:on|off)|switched\s+(?:on|off)|active|offered|supported|support)\b|\bis\s+there\b|\bdo\s+i\s+have\s+access\b|\bworks?\s+(?:yet|now|here|at\s+all)\b|\bworking\b|\bapproved\b|\ballowed\b|\bpermitted\b|\bgranted\b/i,
+  },
+  {
+    facet: 'persistence',
+    pattern:
+      /\b(?:remember|remembers|remembering|recall|recalls|forget|forgets|persist\w*|retain\w*|kept|keeps?|saved|stored|survive\w*)\b|\bcarry\s+over\b|\bbetween\s+sessions\b|\bacross\s+sessions\b|\bafter\s+(?:a\s+|the\s+|it\s+)?\w*\s*(?:restarts?|reboots?|reloads?|refreshes)\b|\bnext\s+time\b/i,
+  },
+  {
+    facet: 'current-state',
+    pattern: /\b(?:currently|right\s+now|at\s+the\s+moment|as\s+of\s+now|status|state\s+of|so\s+far)\b/i,
+  },
+  {
+    facet: 'configuration',
+    pattern:
+      /\b(?:configured|configuration|set\s*up|setup|installed|provisioned|connected|credentials)\b|\bhooked\s+up\b|\bapi\s+key\b|\benvironment\s+variable\b/i,
+  },
+  {
+    facet: 'limits',
+    pattern: /\b(?:limits?|limitations?|restrictions?|maximum|max|cap|quota)\b|\bhow\s+(?:large|big|many|much|long)\b/i,
+  },
+  {
+    facet: 'modality',
+    pattern: /\b(?:file\s*types?|formats?|modalit\w*)\b|\bkinds?\s+of\s+(?:files?|input|content)\b|\bwhat\s+sorts?\s+of\b/i,
+  },
+  {
+    facet: 'negative-indirect',
+    pattern:
+      /\b(?:can'?t|cannot|unable|won'?t|doesn'?t|don'?t|isn'?t|aren'?t)\b|\bno\s+longer\b|\bi\s+thought\s+you\s+(?:could|had)\b|\byou\s+said\s+you\s+could\b|\bwhy\s+(?:can'?t|won'?t|doesn'?t|isn'?t)\b/i,
+  },
+]
 
 /**
- * Which platform topics this prompt is asking about, if any.
+ * Facets that are about the STATE of the deployment rather than about what is
+ * being asked for. One of these present means the question survives the
+ * explanation and advice guards below — "is your web search configured?" is a
+ * status question even though it reads like a request for an explanation.
+ */
+const STATUS_FACETS: ReadonlySet<CapabilityFacet> = new Set<CapabilityFacet>([
+  'availability',
+  'persistence',
+  'current-state',
+  'configuration',
+  'limits',
+  'modality',
+])
+
+/* ── the guards: what is NOT a capability question ───────────────────── */
+
+/** Asking how something works, or what something is. A subject, not a state. */
+const EXPLANATION_FRAME =
+  /\bhow\s+(?:does|do|did|would|can|is|are)\b[^?.!]{0,80}\bwork(?:s|ed|ing)?\b|\bexplain\b|\btell\s+me\s+about\b|\bwhat\s+(?:is|are|was|were)\s+(?:a|an|the)\b|\bdifference\s+between\b|\bunder\s+the\s+hood\b|\bhow\s+do\s+i\b|\bteach\s+me\b/i
+
+/** Asking which is better. An opinion about the world, never about this server. */
+const ADVICE_FRAME =
+  /\b(?:best|better|worst|recommend\w*|prefer\w*|advice|tips?|versus)\b|\bshould\s+i\b|\bwhich\s+should\b|\bworth\s+(?:it|using)\b|\bpros\s+and\s+cons\b|\bvs\.?\b/i
+
+/**
+ * A request to PRODUCE something. "Can you write a Python script to parse this
+ * CSV?" names a document format and is not a question about document support;
+ * the CSV is the object of a subordinate clause, not the subject of the ask.
+ */
+const TASK_REQUEST =
+  /\b(?:write|writing|create|creating|build|building|implement|draft|compose|refactor|debug|fix|translate|rewrite|generate)\b(?:\s+\w+){0,4}?\s+(?:a|an|the|some|me|my)?\s*(?:python|javascript|typescript|java|sql|bash|shell|rust|go|css|html|react)?\s*(?:scripts?|functions?|programs?|code|snippets?|quer(?:y|ies)|regexe?s?|class(?:es)?|methods?|modules?|components?|tests?|essays?|poems?|letters?|articles?|plans?|outlines?)\b/i
+
+/**
+ * …unless the same sentence asks to RUN it or to take an ATTACHMENT, which are
+ * themselves capability questions. "Can you write and run code for me?" is a
+ * question about execution with a production verb in front of it.
+ */
+const STRONG_CAPABILITY_FRAME =
+  /\b(?:run|runs|running|execute|executes|executing)\s+(?:it|them|the|this|that|a|my|some|code|scripts?|commands?|programs?)\b|\battach(?:ed|ing|ment|ments)?\b|\bupload(?:ed|ing|s)?\b/i
+
+/* ── axis 3: topic ───────────────────────────────────────────────────── */
+
+/**
+ * Topic patterns name the FEATURE, not the interaction. The subject and facet
+ * axes already carry the "is this about state" question, so these do not have
+ * to encode a verb list — which is what made the first version miss every
+ * paraphrase that did not use one of its verbs.
+ */
+const TOPIC_PATTERNS: ReadonlyArray<{ topic: PlatformTopic; pattern: RegExp }> = [
+  {
+    topic: 'image-generation',
+    pattern:
+      /\b(?:generate|generating|create|creating|make|making|draw|drawing|paint|painting|render|rendering|produce|producing)\s+(?:me\s+)?(?:an?\s+|some\s+|the\s+)?(?:images?|pictures?|photos?|illustrations?|logos?|artwork|drawings?)\b|\bimage\s+generation\b|\btext[-\s]to[-\s]image\b|\bdall[-\s]?e\b|\bstable\s+diffusion\b|\bmidjourney\b/i,
+  },
+  {
+    topic: 'images',
+    pattern:
+      /\b(?:images?|pictures?|photos?|photographs?|screenshots?|diagrams?|charts?|graphs?)\b|\bvision\b|\bvisually\b|\bmultimodal\b|\bocr\b/i,
+  },
+  {
+    topic: 'documents',
+    pattern:
+      /\b(?:pdfs?|docx?|documents?|spreadsheets?|csv|xlsx|attachments?|attach(?:ed|ing)?|markdown)\b|\bfile\s*types?\b|\bfile\s*formats?\b|\btext\s+files?\b/i,
+  },
+  {
+    topic: 'audio',
+    pattern:
+      /\b(?:audio|voice|speech|transcri\w*|recordings?|microphones?|mic|dictat\w*|stt|tts|spoken|listen)\b|\btext[-\s]to[-\s]speech\b|\bspeech[-\s]to[-\s]text\b/i,
+  },
+  {
+    topic: 'memory',
+    pattern:
+      /\b(?:remember|remembers|remembering|recall|recalls|forget|forgets|memory|persist\w*|retain\w*)\b|\bconversation\s+history\b|\bchat\s+history\b|\b(?:previous|earlier|past|prior|last)\s+(?:conversations?|chats?|sessions?|messages?)\b|\bmy\s+(?:chats?|conversations?)\b|\bwe\s+(?:talked|discussed|spoke)\b|\brecord\s+of\s+(?:our|this|the)\b|\btranscripts?\s+of\s+(?:our|this|the)\b|\bbetween\s+sessions\b|\bacross\s+sessions\b/i,
+  },
+  {
+    topic: 'files',
+    pattern:
+      /\bmy\s+(?:files?|computer|drive|machine|laptop|uploads?|hard\s+drive)\b|\blocal\s+files?\b|\bfile\s+system\b|\bfilesystem\b|\bfile\s+library\b|\buploaded\s+files?\b|\b(?:open|access|read|see|get|browse)\s+(?:a\s+|the\s+)?files?\b/i,
+  },
+  { topic: 'email', pattern: /\b(?:e-?mails?|inbox|gmail|mailbox)\b|\bmail\s+account\b/i },
+  {
+    topic: 'code-execution',
+    pattern:
+      /\b(?:run|runs|running|execute|executes|executing)\s+(?:it|them|the|this|that|a|my|some)?\s*(?:code|scripts?|commands?|programs?|python|bash|shell|sql)\b|\bterminal\b|\bshell\s+(?:command|access)\b|\bcode\s+execution\b|\bsandbox\b/i,
+  },
+  {
+    topic: 'web-search',
+    pattern:
+      /\bweb\s*search\b|\bsearch(?:ing)?\s+(?:the\s+)?(?:web|internet|online)\b|\bbrows(?:e|ing)\s+(?:the\s+)?(?:web|internet)\b|\bgoogle\b|\binternet\s+access\b|\bonline\s+(?:search|sources?)\b|\blook\s+(?:it\s+|things\s+|that\s+)?up\s+(?:online|on\s+the\s+web)\b|\bcurrent\s+(?:news|events)\b|\btoday'?s\s+news\b|\breal[-\s]time\s+(?:information|data|web)\b/i,
+  },
+]
+
+/**
+ * A capability noun used in its ordinary-world sense.
+ *
+ * "memory" and "audio" are the two that collide hardest: computer memory and
+ * audio formats are ordinary subjects. Each pair is "the domain sense" plus
+ * "the signal that overrides it", and the override wins — "What audio or
+ * transcription support is currently available?" says transcription, so it is
+ * about this product no matter how many format words surround it.
+ */
+const DOMAIN_SENSE: Partial<Record<PlatformTopic, { domain: RegExp; override: RegExp }>> = {
+  memory: {
+    domain:
+      /\b(?:computer|ram|vram|gpu|cpu|virtual|physical|shared|cache|heap|stack|muscle)\s+memory\b|\bmemory\s+(?:management|leaks?|allocation|address|usage|model|bandwidth|chips?)\b|\bmemory\s+(?:in|of)\s+(?:a\s+)?(?:computer|cpu|gpu|program)\b/i,
+    override:
+      /\b(?:remember|remembers|remembering|recall|recalls|forgets?|persist\w*)\b|\bconversation\s+history\b|\bchat\s+history\b|\b(?:previous|earlier|past|prior|last)\s+(?:conversations?|chats?|sessions?)\b|\bbetween\s+sessions\b|\bacross\s+sessions\b/i,
+  },
+  audio: {
+    domain:
+      /\b(?:codecs?|bitrates?|sample\s+rate|mixing|mastering|podcasts?|mp3|wav|flac|aac|ogg)\b|\baudio\s+(?:formats?|quality|compression|engineering|interface|editing)\b/i,
+    override:
+      /\btranscri\w*\b|\bdictat\w*\b|\bmicrophones?\b|\bvoice\s+notes?\b|\bspeech[-\s]to[-\s]text\b|\bstt\b/i,
+  },
+}
+
+/** Asking about the product as a whole. */
+const OVERVIEW_FRAME =
+  /\bwhat\s+(?:else\s+)?can\s+(?:you|migrapilot|it|this)\b|\bwhat\s+are\s+you\s+(?:able\s+to\s+do|capable\s+of)\b|\bwhat\s+are\s+your\s+capabilities\b|\bwhat\s+capabilities\b|\bwhat\s+features\b|\bwhat\s+do\s+you\s+support\b|\blist\s+your\s+capabilities\b/i
+
+/* ── the classifier ──────────────────────────────────────────────────── */
+
+function classifySubject(text: string): CapabilitySubject {
+  if (SELF_REFERENCE.test(text)) return 'self-explicit'
+  if (OTHER_PRODUCT.test(text)) return 'none'
+  if (FEATURE_STATE_FRAMES.some((p) => p.test(text))) return 'self-implicit'
+  return 'none'
+}
+
+function classifyFacets(text: string): CapabilityFacet[] {
+  return FACET_PATTERNS.filter(({ pattern }) => pattern.test(text)).map((f) => f.facet)
+}
+
+function classifyTopics(text: string): PlatformTopic[] {
+  let found = TOPIC_PATTERNS.filter(({ pattern }) => pattern.test(text)).map((t) => t.topic)
+
+  // A capability noun in its ordinary-world sense is not this product's.
+  found = found.filter((topic) => {
+    const sense = DOMAIN_SENSE[topic]
+    if (!sense) return true
+    if (!sense.domain.test(text)) return true
+    return sense.override.test(text)
+  })
+
+  // Asking to MAKE a picture is not asking whether pictures can be read.
+  if (found.includes('image-generation')) found = found.filter((t) => t !== 'images')
+
+  return [...new Set(found)]
+}
+
+/**
+ * The whole intent, with its reason. `platformCapabilityTopics` is the thin
+ * wrapper the chat route calls; this is what the tests and evidence records
+ * read, because "why did it not fire" is the question that matters when one
+ * of these misses.
  *
  * 🚨 AN ATTACHED DOCUMENT WINS. "Can you read this PDF?" with a file attached
  * is a request to read the file, and the document path answers it far better
  * than a capability table. The caller passes `hasAttachments` so this module
  * never has to guess at a turn's shape.
  */
+export function classifyCapabilityIntent(
+  prompt: string,
+  opts: { hasAttachments?: boolean } = {},
+): CapabilityIntent {
+  const none = (reason: string): CapabilityIntent => ({
+    subject: 'none', facets: [], topics: [], confidence: 'none', reason,
+  })
+
+  if (opts.hasAttachments) return none('an attachment is present — the document path owns this turn')
+  const text = prompt.trim()
+  if (!text) return none('empty prompt')
+  // A long message is a task, not a question about the product.
+  if (text.length > 240) return none('longer than 240 characters — a task, not a question')
+
+  const subject = classifySubject(text)
+  if (subject === 'none') return none('no self subject — the question is about the world')
+
+  const facets = classifyFacets(text)
+  // "What are your capabilities?" carries no facet word at all: asking for the
+  // whole list IS the availability question, so the overview frame stands in
+  // for one. Specific topics still win over it further down.
+  const asksForOverview = OVERVIEW_FRAME.test(text)
+  if (facets.length === 0 && !asksForOverview) {
+    return { subject, facets, topics: [], confidence: 'none', reason: 'no capability facet — a request, not a question about state' }
+  }
+
+  const hasStatusFacet = facets.some((f) => STATUS_FACETS.has(f))
+
+  // "How does X work", "what is an X", "which is best" are about a subject.
+  // A status facet overrides them: "is your search configured?" is a status
+  // question whatever frame it arrives in.
+  if (!hasStatusFacet && (EXPLANATION_FRAME.test(text) || ADVICE_FRAME.test(text))) {
+    return { subject, facets, topics: [], confidence: 'none', reason: 'an explanation or advice question' }
+  }
+
+  // A request to produce something, with a capability noun somewhere inside it.
+  if (TASK_REQUEST.test(text) && !STRONG_CAPABILITY_FRAME.test(text)) {
+    return { subject, facets, topics: [], confidence: 'none', reason: 'a request to produce something' }
+  }
+
+  const topics = classifyTopics(text)
+  if (topics.length > 0) {
+    return { subject, facets, topics, confidence: 'high', reason: `capability question about ${topics.join(', ')}` }
+  }
+  if (asksForOverview) {
+    return { subject, facets, topics: ['overview'], confidence: 'high', reason: 'asked what the product can do' }
+  }
+
+  // 🚨 THIS IS THE NON-FABRICATION BRANCH. It is a question about this
+  // product, and which capability it is about did not resolve. Guessing a
+  // topic here would answer with a fact about something else — strictly worse
+  // than the model's prose, which at least does not carry the product's
+  // authority. The model answers; nothing is claimed on the product's behalf.
+  return { subject, facets, topics: [], confidence: 'low', reason: 'about this product, but no capability resolved' }
+}
+
+/** Which platform topics this prompt is asking about, if any. */
 export function platformCapabilityTopics(
   prompt: string,
   opts: { hasAttachments?: boolean } = {},
 ): PlatformTopic[] {
-  if (opts.hasAttachments) return []
-  const text = prompt.trim()
-  if (!text) return []
-  // A long message is a task, not a question about the product.
-  if (text.length > 240) return []
-  if (OVERVIEW.test(text)) return ['overview']
-  if (!SELF_FRAME.test(text)) return []
-  const found = TOPIC_PATTERNS.filter(({ pattern }) => pattern.test(text)).map((t) => t.topic)
-  return [...new Set(found)]
+  return classifyCapabilityIntent(prompt, opts).topics
 }
 
 /* ------------------------------------------------------------------ *
@@ -179,11 +507,23 @@ const OVERVIEW_TOPICS: readonly PlatformTopic[] = [
   'documents', 'files', 'memory', 'images', 'web-search', 'email', 'audio', 'image-generation', 'code-execution',
 ]
 
+/**
+ * 🚨 "NOT VERIFIED" IS A DIFFERENT ANSWER FROM "NO".
+ *
+ * When an authority does not answer, the honest statement is that its state
+ * was not verified. Saying "not offered here" would be a claim about the
+ * deployment made from no evidence — the same class of defect this whole
+ * module exists to stop, just with the product's voice instead of the model's.
+ */
+const NOT_VERIFIED =
+  'The capability registry did not answer, so this was not verified — nothing here is a claim about it.'
+
 function fromRegistry(
   snapshot: PlatformCapabilitySnapshot,
   id: string,
 ): { state: PlatformCapabilityState; detail: string } | null {
-  if (snapshot.registry === null) return null
+  // Did not answer. NOT "answered, and the capability is absent".
+  if (snapshot.registry === null) return { state: 'unavailable', detail: NOT_VERIFIED }
   const row = snapshot.registry.find((c) => c.id === id)
   if (!row) return null
   if (row.available) return { state: 'available', detail: 'Available now.' }
@@ -260,6 +600,7 @@ export function platformCapabilityFact(
       const r = fromRegistry(snapshot, 'terminal.exec')
       if (!r) return { topic, label, state: 'unavailable', detail: 'Running code is not offered in chat. Explaining, writing and reviewing it is.' }
       if (r.state === 'available') return { topic, label, ...r }
+      if (r.detail === NOT_VERIFIED) return { topic, label, ...r }
       return {
         topic, label, state: 'not-configured',
         detail: 'Running code is not enabled in chat. Explaining, writing and reviewing it is.',
@@ -288,6 +629,12 @@ const VERDICT: Record<PlatformCapabilityState, string> = {
   unavailable: 'no',
 }
 
+/** An unverified capability does not get a verdict at all. */
+function line(f: PlatformCapabilityFact): string {
+  if (f.detail === NOT_VERIFIED) return `${f.label} — not verified. ${f.detail}`
+  return `${f.label} — ${VERDICT[f.state]}. ${f.detail}`.trim()
+}
+
 /**
  * The text the product owns for these facts.
  *
@@ -299,7 +646,7 @@ const VERDICT: Record<PlatformCapabilityState, string> = {
 export function renderPlatformCapabilities(facts: readonly PlatformCapabilityFact[]): string {
   const real = facts.filter((f) => f.topic !== 'overview')
   if (real.length === 0) return ''
-  const lines = real.map((f) => `${f.label} — ${VERDICT[f.state]}. ${f.detail}`.trim())
+  const lines = real.map(line)
   if (real.length === 1) return lines[0]!
   return ['Here is where each of those actually stands:', '', ...lines.map((l) => `• ${l}`)].join('\n')
 }
