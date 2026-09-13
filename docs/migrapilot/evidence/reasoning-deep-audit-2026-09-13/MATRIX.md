@@ -29,14 +29,19 @@ probe does not contain.
 | `qwen3:8b` | PASS | **PASS** ¹ | PASS | PASS | PASS | **5/5** |
 | `qwen3:14b` | PASS | **PASS** ¹ | PASS | PASS | PASS | **5/5** |
 | `qwen3-coder:30b` | PASS | PASS | PASS | PASS | PASS | **5/5** |
-| `deepseek-r1:32b` | PASS | PASS | PASS | PASS | *pending* ² | **4/4** |
+| `deepseek-r1:32b` | PASS | PASS | PASS | PASS | **NO-RESULT** ² | **4/4** |
 
 ¹ Scored `FAIL` by the original harness. Both models answered **correctly**; they wrote it as
 `$$\boxed{36} \text{ minutes}$$` and the scorer wanted the contiguous string `"36 minute"`.
 Re-scoring corrected five verdicts across the matrix **without calling a single model again**.
 
-² The final item exceeded 20 minutes of wall clock and had not returned when this was written.
-That duration is itself evidence and is reported as such rather than as a score.
+² 🚨 **NOT A FAILURE — THE HARNESS GAVE UP.** The request returned at **780,259 ms**, which is
+exactly the harness's 780-second curl timeout, with `done_reason: parse_error` and zero
+characters. The model was still working when the measurement was abandoned.
+
+It is reported as `NO-RESULT(timeout)` and **excluded from the score**, because a harness limit
+is not a model verdict. It is, however, decisive **cost** evidence: `deepseek-r1:32b` could not
+answer a one-sentence question inside thirteen minutes.
 
 ---
 
@@ -64,7 +69,8 @@ a lower bound and a load/unload signal — not a measurement of peak use. The su
 - **`qwen3-coder:30b` is the fastest by a distance** (median 6 s) and leaves **0.7 GB** of
   headroom. It is also a *coder* model being considered for a reasoning family.
 - **`deepseek-r1:32b` is the most expensive by an order of magnitude** — 776 s cold, 168 s median,
-  and a final item still unreturned past 20 minutes. It answered everything correctly.
+  and a final item that **never returned at all** inside a 780-second ceiling. It answered
+  correctly everything it managed to answer.
 
 ---
 
@@ -100,7 +106,17 @@ Both are now permanent requirements of the evidence contract, along with recordi
 stripping `<think>` before scoring, separating cold from warm latency, and retaining full
 transcripts so a scoring error costs a re-score rather than another hour of GPU.
 
-**A third defect is still open:** VRAM sampled after generation rather than during it.
+**A third defect was found by the final row**, and it is the same mistake a third time: the
+re-scorer mapped a timed-out request to `UNCLEAR`, i.e. scored an infrastructure outcome as
+model behaviour. `TRUNCATED`, `NO-RESULT(timeout)` and `NO-RESULT(empty)` are now distinct from
+every model verdict.
+
+Three separate times in one audit, this harness blamed a model for its own limits — truncation,
+formatting, and now a timeout. That is the strongest possible argument for the owner's rule that
+**qualification infrastructure is itself a system under test**, and it is why the discriminating
+suite must be built and reviewed before any approval rests on it.
+
+**A fourth defect is still open:** VRAM sampled after generation rather than during it.
 
 ---
 
