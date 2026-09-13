@@ -30,6 +30,16 @@ export type AuditEventType =
   | 'capability.refused'
   /** A tool call blocked at the gate because this authority may not use that class. */
   | 'capability.tool_denied'
+  /**
+   * A live approval refused because it no longer covers the installed weights.
+   *
+   * Deliberately NOT `capability.refused`: that one means authority was denied,
+   * and this one means authority exists but INTEGRITY could not be shown. An
+   * operator reading the log needs to tell "nobody approved this" apart from
+   * "the approved model changed underneath us", because the actions differ —
+   * qualify versus requalify.
+   */
+  | 'qualification.integrity_refused'
   | 'execution.completed'
   | 'execution.failed'
   | 'execution.cancel_requested'

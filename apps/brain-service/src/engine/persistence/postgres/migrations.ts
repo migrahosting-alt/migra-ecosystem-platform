@@ -1455,6 +1455,46 @@ BEGIN
 END $$;
 `;
 
+/**
+ * AN APPROVAL IS A CLAIM ABOUT A MODEL *AGAINST A STATED BAR*, IN A NAMED PLACE.
+ *
+ * 🚨 WHAT WAS MISSING, AND WHY IT MATTERS
+ *
+ * The decision row bound capability, model, digest, evidence run, approver,
+ * calling service, request id and timestamp — everything except WHICH VERSION OF
+ * THE BAR WAS CLEARED and WHERE THE DECISION HAS FORCE.
+ *
+ * Evidence packages already carry `suiteRevision` and `thresholdRevision` (see
+ * src/eval/chatGeneral). The decision did not copy them, so answering "what
+ * standard did this pass?" meant joining through evidence and TRUSTING THAT THE
+ * SUITE HAD NOT BEEN EDITED SINCE. A bar that can move invisibly makes the claim
+ * unfalsifiable, which is the opposite of what a governed decision is for.
+ *
+ * `environment` closes the second hole. Authority is environment-local by
+ * design: evidence is an immutable measurement and may be shared, but a staging
+ * approval must never become production authority. Without this column the row
+ * could not say where it applies, and the separation lived only in the fact that
+ * the two deployments happen to use different databases — a property of the
+ * topology, not of the record.
+ *
+ * Existing rows keep NULL. A NULL policy version is not "version 0", it is "this
+ * predates the binding", and callers must treat it as unverifiable rather than
+ * as satisfying any particular bar.
+ */
+const M29_QUALIFICATION_POLICY_BINDING = `
+ALTER TABLE model_qualification_decisions
+  ADD COLUMN IF NOT EXISTS suite_revision     TEXT,
+  ADD COLUMN IF NOT EXISTS threshold_revision TEXT,
+  ADD COLUMN IF NOT EXISTS policy_version     TEXT,
+  ADD COLUMN IF NOT EXISTS environment        TEXT;
+
+/* Answering "what is approved HERE, right now" is the hot path: the family
+   resolver asks it on every model-families request. */
+CREATE INDEX IF NOT EXISTS model_qualification_env_idx
+  ON model_qualification_decisions (capability, environment, state)
+  WHERE revoked_at IS NULL;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1484,6 +1524,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 26, name: 'tool_idempotency', sql: M26_TOOL_IDEMPOTENCY },
   { version: 27, name: 'mail_connections', sql: M27_MAIL_CONNECTIONS },
   { version: 28, name: 'mail_oauth_pending', sql: M28_MAIL_OAUTH_PENDING },
+  { version: 29, name: 'qualification_policy_binding', sql: M29_QUALIFICATION_POLICY_BINDING },
 ];
 
 

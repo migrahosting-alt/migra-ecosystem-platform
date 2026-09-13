@@ -65,6 +65,7 @@ import { renderTextGlyph } from '../media/glyphRender.js';
 import type { IndexService } from '../rag/indexService.js';
 import { auditStore } from '../observability/auditLog.js';
 import { gateVisionTurn, visionCapabilitySnapshot, approvedByCapability, type VisionGateDeps } from '../media/visionGate.js';
+import { checkApprovalIntegrity, INTEGRITY_REASON_TEXT } from '../models/approvalIntegrity.js';
 import { documentReaderCapability } from '../rag/documentReaderCapability.js';
 import { resolveFamiliesForSurface, resolveFamily } from '../models/modelFamilyResolver.js';
 import { decideOrchestration } from '../orchestration/decide.js';
@@ -391,9 +392,58 @@ export function registerAiRoutes(
           .filter((c): c is string => Boolean(c)),
       ),
     ];
-    const governedByCapability = visionDeps
+    const rawGoverned = visionDeps
       ? await approvedByCapability(visionDeps, declared as never)
       : new Map<string, { qualified: boolean; modelId: string | null; digest: string | null }>();
+
+    /*
+     * 🚨 AN APPROVAL IS FOR BYTES, NOT FOR A NAME — AND UNTIL NOW NOTHING CHECKED.
+     *
+     * The decision has always stored the digest it was granted against, and the
+     * approve route has always refused evidence without one, precisely because
+     * "a tag can be repointed at different weights afterwards". Nothing ever
+     * compared it to the installed model, so that exact failure was live: pull
+     * the same tag, get different bytes, and yesterday's approval covers them.
+     *
+     * FAIL CLOSED, including when the answer is "I cannot tell". A governed
+     * capability that cannot verify its own integrity declines rather than
+     * assumes — otherwise its guarantee quietly degrades to "probably".
+     */
+    const liveDigest = (modelId: string): string | undefined => {
+      const m = models.find((x) => x.id === modelId);
+      return m ? (m.digest ?? '') : undefined;   // '' = present but unverifiable
+    };
+    const integrityRefusals = new Map<string, string>();
+    const governedByCapability = new Map<string, { qualified: boolean; modelId: string | null; digest: string | null }>();
+    for (const [capability, decision] of rawGoverned) {
+      if (!decision.qualified || !decision.modelId) {
+        governedByCapability.set(capability, decision);
+        continue;
+      }
+      const verdict = checkApprovalIntegrity(
+        { modelId: decision.modelId, modelDigest: decision.digest ?? undefined },
+        liveDigest,
+      );
+      if (verdict.ok) {
+        governedByCapability.set(capability, decision);
+        continue;
+      }
+      // Refused, and the reason travels with it so the family can say WHY
+      // rather than collapsing to "no approved model".
+      integrityRefusals.set(capability, INTEGRITY_REASON_TEXT[verdict.reason]);
+      governedByCapability.set(capability, { qualified: false, modelId: null, digest: null });
+      const correlationId = engineCorrelationId(request);
+      await auditStore.append({
+        correlationId,
+        requestId: correlationId,
+        type: 'qualification.integrity_refused',
+        component: 'governance',
+        fields: {
+          capability, modelId: decision.modelId,
+          reason: verdict.reason, detail: verdict.detail,
+        },
+      }).catch(() => {});
+    }
 
     const resolutions = resolveFamiliesForSurface(surface, {
       models,
@@ -445,7 +495,15 @@ export function registerAiRoutes(
           // Live resolution — computed now, never asserted by the catalog.
           available: r.available,
           governed: r.governed,
-          ...(r.unavailableReason ? { unavailableReason: r.unavailableReason } : {}),
+          /*
+           * An integrity refusal is a DIFFERENT fact from "nobody approved one",
+           * and the operator action is different too — requalify vs qualify. It
+           * replaces the resolver's generic sentence rather than sitting beside
+           * it, so the user is told the specific truth.
+           */
+          ...(integrityRefusals.has(f.requirements.governedCapability ?? '')
+            ? { unavailableReason: integrityRefusals.get(f.requirements.governedCapability ?? '')! }
+            : r.unavailableReason ? { unavailableReason: r.unavailableReason } : {}),
           ...(r.selectedBackend ? { selectedBackend: r.selectedBackend } : {}),
           ...(r.basis ? { basis: r.basis } : {}),
         };

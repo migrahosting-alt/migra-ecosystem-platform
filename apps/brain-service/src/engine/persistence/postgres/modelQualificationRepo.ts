@@ -93,6 +93,25 @@ export interface QualificationDecision {
   callingService?: string | undefined;
   requestId?: string | undefined;
   note?: string | undefined;
+  /**
+   * 🚨 WHICH BAR WAS CLEARED, AND WHERE THE DECISION HAS FORCE.
+   *
+   * An approval is a claim about a model AGAINST A STATED BAR, IN A NAMED PLACE.
+   * Without these it could not answer "what standard did this pass?" except by
+   * joining through evidence and trusting the suite had not been edited since —
+   * and a bar that can move invisibly makes the claim unfalsifiable.
+   *
+   * `environment` keeps authority local by record rather than by topology:
+   * evidence is an immutable measurement and may be shared, but a staging
+   * approval must never become production authority.
+   *
+   * UNDEFINED IS NOT "VERSION 0". It means the row predates the binding, and a
+   * caller must treat it as unverifiable rather than as clearing any bar.
+   */
+  suiteRevision?: string | undefined;
+  thresholdRevision?: string | undefined;
+  policyVersion?: string | undefined;
+  environment?: string | undefined;
   decidedAt: number;
   revokedAt?: number | undefined;
   revokedByUserId?: string | undefined;
@@ -133,13 +152,16 @@ export async function insertDecision(client: PoolClient, decision: Qualification
   await client.query(
     `INSERT INTO model_qualification_decisions
        (id, model_id, capability, model_version, model_digest, state, evidence_run_id,
-        approver_user_id, calling_service, request_id, note, decided_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        approver_user_id, calling_service, request_id, note, decided_at,
+        suite_revision, threshold_revision, policy_version, environment)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
     [
       decision.id, decision.modelId, decision.capability, decision.modelVersion ?? null,
       decision.modelDigest ?? null, decision.state, decision.evidenceRunId ?? null,
       decision.approverUserId ?? null, decision.callingService ?? null, decision.requestId ?? null,
       decision.note ?? null, decision.decidedAt,
+      decision.suiteRevision ?? null, decision.thresholdRevision ?? null,
+      decision.policyVersion ?? null, decision.environment ?? null,
     ],
   );
 }
@@ -230,6 +252,10 @@ function hydrate(r: Record<string, unknown>): QualificationDecision {
     callingService: (r.calling_service as string) ?? undefined,
     requestId: (r.request_id as string) ?? undefined,
     note: (r.note as string) ?? undefined,
+    suiteRevision: (r.suite_revision as string) ?? undefined,
+    thresholdRevision: (r.threshold_revision as string) ?? undefined,
+    policyVersion: (r.policy_version as string) ?? undefined,
+    environment: (r.environment as string) ?? undefined,
     decidedAt: num(r.decided_at),
     revokedAt: r.revoked_at === null || r.revoked_at === undefined ? undefined : num(r.revoked_at),
     revokedByUserId: (r.revoked_by_user_id as string) ?? undefined,

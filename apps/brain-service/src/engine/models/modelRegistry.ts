@@ -38,6 +38,20 @@ export interface ModelDescriptor {
   paramCount?: number;
   contextLength?: number;
   sizeBytes?: number;
+  /**
+   * THE WEIGHTS THIS TAG CURRENTLY POINTS AT.
+   *
+   * 🚨 A TAG IS NOT AN IDENTITY. `deepseek-r1:32b` is a moving pointer: pull it
+   * again and the same name can carry different bytes. A qualification approval
+   * records the digest it was granted against precisely so the approval cannot
+   * silently transfer to weights nobody evaluated — but the approval could not
+   * be CHECKED until the live digest was available here to compare against.
+   *
+   * Absent when the provider does not report one, which is itself decisive:
+   * integrity cannot be verified, so a governed capability must refuse rather
+   * than assume.
+   */
+  digest?: string;
   capabilities: ModelCapabilities;
   tier: ModelTier;
   /**
@@ -227,6 +241,9 @@ export class ModelRegistry {
       paramCount,
       contextLength: m.details?.context_length,
       sizeBytes: m.size,
+      // Ollama reports this on /api/tags; it is the only identity that survives
+      // a tag being repointed.
+      ...(typeof m.digest === 'string' && m.digest ? { digest: normaliseDigest(m.digest) } : {}),
       capabilities,
       tier: tierFor(paramCount),
       hosting: isRemotelyHosted(name, m.size, paramCount) ? 'remote' : 'on-device',
@@ -263,6 +280,20 @@ export class ModelRegistry {
  * that trips neither signal is admitted, which is the pre-existing behaviour, so
  * this narrows the gap without pretending to close it.
  */
+/**
+ * One spelling for a digest, so a comparison can never fail on formatting.
+ *
+ * Ollama reports a bare 64-hex string on /api/tags; the qualification record
+ * stores `sha256:` + 64 hex, because that is what an approval pattern-enforces.
+ * Comparing those two directly would report a mismatch for identical weights —
+ * a fail-closed refusal for a formatting difference, which erodes trust in the
+ * check far faster than it protects anything.
+ */
+export function normaliseDigest(raw: string): string {
+  const hex = raw.trim().toLowerCase().replace(/^sha256:/, '');
+  return /^[0-9a-f]{64}$/.test(hex) ? `sha256:${hex}` : raw.trim().toLowerCase();
+}
+
 export function isRemotelyHosted(name: string, sizeBytes?: number, paramCount?: number): boolean {
   if (/-cloud\b|:cloud\b|-cloud$/i.test(name)) return true;
   // A billion parameters is never under a megabyte of weights.
@@ -297,6 +328,8 @@ interface OllamaModel {
   name?: string;
   model?: string;
   size?: number;
+  /** sha256 of the manifest — the identity a tag does not provide. */
+  digest?: string;
   capabilities?: string[];
   details?: { family?: string; parameter_size?: string; context_length?: number };
 }
