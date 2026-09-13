@@ -307,6 +307,19 @@ echo "$RUNNING" | grep -q "\"release\":\"$REL\""     || fail "$UP IS SERVING A D
 echo "$RUNNING" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "$UP IS SERVING A DIFFERENT BUILD — roll back"
 
 # ── 11. rollback stays available and is printed, not remembered ────────────
+#
+# 🚨 THE RECOVERY INSTRUCTION IS ITSELF A PRODUCT, AND THIS ONE WAS DANGEROUS.
+#
+# It used to print `ln -sfn $PREVIOUS $ROOT/current && systemctl restart`, which
+# repoints `current` and never touches `previous`. Once `previous` became a
+# recorded pointer that line started producing current == previous: the service
+# moves back and the way back is erased, and retention then sees rollback ==
+# active and demotes the real spare.
+#
+# Handing an operator a known-dangerous command AT THE WORST MOMENT is worse
+# than handing them nothing. It now names the governed mechanism, which plans
+# first, checks both releases with the shared completeness predicate, swaps both
+# pointers together and then asks the running process what it serves.
 cat <<DONE
 
 DEPLOYED — and proven, link by link:
@@ -316,8 +329,10 @@ DEPLOYED — and proven, link by link:
   activated        current -> $REL
   RUNNING PROCESS  reports commit $SHORT / release $REL / buildId $BUILD_ID
 
-11. rollback:
-  ssh $HOST "sudo ln -sfn $PREVIOUS $ROOT/current && sudo systemctl restart $UNIT"
+11. rollback — plan it first, then apply:
+  docs/migrapilot/rollback.sh --target $DEPLOY_TARGET_NAME --app consumer
+  docs/migrapilot/rollback.sh --target $DEPLOY_TARGET_NAME --app consumer --apply
+  (rolls back to $(basename "$PREVIOUS"), and is its own inverse)
 
 NOT ACCEPTED. This script proves what is RUNNING; it does not prove the product
 is correct. Hand back for real-system retest.

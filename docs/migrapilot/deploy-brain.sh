@@ -169,7 +169,20 @@ ROLLBACK_OK="$(ssh -n "$HOST" "$(release_completeness_test brain "$PREVIOUS") &&
 [ "$ROLLBACK_OK" = "yes" ] \
   || fail "the rollback target $PREVIOUS cannot serve — a brain release needs $(release_requirements brain). Deploying now would leave no validated way back."
 echo "   rollback target is complete and servable"
-ROLLBACK_CMD="ssh $HOST \"sudo ln -sfn $PREVIOUS $ROOT/current && sudo systemctl restart $UNIT\""
+# 🚨 THE RECOVERY INSTRUCTION IS ITSELF A PRODUCT, AND THIS ONE WAS DANGEROUS.
+#
+# This string is what an operator copies at the worst possible moment — it is
+# interpolated into four "IS SERVING A DIFFERENT …" failures and into the final
+# summary. It used to be `ln -sfn $PREVIOUS $ROOT/current && systemctl restart`,
+# which repoints `current` and never touches `previous`. Once `previous` became
+# a recorded pointer that line started producing current == previous: the
+# service moves back and the way back is erased, and retention then sees
+# rollback == active and demotes the real spare.
+#
+# It now names the governed mechanism, which plans first, checks BOTH releases
+# with the shared completeness predicate, swaps both pointers together, and then
+# asks the running process what it actually serves.
+ROLLBACK_CMD="docs/migrapilot/rollback.sh --target $DEPLOY_TARGET_NAME --app brain --apply   (run it without --apply first to see the plan)"
 
 # ── 7. build the release directory ─────────────────────────────────────────
 step "7. constructing the release directory"
