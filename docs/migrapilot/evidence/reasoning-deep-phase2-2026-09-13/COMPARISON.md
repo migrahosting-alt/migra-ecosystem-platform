@@ -142,12 +142,46 @@ What is recorded above comes from the suite's own per-generation sampler and fro
 capacity arithmetic, both of which are sufficient for the eviction finding. The finer
 device-level fields are **not** evidence I hold, and are listed below as outstanding.
 
-## Still outstanding
+---
 
-- **device-level contention telemetry** — must be re-collected with a collector that
-  writes incrementally
-- **cold-start trials under contention**
-- **licence / provenance** — not obtainable from the Ollama catalog; needs an
-  authoritative upstream source mapped to the exact digest
+## Licence and provenance
+
+Read from the model manifests via `/api/show`, which is more than `/api/tags` carries
+and still **not an authoritative upstream attestation**:
+
+| | `qwen3:14b` | `qwen3:8b` |
+| --- | --- | --- |
+| licence text present | yes, Apache License (11,305 bytes) | yes, identical |
+| `general.license` tag | **absent** | `apache-2.0` |
+| publisher / repo URL | **absent** | **absent** |
+| upstream source attestation | **absent** | **absent** |
+
+🚨 **Two gaps that block signing, independent of any capability result.**
+
+1. **This is a redistributor's claim.** The licence text is what the Ollama registry
+   serves. Nothing here is signed by the publisher, and `qwen3:14b` does not even carry
+   the machine-readable licence tag its sibling does.
+2. **The digest does not identify the weights.** `/api/tags` reports the **manifest**
+   sha256, and `model_info` contains no provenance keys at all — only
+   `general.quantization_version`. So there is no recorded mapping from the digest an
+   approval would bind to a publisher-attested artifact.
+
+An approval binds a digest precisely so it cannot transfer to bytes nobody evaluated.
+A digest that identifies a redistributor's manifest, with no chain to the upstream
+publisher, weakens that guarantee — and that is a **governance** finding, not a model
+one. It applies to every candidate equally.
+
+---
+
+## Not run, and recorded as not run
+
+- **device-level contention telemetry** (`nvidia-smi`: minimum free VRAM, eviction of
+  other compute processes, utilisation). The collector never started and was written to
+  emit only at the end. **Not re-run**, per the owner's instruction not to spend further
+  GPU confirming what the capacity arithmetic and 55 transitions already establish.
+- **cold-start trials under contention.**
+
+Neither changes the conclusion. Both are listed so that the absence is a recorded fact
+rather than an unnoticed gap.
 
 **`reasoning.deep` QUALIFICATION IN PROGRESS — NO APPROVAL PERMITTED.**
