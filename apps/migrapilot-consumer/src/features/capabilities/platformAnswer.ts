@@ -216,7 +216,10 @@ const FEATURE_STATE_FRAMES: readonly RegExp[] = [
   // "Is X … yet?" — "yet" asks about a state that is expected to change.
   /\b(?:is|are|does|do|has|have|can)\b[^?.!]{0,50}?\byet\b/i,
   // "What are the limits on …?" — a limit belongs to whatever enforces it.
-  /\b(?:what|which)\s+(?:are\s+)?(?:the\s+)?(?:limits?|limitations?|restrictions?|maximum|max)\b/i,
+  /\b(?:what|which)\s+(?:is\s+|are\s+)?(?:the\s+)?(?:limits?|limitations?|restrictions?|maximum|max|biggest|largest|longest)\b/i,
+  // "How many files can I keep?" — "can I" plus a verb only this product
+  // performs is a question about what this product permits.
+  /\bhow\s+(?:many|much|large|big|long)\b[^?.!]{0,60}?\b(?:can|may)\s+i\s+(?:keep|store|upload|attach|send|save|add)\b/i,
 ]
 
 /**
@@ -225,7 +228,7 @@ const FEATURE_STATE_FRAMES: readonly RegExp[] = [
  * a question about this product.
  */
 const OTHER_PRODUCT =
-  /\b(?:chatgpt|gpt-?[0-9]|openai|claude|gemini|bard|copilot|cursor|notion|slack|excel|word|powerpoint|photoshop|acrobat|adobe|google\s+docs|microsoft|salesforce)\b/i
+  /\b(?:chatgpt|gpt-?[0-9]|openai|claude|gemini|bard|copilot|cursor|notion|slack|excel|word|powerpoint|photoshop|acrobat|adobe|google\s+docs|microsoft|salesforce|dropbox|google\s+drive|onedrive|icloud|sharepoint|box\.com|s3|github|gitlab|jira|trello|zoom|teams|discord|whatsapp)\b/i
 
 /* ── axis 2: facet ───────────────────────────────────────────────────── */
 
@@ -256,7 +259,7 @@ const FACET_PATTERNS: ReadonlyArray<{ facet: CapabilityFacet; pattern: RegExp }>
   },
   {
     facet: 'limits',
-    pattern: /\b(?:limits?|limitations?|restrictions?|maximum|max|cap|quota)\b|\bhow\s+(?:large|big|many|much|long)\b/i,
+    pattern: /\b(?:limits?|limitations?|restrictions?|maximum|max|cap|quota|biggest|largest|longest)\b|\bhow\s+(?:large|big|many|much|long)\b/i,
   },
   {
     facet: 'modality',
@@ -332,7 +335,7 @@ const TOPIC_PATTERNS: ReadonlyArray<{ topic: PlatformTopic; pattern: RegExp }> =
   {
     topic: 'documents',
     pattern:
-      /\b(?:pdfs?|docx?|documents?|spreadsheets?|csv|xlsx|attachments?|attach(?:ed|ing)?|markdown)\b|\bfile\s*types?\b|\bfile\s*formats?\b|\btext\s+files?\b/i,
+      /\b(?:pdfs?|docx?|documents?|spreadsheets?|csv|xlsx|attachments?|attach(?:ed|ing)?|markdown)\b|\bfile\s*types?\b|\bfile\s*formats?\b|\btext\s+files?\b|\bfiles?\b[^?.!]{0,25}?\b(?:can\s+i|i\s+can)\s+(?:upload|attach|send|read)\b/i,
   },
   {
     topic: 'audio',
@@ -347,7 +350,7 @@ const TOPIC_PATTERNS: ReadonlyArray<{ topic: PlatformTopic; pattern: RegExp }> =
   {
     topic: 'files',
     pattern:
-      /\bmy\s+(?:files?|computer|drive|machine|laptop|uploads?|hard\s+drive)\b|\blocal\s+files?\b|\bfile\s+system\b|\bfilesystem\b|\bfile\s+library\b|\buploaded\s+files?\b|\b(?:open|access|read|see|get|browse)\s+(?:a\s+|the\s+)?files?\b/i,
+      /\bmy\s+(?:files?|computer|drive|machine|laptop|uploads?|hard\s+drive)\b|\blocal\s+files?\b|\bfile\s+system\b|\bfilesystem\b|\bfile\s+library\b|\buploaded\s+files?\b|\b(?:open|access|read|see|get|browse|keep|store|upload|save)\s+(?:a\s+|the\s+|many\s+)?files?\b|\bhow\s+many\s+files?\b|\bfiles?\b[^?.!]{0,25}?\b(?:can\s+i|i\s+can)\s+(?:keep|store|save)\b/i,
   },
   { topic: 'email', pattern: /\b(?:e-?mails?|inbox|gmail|mailbox)\b|\bmail\s+account\b/i },
   {
@@ -544,10 +547,19 @@ function fromRegistry(
   }
 }
 
-/** Whole megabytes, the unit the product already uses for these numbers. */
+/**
+ * Megabytes, in the product's own arithmetic.
+ *
+ * 🚨 1_048_576, NOT 1_000_000, AND FLOOR, NOT ROUND. Found on deployed staging:
+ * this said "26 MB" while the file-too-large message on the very next turn said
+ * "25 MB" — one limit, two numbers, from two surfaces of the same product. The
+ * env vars are named `_MB` and `megabytes()` multiplies by 1024×1024, so this
+ * must divide the same way the other surface does (`route.ts`, the
+ * `file_too_large_to_read` branch) or the product contradicts itself.
+ */
 function mb(bytes: number | undefined): string | null {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return null
-  return `${Math.round(bytes / 1_000_000)} MB`
+  return `${Math.floor(bytes / 1_048_576)} MB`
 }
 
 /** The limits sentence, or nothing at all when no authority supplied them. */

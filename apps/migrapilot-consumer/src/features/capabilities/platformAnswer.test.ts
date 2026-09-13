@@ -466,6 +466,17 @@ const ORDINARY_CORPUS: readonly string[] = [
   'Has the deployment finished yet?',
   'What is the maximum size of a Postgres row?',
   'Is the invoice approved yet?',
+  // 🚨 The limits family collides hardest with ordinary questions, because
+  // "how many X can I keep" is a question anyone asks about anything.
+  'How many files can I keep in Dropbox?',
+  'How many photos can I store on iCloud?',
+  'How many people can I invite to a Zoom call?',
+  'How much RAM can I install in this laptop?',
+  'How many rows can I store in SQLite?',
+  'How long can I keep leftovers in the fridge?',
+  'How big can a Docker image be?',
+  'What is the biggest city in Haiti?',
+  'What is the largest number JavaScript can represent?',
 ]
 
 const PRODUCT_CORPUS: readonly string[] = [
@@ -479,6 +490,9 @@ const PRODUCT_CORPUS: readonly string[] = [
   'Is your email integration connected?',
   'Can this assistant execute code?',
   'You cannot search the web, correct?',
+  'How many files can I keep?',
+  'How large a file can I upload?',
+  'What is the biggest file I can send?',
 ]
 
 test('CORPUS: no ordinary question is answered with a capability table', () => {
@@ -511,7 +525,7 @@ test('CORPUS: every product question renders product-owned text, not a stub', ()
 test('"what are the limits" answers with the limit that is actually enforced', () => {
   const withLimits: PlatformCapabilitySnapshot = {
     ...STAGING,
-    limits: { maxFileBytes: 50_000_000, maxFiles: 2000, maxExtractBytes: 25_000_000 },
+    limits: { maxFileBytes: 50 * 1024 * 1024, maxFiles: 2000, maxExtractBytes: 25 * 1024 * 1024 },
   }
   assert.deepEqual(platformCapabilityTopics('What are the limits on the files I can attach?'), ['documents'])
   const doc = platformCapabilityFact('documents', withLimits).detail
@@ -526,4 +540,31 @@ test('no limits supplied means no sentence invented about limits', () => {
   const doc = platformCapabilityFact('documents', STAGING).detail
   assert.doesNotMatch(doc, /Up to .* per file/)
   assert.doesNotMatch(platformCapabilityFact('files', STAGING).detail, /You can keep up to/)
+})
+
+test('🚨 one limit, one number — the capability answer matches the other surface', () => {
+  // Found on deployed staging: this said "26 MB" while the file-too-large
+  // message said "25 MB". Same limit, two surfaces, two numbers. The env vars
+  // are named _MB and megabytes() multiplies by 1024×1024, so the arithmetic
+  // here must be the arithmetic in the route's file_too_large_to_read branch.
+  const MAX_EXTRACT_BYTES = 25 * 1024 * 1024
+  const otherSurface = `${Math.floor(MAX_EXTRACT_BYTES / 1_048_576)} MB`
+  assert.equal(otherSurface, '25 MB')
+  const withLimits: PlatformCapabilitySnapshot = {
+    ...STAGING,
+    limits: { maxFileBytes: 256 * 1024 * 1024, maxExtractBytes: MAX_EXTRACT_BYTES, maxFiles: 2000 },
+  }
+  const detail = platformCapabilityFact('documents', withLimits).detail
+  assert.ok(detail.includes(`the first ${otherSurface}`), `said: ${detail}`)
+  assert.match(detail, /Up to 256 MB per file/)
+})
+
+test('"How many files can I keep?" is a limits question, not a question for the model', () => {
+  // Measured on deployed staging: it reached the model and was answered "as
+  // many as your device's storage allows … Google Drive … Office 365."
+  const intent = classifyCapabilityIntent('How many files can I keep?')
+  assert.equal(intent.confidence, 'high', intent.reason)
+  assert.deepEqual(intent.topics, ['files'])
+  const withLimits: PlatformCapabilitySnapshot = { ...STAGING, limits: { maxFiles: 2000 } }
+  assert.match(platformCapabilityFact('files', withLimits).detail, /You can keep up to 2,000 files\./)
 })
