@@ -505,3 +505,25 @@ test('CORPUS: every product question renders product-owned text, not a stub', ()
     assert.match(text, / — (yes|no|not right now|not verified)\./, prompt)
   }
 })
+
+/* ── limits come from the authority, never from this file ───────────────── */
+
+test('"what are the limits" answers with the limit that is actually enforced', () => {
+  const withLimits: PlatformCapabilitySnapshot = {
+    ...STAGING,
+    limits: { maxFileBytes: 50_000_000, maxFiles: 2000, maxExtractBytes: 25_000_000 },
+  }
+  assert.deepEqual(platformCapabilityTopics('What are the limits on the files I can attach?'), ['documents'])
+  const doc = platformCapabilityFact('documents', withLimits).detail
+  assert.match(doc, /Up to 50 MB per file, and text is read from the first 25 MB of it\./)
+  const files = platformCapabilityFact('files', withLimits).detail
+  assert.match(files, /You can keep up to 2,000 files\./)
+})
+
+test('no limits supplied means no sentence invented about limits', () => {
+  // 🚨 The failure mode this replaces was a true statement that was not an
+  // answer. Its replacement must not become a made-up number.
+  const doc = platformCapabilityFact('documents', STAGING).detail
+  assert.doesNotMatch(doc, /Up to .* per file/)
+  assert.doesNotMatch(platformCapabilityFact('files', STAGING).detail, /You can keep up to/)
+})

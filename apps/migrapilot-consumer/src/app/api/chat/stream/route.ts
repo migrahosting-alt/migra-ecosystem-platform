@@ -46,7 +46,7 @@ import {
 } from '@/server/brain/seams'
 import { listCapabilities, orchestrateTurn } from '@/server/brain/seams'
 import { NO_AUTHORITY } from '@migrapilot/shared-types/project-authority'
-import { MAX_EXTRACT_BYTES, listFiles, userDirectory } from '@/server/files/storage'
+import { MAX_EXTRACT_BYTES, MAX_FILE_BYTES, MAX_FILES, listFiles, userDirectory } from '@/server/files/storage'
 import { visionCapability } from '@/server/files/visionCapability'
 import { micAvailability } from '@/server/brain/view'
 import { transcriptionCapability } from '@/server/brain/seams'
@@ -998,6 +998,9 @@ export async function POST(request: Request): Promise<Response> {
                 }))
               : null,
           vision: vision ? { state: vision.state, message: vision.message } : null,
+          // The attachment authority's own numbers, so "what are the limits?"
+          // answers with the limit that is actually enforced.
+          limits: { maxFileBytes: MAX_FILE_BYTES, maxFiles: MAX_FILES, maxExtractBytes: MAX_EXTRACT_BYTES },
           speech: speech
             ? { state: speech.state, ...(speech.state === 'disabled' ? { reason: speech.reason } : {}) }
             : null,

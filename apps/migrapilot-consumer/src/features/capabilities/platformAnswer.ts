@@ -97,6 +97,16 @@ export interface PlatformCapabilitySnapshot {
   vision: { state: string; message: string } | null
   /** The speech runtime's own verdict. */
   speech: { state: string; reason?: string } | null
+  /**
+   * The attachment authority's own numbers.
+   *
+   * 🚨 PASSED IN, NOT RETYPED HERE. "What are the limits on the files I can
+   * attach?" is one of the question families this layer owns, and it was
+   * answering with a capability that named no limit at all — true, and not an
+   * answer. A constant copied into this file would be a second opinion that
+   * drifts the first time the env var changes.
+   */
+  limits?: { maxFileBytes?: number; maxFiles?: number; maxExtractBytes?: number }
 }
 
 /* ------------------------------------------------------------------ *
@@ -534,6 +544,21 @@ function fromRegistry(
   }
 }
 
+/** Whole megabytes, the unit the product already uses for these numbers. */
+function mb(bytes: number | undefined): string | null {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return null
+  return `${Math.round(bytes / 1_000_000)} MB`
+}
+
+/** The limits sentence, or nothing at all when no authority supplied them. */
+function documentLimits(snapshot: PlatformCapabilitySnapshot): string {
+  const perFile = mb(snapshot.limits?.maxFileBytes)
+  const extract = mb(snapshot.limits?.maxExtractBytes)
+  if (!perFile && !extract) return ''
+  if (perFile && extract) return ` Up to ${perFile} per file, and text is read from the first ${extract} of it.`
+  return ` Up to ${perFile ?? extract} per file.`
+}
+
 const SIGN_IN = 'Sign in and this becomes available — it needs an account to hold your files.'
 
 /** Resolve one topic against the authorities. Never guesses. */
@@ -545,12 +570,16 @@ export function platformCapabilityFact(
   switch (topic) {
     case 'documents':
       return snapshot.signedIn
-        ? { topic, label, state: 'available', detail: 'PDF, CSV, JSON, Markdown, plain text, code and .xlsx spreadsheets. Attach one and ask about it — answers cite the file and the lines they came from.' }
+        ? { topic, label, state: 'available', detail: `PDF, CSV, JSON, Markdown, plain text, code and .xlsx spreadsheets. Attach one and ask about it — answers cite the file and the lines they came from.${documentLimits(snapshot)}` }
         : { topic, label, state: 'blocked', detail: SIGN_IN }
 
     case 'files':
       return snapshot.signedIn
-        ? { topic, label, state: 'available', detail: 'Files you have already uploaded stay in your library and can be attached again without re-sending them. Local paths on your own computer are not readable.' }
+        ? { topic, label, state: 'available', detail: `Files you have already uploaded stay in your library and can be attached again without re-sending them. Local paths on your own computer are not readable.${
+            typeof snapshot.limits?.maxFiles === 'number' && snapshot.limits.maxFiles > 0
+              ? ` You can keep up to ${snapshot.limits.maxFiles.toLocaleString('en-US')} files.`
+              : ''
+          }` }
         : { topic, label, state: 'blocked', detail: SIGN_IN }
 
     case 'memory':
