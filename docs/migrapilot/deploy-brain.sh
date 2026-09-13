@@ -81,8 +81,11 @@ HOST="$DEPLOY_HOST"
 ROOT="$DEPLOY_BRAIN_ROOT"
 UNIT="$DEPLOY_BRAIN_UNIT"
 BOOT_PORT="$DEPLOY_BRAIN_BOOT_PORT"
-PROD_BIND="$DEPLOY_BRAIN_BIND"
-PROD_PORT="$DEPLOY_BRAIN_PORT"
+# Named for what they are, not for one of the targets they can hold. These
+# resolve from deploy-targets.sh like everything else; the PROD_ prefix was a
+# leftover that read as a hard-coded production address at a glance.
+VERIFY_BIND="$DEPLOY_BRAIN_BIND"
+VERIFY_PORT="$DEPLOY_BRAIN_PORT"
 
 # 🚨 SAID OUT LOUD, EVERY TIME. A deployment that does not announce where it is
 # going is one somebody runs from the wrong terminal.
@@ -122,7 +125,7 @@ step "3. full brain gate (build + tests)"
 # code-only.
 step "4. schema migration delta"
 BUILT_SCHEMA="$(cd "$APP" && node -e "import('./dist/src/engine/persistence/postgres/migrations.js').then(m=>console.log(m.latestVersion()))")"
-LIVE_SCHEMA="$(ssh -n "$HOST" "curl -s --max-time 8 http://$PROD_BIND:$PROD_PORT/health" \
+LIVE_SCHEMA="$(ssh -n "$HOST" "curl -s --max-time 8 http://$VERIFY_BIND:$VERIFY_PORT/health" \
   | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const h=JSON.parse(s);const f=JSON.stringify(h).match(/\"schemaVersion\":\s*(\d+)/);console.log(f?f[1]:'unknown')}catch{console.log('unknown')}})")"
 echo "   built artifact: schema $BUILT_SCHEMA   production: schema $LIVE_SCHEMA"
 [ "$LIVE_SCHEMA" = "unknown" ] && fail "could not read production schema version; refusing to guess"
@@ -317,26 +320,35 @@ step "13. THE RUNNING PRODUCTION PROCESS REPORTS THE SAME RELEASE"
 # have ordered a rollback of a good release.
 RUNNING=""
 for attempt in 1 2 3 4 5; do
-  RUNNING="$(ssh -n -o ConnectTimeout=15 "$HOST" "curl -s --max-time 10 http://$PROD_BIND:$PROD_PORT/api/version" 2>/dev/null || true)"
+  RUNNING="$(ssh -n -o ConnectTimeout=15 "$HOST" "curl -s --max-time 10 http://$VERIFY_BIND:$VERIFY_PORT/api/version" 2>/dev/null || true)"
   [ -n "$RUNNING" ] && break
   echo "   attempt $attempt: no answer from the running service, retrying…"
   sleep 5
 done
 
 if [ -z "$RUNNING" ]; then
-  fail "COULD NOT VERIFY what production is serving — no answer after 5 attempts.
+  fail "COULD NOT VERIFY what $DEPLOY_TARGET_NAME is serving — no answer after 5 attempts.
    This is NOT evidence of a bad release: the symlink was swapped and the unit restarted.
    Check before deciding anything, and roll back ONLY if it disagrees:
-     ssh $HOST \"curl -s http://$PROD_BIND:$PROD_PORT/api/version\"
+     ssh $HOST \"curl -s http://$VERIFY_BIND:$VERIFY_PORT/api/version\"
    Expected: commit $COMMIT / release $REL / buildId sha256:$BUILD_ID
    Rollback if needed: $ROLLBACK_CMD"
 fi
 
 echo "   $RUNNING"
-echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""            || fail "PRODUCTION IS SERVING A DIFFERENT COMMIT — roll back: $ROLLBACK_CMD"
-echo "$RUNNING" | grep -q "\"release\":\"$REL\""              || fail "PRODUCTION IS SERVING A DIFFERENT RELEASE — roll back: $ROLLBACK_CMD"
-echo "$RUNNING" | grep -q "\"buildId\":\"sha256:$BUILD_ID\""  || fail "PRODUCTION IS SERVING A DIFFERENT BUILD — roll back: $ROLLBACK_CMD"
-echo "$RUNNING" | grep -q '"stamped":true'                    || fail "production artifact is not stamped — roll back: $ROLLBACK_CMD"
+# 🚨 NAME THE ENVIRONMENT THAT WAS ACTUALLY CHECKED.
+#
+# These four lines said "PRODUCTION IS SERVING A DIFFERENT COMMIT" on every
+# target, so a staging deploy that failed its last check told the operator that
+# PRODUCTION was wrong — at the one moment a person is deciding whether to roll
+# production back. The address beside it was already target-resolved, so the
+# sentence and the evidence behind it disagreed. The consumer script resolves
+# this from the target; this one did not.
+UP="$(printf '%s' "$DEPLOY_TARGET_NAME" | tr '[:lower:]' '[:upper:]')"
+echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""            || fail "$UP IS SERVING A DIFFERENT COMMIT — roll back: $ROLLBACK_CMD"
+echo "$RUNNING" | grep -q "\"release\":\"$REL\""              || fail "$UP IS SERVING A DIFFERENT RELEASE — roll back: $ROLLBACK_CMD"
+echo "$RUNNING" | grep -q "\"buildId\":\"sha256:$BUILD_ID\""  || fail "$UP IS SERVING A DIFFERENT BUILD — roll back: $ROLLBACK_CMD"
+echo "$RUNNING" | grep -q '"stamped":true'                    || fail "the $DEPLOY_TARGET_NAME artifact is not stamped — roll back: $ROLLBACK_CMD"
 
 cat <<DONE
 

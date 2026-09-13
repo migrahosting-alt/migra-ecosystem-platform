@@ -229,10 +229,43 @@ RUNNING PROCESS  reports commit 2d1793e9 / release capability-intent-09133
 ```
 
 Two earlier attempts are part of the record. `capability-intent-09132` **aborted at step 1**
-because `docs/migrapilot` was dirty with the evidence edits — the guard working. Its wrapper
-still reported exit 0, so the check that caught it was reading `/api/version` and seeing the
-**old** release, not the exit code. Proving what is running is the only link that cannot be
-faked.
+because `docs/migrapilot` was dirty with the evidence edits — the guard working.
+
+### 🚨 CORRECTION — I reported an exit-code defect that does not exist
+
+I first wrote that the deploy script "reported exit 0" on that abort. **That was wrong, and the
+error was mine.** My invocation was:
+
+```
+bash deploy-consumer.sh … > log 2>&1; echo "EXIT=$?"; grep -A8 'DEPLOYED' log || tail -20 log
+```
+
+The `echo` printed `EXIT=1` — the script's own status, and correct. The "exit 0" I saw and
+repeated was the **compound command's** status, which is that of its last element, a successful
+`tail`. I attributed my shell's aggregate status to the script.
+
+Measured directly, one guard per invocation, nothing else in the command:
+
+| guard | exit |
+| --- | --- |
+| no `--target` given | **2** |
+| unknown `--target` | **2** |
+| release name containing a slash | **1** |
+| release name starting with a dot | **1** |
+| empty release name | **1** |
+| **dirty tree (tracked change)** | **1** |
+
+And by inspection every later failure routes through `fail()`, which is
+`printf … >&2; exit 1`: gate failure is a bare subshell under `set -e`; the transfer is a
+`tar | ssh` pipeline covered by `pipefail`; boot-unit start, liveness, HTTP status and all six
+identity comparisons each end in `|| fail …`. The single `|| true` in the file is deliberate and
+is paired with an explicit `if [ -z "$RUNNING" ]; then fail` — it exists so a transient SSH
+reset cannot be mistranslated into "serving the wrong commit", which is the same refusal
+discipline as the capability layer.
+
+What actually caught the aborted deploy was reading `/api/version` and seeing the **old**
+release. That remains the point worth keeping: proving what is RUNNING is the link that cannot
+be faked. But it was not compensating for a dishonest exit code.
 
 ### Production, confirmed untouched after the deploy
 
