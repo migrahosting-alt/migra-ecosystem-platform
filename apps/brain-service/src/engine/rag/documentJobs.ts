@@ -294,12 +294,34 @@ export class DocumentJobRunner {
   }
 }
 
+/**
+ * The reader itself is missing, as opposed to the document being unreadable.
+ *
+ * One predicate, used by BOTH the state and the sentence, so the two can never
+ * disagree about which kind of failure this was.
+ */
+export function isReaderUnavailable(error: unknown): boolean {
+  const message = String((error as { message?: string })?.message ?? error);
+  // The binary name and ENOENT can appear in either order — Node reports
+  // "spawn pdftoppm ENOENT" — so neither is assumed to come first.
+  return /ENOENT/i.test(message) && /(pdftoppm|pdfinfo|tesseract)/i.test(message);
+}
+
 /** Map a thrown error onto the state the user should see. */
 export function classifyFailure(error: unknown): DocumentReadiness['state'] {
   const failure = (error as { failure?: { kind?: string } })?.failure?.kind;
   if (failure === 'encrypted') return 'encrypted';
   if (failure === 'corrupt') return 'corrupt';
   if (failure === 'no_text_layer') return 'no_text_layer';
+  /*
+   * 🚨 CHECKED BEFORE ocr_failed, BECAUSE IT IS NOT AN OCR FAILURE.
+   *
+   * A missing pdftoppm/pdfinfo/tesseract means OCR never ran. Reporting that as
+   * `ocr_failed` tells the user their scan defeated the recogniser and sends
+   * them off to re-scan a perfectly good book, when the truthful answer is that
+   * nothing on this server could have read it and they should do nothing.
+   */
+  if (isReaderUnavailable(error)) return 'reader_unavailable';
   return 'ocr_failed';
 }
 
@@ -316,5 +338,7 @@ export function describeFailure(error: unknown): string {
   const missingBinary = /ENOENT/i.test(message);
   if (missingBinary && /(pdftoppm|pdfinfo)/i.test(message)) return 'the page renderer is not available on this server';
   if (missingBinary && /tesseract/i.test(message)) return 'the text recogniser is not available on this server';
+  // Anything else that reaches `isReaderUnavailable` still gets a sentence that
+  // names the server rather than the file, so the state and the prose agree.
   return message.slice(0, 200);
 }

@@ -17,6 +17,8 @@ export interface ProcessingStatus {
   state:
     | 'stored' | 'queued' | 'processing' | 'ready' | 'ready_with_unplaced_pages'
     | 'no_text_layer' | 'ocr_failed' | 'corrupt' | 'encrypted' | 'too_large_to_process'
+    /** The server lacks the renderer/recogniser. The document is not the problem. */
+    | 'reader_unavailable'
   stage?: string
   detail?: string
   description: string

@@ -64,6 +64,38 @@ test('extraction failures keep their specific state', () => {
   assert.equal(classifyFailure({ failure: { kind: 'no_text_layer' } }), 'no_text_layer');
 });
 
+test('🚨 a missing reader is its own STATE, not a failed OCR run', () => {
+  /*
+   * The sentence above was already right and the state was not: a missing
+   * binary was classified `ocr_failed`, so every caller that branched on the
+   * state saw an OCR attempt that never happened — and told the user their
+   * scan had defeated the recogniser. The prose said "operator problem" while
+   * the contract beside it said "your document". Callers must not have to read
+   * the sentence to find out which.
+   */
+  assert.equal(classifyFailure(new Error('spawn pdftoppm ENOENT')), 'reader_unavailable');
+  assert.equal(classifyFailure(new Error('spawn pdfinfo ENOENT')), 'reader_unavailable');
+  assert.equal(classifyFailure(new Error('spawn tesseract ENOENT')), 'reader_unavailable');
+  // Node reports the name and ENOENT in either order.
+  assert.equal(classifyFailure(new Error('ENOENT: no such file, spawn pdftoppm')), 'reader_unavailable');
+});
+
+test('the state and the sentence agree about who failed', () => {
+  // One predicate decides both, so they cannot drift apart.
+  for (const message of ['spawn pdftoppm ENOENT', 'spawn tesseract ENOENT']) {
+    const error = new Error(message);
+    assert.equal(classifyFailure(error), 'reader_unavailable');
+    assert.match(describeFailure(error), /not available on this server/);
+  }
+});
+
+test('a genuine OCR failure is still ocr_failed', () => {
+  // The guard must not swallow real extraction failures into "not my fault".
+  assert.equal(classifyFailure(new Error('page 3 produced no glyphs')), 'ocr_failed');
+  // ENOENT on something that is NOT a reader binary is not a reader problem.
+  assert.equal(classifyFailure(new Error('ENOENT: no such file or directory, open /tmp/page-3.png')), 'ocr_failed');
+});
+
 test('active jobs are reported so boot recovery does not steal them', async () => {
   const runner = new DocumentJobRunner({ persist: async () => {} });
   await runner.enqueue(scope, 'busy.pdf', '/nonexistent/busy.pdf');

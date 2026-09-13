@@ -40,6 +40,20 @@ export type DocumentState =
   | 'no_text_layer'
   /** OCR ran and could not produce usable text. */
   | 'ocr_failed'
+  /**
+   * 🚨 THE SERVER CANNOT DO THIS. THE DOCUMENT IS NOT THE PROBLEM.
+   *
+   * `describeFailure` has always known the difference — "a missing binary is an
+   * operator problem, not the user's document" — but it said so only in PROSE,
+   * and `classifyFailure` collapsed it to `ocr_failed`. So the one fact that
+   * decides whether the user should re-scan their book or do nothing at all
+   * survived only as a sentence, and every caller that branched on the state saw
+   * a failed OCR run that never happened.
+   *
+   * A caller must not have to parse prose to discover this, for the same reason
+   * `ready_with_unplaced_pages` is a state and not a flag.
+   */
+  | 'reader_unavailable'
   | 'corrupt'
   | 'encrypted'
   /** Storable, but beyond what the parser may safely load in-process. */
@@ -150,6 +164,12 @@ export function describeState(readiness: DocumentReadiness): string {
       return 'This PDF has no readable text layer — it looks like a scan or images of pages.';
     case 'ocr_failed':
       return 'The pages were rendered but no readable text could be recovered.';
+    case 'reader_unavailable':
+      // The reader's own sentence names WHICH component is missing; this is the
+      // fallback for when it did not supply one.
+      return readiness.failureReason
+        ? `This document could not be read: ${readiness.failureReason}. The file itself is fine.`
+        : 'The document reader is not available on this server, so this file could not be read. The file itself is fine.';
     case 'corrupt':
       return 'This PDF is damaged and could not be opened.';
     case 'encrypted':

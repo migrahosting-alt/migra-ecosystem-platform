@@ -55,7 +55,8 @@ import {
   platformCapabilityTopics,
 } from '@/features/capabilities/platformAnswer'
 import { reconcileGrounding } from '@/server/files/grounding'
-import { readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
+import { listProcessing, readProcessing, sequenceNoteFor } from '@/server/files/documentProcessing'
+import { describeReadFailures, type ReadFailure } from '@/features/attachments/readFailure'
 import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import { reserveTurnFor, settleTurnFor } from '@/server/anonymous/turnQuota'
 import type { Principal } from '@/server/tenancy/principal'
@@ -199,6 +200,22 @@ function refusalOr(
    * Separate because the sentence is about the ceiling, not the contents.
    */
   tooLarge: readonly string[] = [],
+  /**
+   * What the document reader actually concluded about each unreadable file.
+   *
+   * 🚨 SIX DIFFERENT FACTS WERE ARRIVING AS ONE SENTENCE. A damaged file, a
+   * scan with no text layer, a password-protected file, a genuinely empty one,
+   * and a SERVER MISSING ITS PDF RENDERER all produce zero chunks, and all five
+   * were reported as "No readable content was found in <file>".
+   *
+   * The last one is the reason this is not cosmetic. The reader had recorded
+   * "the page renderer is not available on this server" — it knew the file was
+   * fine and the SERVER was not — and the chat path discarded that and told the
+   * user their document was empty. One of those sends a person to re-scan a
+   * perfectly good book; the other is an operator's job and the user should do
+   * nothing at all.
+   */
+  readFailures: readonly ReadFailure[] = [],
 ): {
   error: string
   message: string
@@ -373,6 +390,16 @@ function refusalOr(
               `Attach a smaller file, or split this one and attach the part you need.`,
           }
         }
+
+        /*
+         * 🚨 THE READER'S OWN VERDICT, WHERE IT HAS ONE.
+         *
+         * `describeReadFailures` returns null unless EVERY unreadable file has a
+         * recognised cause, so a partial explanation never stands in for files
+         * whose cause is unknown. See readFailure.ts.
+         */
+        const explained = describeReadFailures(unreadable, readFailures)
+        if (explained) return explained
 
         const names = unreadable.join(', ')
         return {
@@ -1345,6 +1372,26 @@ export async function POST(request: Request): Promise<Response> {
 
       if (opened.kind !== 'ok') {
         const refusalCode = deliberateRefusalCode(opened)
+        /*
+         * Asked ONLY on the path where something was unreadable, which is rare.
+         * The reader already recorded why; this turn just has to stop throwing
+         * that away. A failure to reach it is not an excuse to invent a reason —
+         * an empty list falls through to the sentence that was there before.
+         */
+        const readFailures =
+          reconciled.unreadable.length > 0
+            ? await listProcessing()
+                .then((docs) =>
+                  docs
+                    .filter((d) => reconciled.unreadable.includes(d.fileName))
+                    .map((d) => ({
+                      name: d.fileName,
+                      state: d.state,
+                      ...(d.failureReason ? { failureReason: d.failureReason } : {}),
+                    })),
+                )
+                .catch(() => [])
+            : []
         const told = refusalOr(
           opened,
           reconciled.unreadable,
@@ -1352,6 +1399,7 @@ export async function POST(request: Request): Promise<Response> {
           reconciled.indexUnavailable,
           Boolean(tableEvidence),
           reconciled.tooLarge,
+          readFailures,
         )
 
         /*
