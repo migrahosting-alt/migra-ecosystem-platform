@@ -25,10 +25,32 @@
  * cannot retroactively justify a decision taken under the old one.
  */
 
-export const SUITE_REVISION = 'reasoning-deep-suite/0.1.0-draft';
-export const THRESHOLD_REVISION = 'reasoning-deep-threshold/0.1.0-draft';
+/**
+ * 🚨 THE SCORER IS FROZEN AS OF THIS REVISION.
+ *
+ * Owner rule, 2026-09-13, issued immediately before the comparator run:
+ *
+ *   "Do not change the scorer again after seeing comparator results unless the
+ *    change is justified by manually reviewed transcript evidence and then
+ *    re-applied to all stored transcripts."
+ *
+ * The reason is drift. Five scorer defects were corrected while only ONE model
+ * had been measured, and every correction happened to raise that model's score.
+ * Each was justified by a transcript — but a scorer that keeps being adjusted
+ * while results arrive will converge on whatever is under test, and the
+ * evaluation standard stops being independent of the thing it evaluates.
+ *
+ * So from here: a change requires a manually reviewed transcript, and must be
+ * RE-APPLIED TO EVERY STORED TRANSCRIPT, not just the new ones. Comparing a
+ * model scored under 0.2.0 with one scored under 0.1.0 is not a comparison.
+ *
+ * Bumping these constants is the record that it happened.
+ */
+export const SCORER_FROZEN_AT = '2026-09-13T10:00:00Z';
+export const SUITE_REVISION = 'reasoning-deep-suite/0.2.0-frozen';
+export const THRESHOLD_REVISION = 'reasoning-deep-threshold/0.2.0-frozen';
 /** The contract a decision row binds. Distinct from the suite that produced the evidence. */
-export const POLICY_VERSION = 'reasoning-deep-policy/0.1.0-draft';
+export const POLICY_VERSION = 'reasoning-deep-policy/0.2.0-frozen';
 
 export type Dimension =
   /** Several constraints at once, where satisfying the easy ones is not enough. */
