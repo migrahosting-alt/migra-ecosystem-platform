@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-14",
- "updatedBy": "Claude (Opus 5) — PDF SLICE re-run from the beginning on staging pdftextfallback-0914 (commit 8704b715). The file-state defect is FIXED and verified live: /api/files now reports ready/readable:true for a text-layer PDF. Plumbing passed end to end. TWO MODEL-LAYER precision misses observed, both proven NOT to be plumbing.",
+ "updatedBy": "Claude (Opus 5) — DOCX slice PASSED with no defects. XLSX slice found TWO REAL DEFECTS, both ours, both fixed and re-verified on staging: a FABRICATED financial figure ($54,212 for a cell reading 25443.75), and a DOUBLE COUNT from summing the sheet's own Total row ($151,427.50 for a true 75,713.75). Scanned PDF/OCR remains OPEN.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3492,5 +3492,70 @@
   ],
   "boundaryRuling": "Per the contract: 'A weaker model is acceptable and measurable. Missing plumbing is not.' Both misses are the model layer, and the proof required by the lane boundary — that the information reached the model intact — was obtained before saying so. These belong to MigraAI Engineer, not to Chat acceptance.",
   "status": "READY FOR LOCAL USER TEST — an automated browser completing the scenario is not the owner using the product"
- }
+ },
+ "docxSlice_2026_09_14": {
+  "status": "READY FOR LOCAL USER TEST — PASSED, no defects found",
+  "artifact": "northwind-maintenance.docx, built to exercise every structural path the extractor has a past defect in, and validated against the product's own extractor before use",
+  "pathsProven": [
+   "table row relationships (Brixham -> annual cost column, not unit cost)",
+   "text box (£185.00 surcharge) — the part that used to be silently dropped",
+   "footnote (consumables at cost plus 8%)",
+   "footer (NW-MAINT-2026-14, model named the footer as its source)",
+   "lists (three sites)",
+   "headings/prose",
+   "deictic 'that table'",
+   "switch away with zero leakage",
+   "reload",
+   "continue after reload"
+  ],
+  "fileState": "NO processing record — correct, a DOCX is read inside the request and never enters the background job table",
+  "modelNote": "one garbled sentence mid-answer; expression, not plumbing"
+ },
+ "xlsxSlice_2026_09_14": {
+  "status": "READY FOR LOCAL USER TEST — passed after two fixes",
+  "defect1_fabrication": {
+   "severity": "highest available to this product",
+   "symptom": "'On the Q1 Sales sheet, what revenue is listed for East?' -> 'Revenue for East ... is $54,212.' The sheet says 25443.75. Invented, in a currency the file does not use, no caveat.",
+   "cause": "the truthful structured_only refusal EXISTED and was UNREACHABLE. It was gated on asksOfDocument, which answers 'the user asks about a document and NONE is attached' and infers from vocabulary. Its noun list has spreadsheet and csv but not workbook/sheet/xlsx, so it returned false for EVERY spreadsheet question incl. 'Summarize this workbook'. MEASURED directly, not inferred: decideAttachmentState returned 'indexed' for all six probe prompts.",
+   "fix": "with a file ACTUALLY ATTACHED, the prompt's vocabulary does not get to decide whether the turn concerns it. Only the craft escape hatch survives.",
+   "commit": "1e1d3fff"
+  },
+  "defect2_double_count": {
+   "symptom": "'total revenue across the four regions' on a sheet ending in a Total row -> $151,427.50; true value 75,713.75. Exactly double.",
+   "layer": "the DETERMINISTIC table layer, not the model — no model work would have fixed it",
+   "cause": "computeColumn summed every row; nothing anywhere detected a totals row. Most real business sheets end in one.",
+   "fix": "a row whose label IS a totals word is a summary. Detected from what the author wrote, never inferred from arithmetic ('Total' vs 'Total Systems Ltd'). Excluded from EVERY operation — the max of a column containing its own total is always the total. And DISCLOSED, because the user is looking at a total printed in their own sheet.",
+   "commit": "7aae0e26, notice wording 389964b7"
+  },
+  "rerunAfterFixes": {
+   "q1 total": "$75,713.75 + both disclosures",
+   "q1 max": "East $25,443.75, totals row excluded",
+   "q2 total after reload": "$78,465",
+   "the fabricating lookup": "truthful refusal",
+   "switch away": "no leakage",
+   "reload": "restored"
+  },
+  "gapsNotDefects": [
+   "row lookup ('what revenue is listed for East') — the table layer knows totals/averages/min/max/counts/summaries, not lookups. Refuses truthfully.",
+   "deictic sheet reference ('on that same sheet') — sheet selection reads the current prompt only. Asks which sheet; does not guess."
+  ],
+  "chipHonesty": "'Ready for table analysis — sheets, columns, labels and numeric values. Document-style text search inside spreadsheets is not available yet.'"
+ },
+ "scannedPdfOcr_STILL_OPEN": {
+  "status": "OPEN — NOT closed by the text-layer fix",
+  "why": "the §12 fix stops a READABLE pdf being blamed on a renderer it never needed. A PDF that genuinely needs rasterising and OCR is unaffected.",
+  "stagingState": "pdftoppm, pdfinfo, tesseract all ABSENT; pdf_page_rendering and pdf_ocr both report unavailable",
+  "required": "deploy poppler + an OCR runtime, then test as its own acceptance slice"
+ },
+ "backlogOrder_2026_09_14": [
+  "multiple attachments",
+  "contextual references across files",
+  "image + document combinations",
+  "conversation persistence edge cases",
+  "remaining message controls",
+  "audio attachment pipeline",
+  "scanned PDF/OCR",
+  "production promotion",
+  "production user validation"
+ ]
 }

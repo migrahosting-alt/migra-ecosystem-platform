@@ -360,3 +360,111 @@ not to Chat acceptance.
 
 **Still `READY FOR LOCAL USER TEST`.** The automated browser completing the scenario twice is not
 the owner using the product.
+
+---
+
+## 14. DOCX through the real composer — PASSED, no defects
+
+`northwind-maintenance.docx`, built to exercise every structural path the
+extractor has a past defect in, and validated against the product's own
+extractor before use.
+
+| step | result |
+| --- | --- |
+| Upload via the composer | stored; **no processing record** — correct: a DOCX is read inside the request |
+| Summary + list | three sites as a real list; picked up the **footnote** (consumables at cost plus 8%) |
+| Table | Brixham **£3663.00**, total **£12452.00** — and it chose the *annual cost* column, not unit cost |
+| Deictic *"that table"* + text box | "the table does not include it … **£185.00** per visit" — from the **text box**, the part that used to be dropped entirely |
+| Switch away | zero leakage into the other conversation |
+| Reload | all three turns and the grounding tray restored |
+| Continue after reload | **NW-MAINT-2026-14**, cited *"in the footer"*, plus the four-hour escalation to the Duty Engineer |
+
+Every structural path held: table row relationships, text boxes, footnotes,
+footers, lists, headings. One garbled sentence in the middle of an otherwise
+correct answer — model expression, not plumbing.
+
+---
+
+## 15. XLSX through the real composer — TWO REAL DEFECTS, both ours, both fixed
+
+`regional-sales-2026.xlsx`: three sheets (Q1 Sales, Q2 Sales, Targets), formulas
+with cached totals, and a totals row on each sales sheet.
+
+### 🚨 Defect 1 — a fabricated financial figure
+
+> *"On the Q1 Sales sheet, what revenue is listed for East?"* →
+> **"Revenue for East on the Q1 Sales sheet is $54,212."**
+
+The sheet says **25443.75**. The number was invented, in a currency the file
+does not use, stated flatly with no caveat, about a file whose chip was on
+screen. **There is no worse failure available to this product.**
+
+**Cause, and it was ours.** The truthful refusal for this case already existed
+and was *unreachable*. The structured-only branch was gated on
+`asksOfDocument`, which answers a different question — "the user asks about a
+document and NONE is attached" — and infers from vocabulary because in that case
+there is no file to look at. Its noun list carries `spreadsheet` and `csv` but
+not `workbook`, `sheet` or `xlsx`, so for an attached workbook it returned false
+for **every** spreadsheet question, "Summarize this workbook" included. The
+branch never fired and the turn reached the model with no evidence at all.
+
+**Fix:** not more nouns. With a file actually attached, whether the turn concerns
+it is not something the prompt's vocabulary gets to decide — the user attached
+it. Only the craft escape hatch survives, which is about the question rather
+than the file.
+
+### 🚨 Defect 2 — the author's own total, summed again
+
+> *"Use the Q1 Sales sheet. What is the total revenue across the four regions?"* →
+> **"$151,427.50"**
+
+The four regions total **75,713.75**. The sheet's own `Total` row was summed as
+if it were a fifth region. Exactly double. Produced by the **deterministic table
+layer**, not the model — no amount of model work would have touched it — and
+disclosed nowhere. On less round numbers nobody would ever catch it. Most real
+business sheets end in a totals row, so this was close to the default case.
+
+**Fix:** a row whose label *is* a totals word is a summary, not an observation.
+Detected from what the author wrote, never inferred from the arithmetic —
+"Total" is a summary row, "Total Systems Ltd" is a supplier. Excluded from every
+operation, because the maximum of a column containing its own total is always
+the total. And **disclosed**, because the user is looking at a total printed in
+their own sheet: a figure that differs from it must say why.
+
+### After both fixes, re-run from nothing
+
+| question | answer |
+| --- | --- |
+| total revenue, Q1 | **$75,713.75** + both disclosures |
+| highest revenue, Q1 | **East, $25,443.75** — totals row excluded from max |
+| total revenue, Q2, after reload | **$78,465** |
+| the lookup that fabricated | truthful refusal naming the file and what it can do |
+| switch away / reload | no leakage; thread, figures and disclosures restored |
+
+### Gaps found, which are NOT defects — they fail honestly
+
+| gap | behaviour |
+| --- | --- |
+| **Row lookup** — "what revenue is listed for East" | the table layer recognises totals, averages, min/max, counts and summaries, but not a row lookup. Refuses truthfully rather than guessing |
+| **Deictic sheet reference** — "on that same sheet" | sheet selection reads the current prompt only, not the conversation. Asks which sheet; does not pick one |
+
+Both belong in the backlog under contextual reference resolution. Neither
+produces a wrong answer.
+
+---
+
+## 16. Still explicitly open
+
+**Scanned PDF / OCR is NOT closed by any of this.** The text-layer fix in §12
+stops a readable PDF being blamed on a renderer it never needed; it does nothing
+for a PDF that genuinely needs rasterising and OCR. `pdftoppm`, `pdfinfo` and
+`tesseract` are still absent from staging, `pdf_page_rendering` and `pdf_ocr`
+still report `unavailable`, and that capability must be deployed and then tested
+**as its own slice**.
+
+### Backlog order, after DOCX and XLSX
+
+multiple attachments → contextual references across files → image + document
+combinations → conversation persistence edge cases → remaining message controls
+→ audio attachment pipeline → scanned PDF/OCR → production promotion →
+production user validation.
