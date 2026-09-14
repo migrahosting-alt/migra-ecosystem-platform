@@ -1844,7 +1844,7 @@ export async function POST(request: Request): Promise<Response> {
         const n = tableEvidence.summaryRowsExcluded
         const disclosure =
           `\n\nThis excludes ${n === 1 ? 'the row' : `${n} rows`} the sheet labels as a total, ` +
-          `so the figure is the sum of the data rows rather than a double count.`
+          `so the figure covers the data rows only.`
         answer += disclosure
         emit('token', { text: disclosure })
       }
