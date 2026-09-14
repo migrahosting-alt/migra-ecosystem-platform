@@ -66,6 +66,25 @@ const GENERAL_NOT_SPECIFIC: readonly RegExp[] = [
   /\b(write|create|draft|generate|make)\s+(me\s+)?(a|an)\b/i,
 ]
 
+/**
+ * Is this a question about the CRAFT rather than about a file in hand?
+ *
+ * Exported because a caller that already KNOWS a file is attached needs this
+ * half of the assessment and must not use the other half. `assessDocumentIntent`
+ * answers "the user asks about a document and NONE is attached" — it infers from
+ * vocabulary precisely because there is no file to look at. When a file IS
+ * attached, that inference is not merely unnecessary, it is wrong: whether the
+ * turn concerns the attachment is not decided by whether the user happened to
+ * type a noun from {@link DOCUMENT_NOUN}.
+ *
+ * This escape hatch stays, because it is about the question and not about the
+ * file: "how do I build a budget spreadsheet" is a craft question whoever has
+ * attached what.
+ */
+export function isGeneralQuestion(prompt: string): boolean {
+  return matches(GENERAL_NOT_SPECIFIC, prompt.trim()) !== null
+}
+
 const matches = (patterns: readonly RegExp[], text: string): RegExpExecArray | null => {
   for (const re of patterns) {
     const m = re.exec(text)

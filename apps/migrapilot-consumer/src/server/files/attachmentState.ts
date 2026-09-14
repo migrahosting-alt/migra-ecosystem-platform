@@ -2,7 +2,7 @@ import 'server-only'
 
 import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
 
-import { assessDocumentIntent } from './documentIntent'
+import { assessDocumentIntent, isGeneralQuestion } from './documentIntent'
 
 /**
  * What can this turn actually answer from?
@@ -93,11 +93,43 @@ export function decideAttachmentState(input: AttachmentStateInput): AttachmentTu
 
   const structured = structuredOnly(present)
   if (structured.length === present.length) {
-    // Every attachment is a table-only file. A prose question cannot be served
-    // from it, and saying so is the only truthful answer.
-    return asksOfDocument(prompt)
-      ? { kind: 'structured_only', files: [...present] }
-      : { kind: 'indexed' }
+    /*
+     * Every attachment is a table-only file, and the deterministic layer above
+     * produced nothing for this question — `hasTableEvidence` already returned
+     * for the answerable case. So there is no evidence about this file and no
+     * prose index that could ever hold any.
+     *
+     * 🚨 THE GATE USED TO BE `asksOfDocument(prompt)`, AND THAT FABRICATED DATA.
+     *
+     * That helper answers a DIFFERENT question — "the user asks about a document
+     * and NONE is attached" — and infers from vocabulary because in that case
+     * there is no file to look at. Its noun list holds `spreadsheet` and `csv`
+     * but not `workbook`, `sheet` or `xlsx`, so for an attached workbook it
+     * answered false for EVERY spreadsheet question, including "Summarize this
+     * workbook" and "What is the total revenue?". This branch therefore never
+     * fired, the truthful refusal was unreachable, and the turn went to the
+     * model with no evidence about a file whose chip was on screen.
+     *
+     * Measured on staging: "On the Q1 Sales sheet, what revenue is listed for
+     * East?" over a workbook whose East row reads 25443.75 was answered
+     * "Revenue for East on the Q1 Sales sheet is $54,212." — a fabricated
+     * figure, with a currency the workbook does not use, stated without a
+     * caveat. There is no worse failure available to this product.
+     *
+     * The fix is not more nouns. With a file ACTUALLY ATTACHED, whether the turn
+     * concerns it is not a question the prompt's vocabulary gets to answer — the
+     * user attached it. What survives is the craft escape hatch, which is about
+     * the QUESTION rather than the file: "how do I build a budget spreadsheet"
+     * is a general question whoever has attached what.
+     *
+     * The residual cost is a user who attaches a workbook and asks something
+     * unrelated in the same turn, who is told what the workbook can be asked
+     * instead of being answered. That is a redundant sentence naming their file.
+     * The alternative is inventing their numbers.
+     */
+    return isGeneralQuestion(prompt)
+      ? { kind: 'indexed' }
+      : { kind: 'structured_only', files: [...present] }
   }
 
   const unreadable = present.filter((name) => unreadableFiles.includes(name))

@@ -162,3 +162,48 @@ describe('the helpers', () => {
     assert.deepEqual(structuredOnly(['a.xlsx', 'b.pdf', 'c.csv', 'd.xlsx']), ['a.xlsx', 'd.xlsx'])
   })
 })
+
+describe('a workbook the table layer could not answer', () => {
+  const state = (prompt: string, hasTableEvidence = false) =>
+    decideAttachmentState({
+      prompt,
+      activeFiles: ['regional-sales-2026.xlsx'],
+      hasTableEvidence,
+    }).kind
+
+  /*
+   * 🚨 THE DEFECT: A FABRICATED FIGURE.
+   *
+   * "On the Q1 Sales sheet, what revenue is listed for East?" over a workbook
+   * whose East row reads 25443.75 was answered "Revenue for East on the Q1 Sales
+   * sheet is $54,212." — invented, in a currency the file does not use, with no
+   * caveat. The gate was `asksOfDocument`, whose noun list has `spreadsheet` and
+   * `csv` but not `workbook`, `sheet` or `xlsx`, so this branch never fired for a
+   * workbook and the turn reached the model with no evidence at all.
+   */
+  it('refuses truthfully instead of letting the model invent values', () => {
+    assert.equal(state('On the Q1 Sales sheet, what revenue is listed for East?'), 'structured_only')
+    assert.equal(state('Which region grew most between Q1 and Q2?'), 'structured_only')
+    assert.equal(state('Did any region miss its target?'), 'structured_only')
+  })
+
+  /* The vocabulary these once depended on is exactly what failed. */
+  it('does not depend on the user naming a document noun', () => {
+    assert.equal(state('Summarize this workbook.'), 'structured_only')
+    assert.equal(state('What is the total revenue?'), 'structured_only')
+    assert.equal(asksOfDocument('Summarize this workbook.'), false,
+      'the old gate still reads false here — which is why it may not be the gate')
+  })
+
+  /* A question about the craft is not about the file, whoever attached what. */
+  it('still answers a general question normally', () => {
+    assert.equal(state('How do I build a budget spreadsheet?'), 'indexed')
+    assert.equal(state('Explain what a pivot table is.'), 'indexed')
+  })
+
+  /* Computed figures mean the question WAS answered; no refusal may speak over them. */
+  it('never refuses a question the deterministic layer answered', () => {
+    assert.equal(state('What is the total revenue?', true), 'indexed')
+    assert.equal(state('On the Q1 Sales sheet, what revenue is listed for East?', true), 'indexed')
+  })
+})
