@@ -1,5 +1,17 @@
 # MigraPilot Chat — module census
 
+> 🚨 **SUPERSEDED AS THE PLANNING DOCUMENT** by
+> [`CHAT_CAPABILITY_CONTRACT.md`](./CHAT_CAPABILITY_CONTRACT.md), 2026-09-14.
+>
+> This file documented **today's code**, and that was the mistake in it: a census of the
+> implementation reads as though the implementation defines the product. It does not.
+> `pptx → refused` is not "MigraPilot does not support PowerPoint" — it is *PPTX is missing and
+> is on the backlog*.
+>
+> The contract document keeps TARGET STATE separate from CURRENT STATE, so an absence is a gap
+> rather than a reduced ambition. This census is retained as the raw current-state evidence it
+> was, and is no longer the thing to plan from.
+
 **2026-09-14.** One grounded inventory of the actual Chat surface.
 
 > 🚨 **Nothing in this document is marked "user-proven". I cannot mark anything user-proven.**

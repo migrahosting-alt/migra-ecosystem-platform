@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-14",
-  "updatedBy": "Claude (Opus 5) — CHAT MODULE CENSUS. Grounded inventory of the real Chat surface with an honest status vocabulary. NOTHING is user-proven; automated verification reaches READY FOR LOCAL USER TEST only. Production runs 0f494d27 and is TWENTY consumer commits behind — every truthfulness fix from this programme is local. Audio attachments do not exist by design. Copy is BROKEN in production.",
+  "updatedBy": "Claude (Opus 5) — CHAT CAPABILITY CONTRACT. The census is superseded as a planning document: it described today's code, which reads as though the code defines the product. The contract keeps TARGET separate from CURRENT, so every absence is a GAP and never a reduced ambition. Production still 20 commits behind.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3393,6 +3393,24 @@
       "Owner-testable local build of the core conversation UX so reload restoration, scroll and long-conversation behaviour stop being UNKNOWN.",
       "Attachment acceptance through the REAL composer, one type at a time, PDF first: multi-page with tables, page-specific questions, follow-ups, conversation switch, reload.",
       "Decide the production-lag question — 20 consumer commits including three truthfulness fixes and a copy corruption sit undeployed. A separate owner decision from finishing the module."
+    ]
+  },
+  "chatCapabilityContract_2026_09_14": {
+    "_state": "TARGET DEFINED — GAPS CLASSIFIED — NOTHING USER-PROVEN",
+    "document": "docs/migrapilot/CHAT_CAPABILITY_CONTRACT.md",
+    "🚨 governingPrinciple": "THE CODE DOES NOT DEFINE THE PRODUCT. \"pptx -> refused\" is not \"MigraPilot does not support PowerPoint\"; it is \"PPTX is missing and is on the backlog\". And: a weaker MODEL is acceptable and measurable, missing PLUMBING is not. If the model can process something and Chat never delivers it the file, loses the conversation, cannot invoke the capability, or has an incomplete UI, that is our defect.",
+    "theDiagnosticSplit": "Give it a 60-page contract and ask for the cancellation clause, its page, and a comparison with the payment terms. If the attachment never reaches the model, extraction loses pages, retrieval picks the wrong chunks, or the follow-up loses the PDF — MIGRAPILOT DEFECT. If everything reaches the model intact with good context and it still reasons badly — MODEL/ENGINEER problem. Nothing may be blamed on the model until the information is proven to have arrived intact.",
+    "statusVocabulary": "USER-PROVEN | READY FOR USER TEST | IMPL/UNPROVEN | PARTIAL | BROKEN | MISSING | BLOCKED BY CAPABILITY. NOTHING is USER-PROVEN — that status is the owner's to grant.",
+    "🚨 blockedItemsAreAllPlumbingComplete": "Every BLOCKED BY CAPABILITY item carries evidence that our side works to the boundary, so \"blocked\" is a diagnosis and not an excuse. SCANNED PDF: accepted, stored, extraction attempted, reader reports reader_unavailable, chat renders \"the page renderer is not available on this server. Nothing is wrong with your file\" — measured end to end on staging; only the renderer binary is missing. IMAGE UNDERSTANDING: accepted, stored, content-addressed, rendered, re-attachable; vision gate returns its own verdict; only an approved model is missing (production HAS one). MICROPHONE: control correctly disabled naming the env var. IMAGE GENERATION: typed SSE refusal mapped to image_generation_not_configured. SEARCH/EMAIL: registered, reported unavailable with the engine's own sentence. NONE is blocked by our implementation.",
+    "biggestUnevidencedArea": "CONTEXTUAL REFERENCE RESOLUTION — \"this file\", \"the table above\", \"what I said earlier\", \"compare that with the first document\" — is UNKNOWN in its entirety, and for a chat assistant it is among the most load-bearing behaviours. The mechanism exists (durable history, per-turn grounding reconciliation); none of it has been exercised.",
+    "backlogOrder": "PPTX (highest value of the refused set) -> audio attachments -> scanned-PDF OCR (a renderer/OCR install, not a code change) -> richer spreadsheet prose -> legacy office -> HEIC -> ZIP (lowest value, largest security surface).",
+    "workOrder": [
+      "conversation UX (close the UNKNOWNs, then owner test)",
+      "attachments through the REAL composer, PDF first",
+      "context and persistence",
+      "assistant workflows as user tasks",
+      "capability integration",
+      "production promotion then owner validation on production"
     ]
   }
 }
