@@ -70,7 +70,7 @@
       "normal_deploys_blocked": true,
       "release": "/opt/migra/repos/migrateck-auth-stage/app",
       "reconciliation": "IN_PROGRESS",
-      "reason": "Source reconciled on branch reconcile/migraauth-p2: P1 import, P2 file reconciliation, P2.1 reproducibility, P2.2 crypto fail-closed, P4 clean reproducible build, P4.1 three reviewed crypto patches. Typecheck 0, tests 134/134, all release gates pass, 248-file build byte-identical across two runs. Production is UNCHANGED and still serves the unattributed on-host build; nothing has been deployed.",
+      "reason": "Source reconciled on branch reconcile/migraauth-p2: P1 import, P2 file reconciliation, P2.1 reproducibility, P2.2 crypto fail-closed, P4 clean reproducible build, P4.1 three reviewed crypto patches. Typecheck 0, tests 138/138, all release gates pass, 248-file build byte-identical across two runs. Production is UNCHANGED and still serves the unattributed on-host build; nothing has been deployed.",
       "phase": "P4_1_APPLIED_PENDING_P3_AND_PROMOTION",
       "source_reconciliation": "SUBSTANTIALLY_COMPLETE",
       "production_promotion": "NOT_COMPLETE",
