@@ -1,7 +1,7 @@
 {
   "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
   "updated": "2026-09-14",
-  "updatedBy": "Claude (Opus 5) — BOUNDARY CORRECTION. reasoning.deep qualification RECLASSIFIED out of Chat acceptance into MigraAI Engineer / model-promotion governance. The evidence stands; it was filed in the wrong lane. Chat acceptance returns to end-to-end user workflows. Production untouched on 0f494d27.",
+  "updatedBy": "Claude (Opus 5) — CHAT MODULE CENSUS. Grounded inventory of the real Chat surface with an honest status vocabulary. NOTHING is user-proven; automated verification reaches READY FOR LOCAL USER TEST only. Production runs 0f494d27 and is TWENTY consumer commits behind — every truthfulness fix from this programme is local. Audio attachments do not exist by design. Copy is BROKEN in production.",
   "rules": {
     "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
     "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3378,5 +3378,21 @@
     "chatAcceptanceIs": "input -> orchestration/context -> model -> tools/knowledge -> response -> persistence, proven with REAL USER SCENARIOS: open it, talk to it, attach things, continue a conversation, recover history, edit/resend, copy, switch chats, use the microphone, receive streamed answers, reload without losing state, use the knowledge we gave it, and get TRUTHFUL errors when an underlying capability is unavailable.",
     "chatAcceptanceIsNot": "synthetic model benchmarks, model qualification campaigns, or GPU capacity studies.",
     "🚨 noFakeCompletion": "Automated tests can only make a capability READY FOR USER TEST. The Chat module is accepted only after the owner personally exercises it in the real product."
+  },
+  "chatModuleCensus_2026_09_14": {
+    "_state": "CENSUS COMPLETE — CHAT MODULE NOT COMPLETE",
+    "document": "docs/migrapilot/CHAT_MODULE_CENSUS.md",
+    "🚨 productionLag": "Production runs 0f494d27 / chat-platform-rc-0908, TWENTY consumer commits behind local HEAD. Verified ABSENT from production: platformAnswer.ts (capability-owned answers), readFailure.ts (truthful document failures), messageText.ts (copy correction), documentReaderCapability.ts (runtime-aware PDF capability). EVERYTHING THIS PROGRAMME HAS FIXED FOR A WEEK IS LOCAL — the public system still answers capability questions from the model, still says \"No readable content was found\" for a renderer failure, and still corrupts code on copy.",
+    "🚨 copyBrokenInProduction": "Production strips every double-asterisk from the whole answer; a streamed turn is ONE block holding the entire response including code fences, so \"def f(*args, **kwargs)\" reaches the clipboard as \"def f(*args, kwargs)\" and \"2 ** 8\" as \"2  8\". Copying a code answer produces broken code, silently. Fixed locally, NOT deployed.",
+    "supportedFileMatrix": "From the canonical ATTACHMENT_TYPES table. INDEXED: pdf docx txt md markdown log csv tsv json xml yaml yml toml ini conf + ~20 code types + png jpg jpeg gif webp. STRUCTURED ONLY: csv tsv xlsx. REFUSED WITH A REASON: doc odt rtf xls ods ppt pptx odp zip tar gz sql. Extractors confirmed to exist for PDF (unpdf text-layer), DOCX (docxText.ts), plain text and the structured table layer.",
+    "🚨 noAudioAttachments": "ATTACHMENT_TYPES contains ZERO audio entries — no mp3, wav, m4a, ogg. Audio cannot be attached at all, and the matrix is honest about that rather than accepting a file nothing will read. The composer MICROPHONE is a different thing (speech-to-text input) and is not configured on any deployment; the control is correctly disabled and says why.",
+    "🚨 attachmentsNotProvenThroughTheUI": "UNKNOWN, all of it: a normal PDF uploading/reading/answering through the composer; page-specific questions; PDFs with tables; mixed text+image PDFs; DOCX end to end; XLSX totals; document context surviving conversation switches; multiple attachments in one turn. What IS proven is narrower and must not be mistaken for it: a text-layer PDF uploaded VIA THE API with an explicit index call was answered with a citation, and a scanned PDF produced a truthful document_reader_unavailable. That is not a user selecting a file in the composer.",
+    "persistenceUnproven": "The scenario upload PDF -> discuss -> leave to Chat B -> return to Chat A -> ask again -> reload -> ask again HAS NEVER BEEN RUN. Conversations and grounding are durable in PostgreSQL and appendMessage is awaited before the turn advances, so the mechanism exists. MECHANISM EXISTING IS NOT THE PRODUCT WORKING.",
+    "🚨 promotionGate": "implemented locally/candidate -> automated verification -> READY FOR LOCAL USER TEST -> owner tests locally -> LOCALLY ACCEPTED -> promoted and deployed -> owner tests production -> PRODUCTION ACCEPTED. EVERY Chat row is at most READY FOR LOCAL USER TEST. Nothing is locally accepted, nothing is production accepted, and four modules are not even deployed. tsc clean and a green suite are NOT completion.",
+    "nextInOrder": [
+      "Owner-testable local build of the core conversation UX so reload restoration, scroll and long-conversation behaviour stop being UNKNOWN.",
+      "Attachment acceptance through the REAL composer, one type at a time, PDF first: multi-page with tables, page-specific questions, follow-ups, conversation switch, reload.",
+      "Decide the production-lag question — 20 consumer commits including three truthfulness fixes and a copy corruption sit undeployed. A separate owner decision from finishing the module."
+    ]
   }
 }
