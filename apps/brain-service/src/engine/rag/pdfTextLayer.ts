@@ -25,8 +25,99 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile, stat } from 'node:fs/promises';
+
+import { extractPdf } from './pdfText.js';
+import { DEFAULT_MAX_INDEX_FILE_BYTES } from './fsFileSource.js';
 
 const run = promisify(execFile);
+
+/**
+ * Did this fail because the EXECUTABLE is absent, rather than because the
+ * document is bad?
+ *
+ * One implementation of the distinction, so no caller grows a private copy that
+ * drifts from it. Each caller passes the binaries IT cares about, because the
+ * sets genuinely differ: the failure classifier asks about the rasteriser and
+ * the recogniser, while this module asks about the two text binaries it is the
+ * only user of.
+ */
+export function binaryMissing(error: unknown, binaries: RegExp): boolean {
+  const message = String((error as { message?: string })?.message ?? error);
+  // The binary name and ENOENT can appear in either order — Node reports
+  // "spawn pdftotext ENOENT" — so neither is assumed to come first.
+  return /ENOENT/i.test(message) && binaries.test(message);
+}
+
+/** The poppler binaries THIS module shells out to. */
+const POPPLER_TEXT = /(pdfinfo|pdftotext)/i;
+
+/**
+ * The in-process reading of ONE document, held only while it is the document
+ * being read.
+ *
+ * The job runner is serial by design — one document at a time — so a single
+ * entry is exactly the working set, and re-parsing the whole PDF once per page
+ * would turn a page-by-page read into quadratic work over the same bytes.
+ */
+let memo: { key: string; pages: string[] } | null = null;
+
+/**
+ * Read the pages WITHOUT poppler, when poppler is not installed here.
+ *
+ * 🚨 WHY THIS EXISTS. `probePdfTextLayer` calls `pdfPageCount` — `pdfinfo` — as
+ * its very first step. On a host with no poppler that throws before the
+ * document's content is examined at all, the probe is read as "no text layer",
+ * and the document falls through to the scanned pipeline, which then fails on
+ * the missing rasteriser. The user is told "the page renderer is not available
+ * on this server" about a PDF whose text was sitting right there, readable by a
+ * library already in this service's dependencies. Measured on staging: a 5 KB,
+ * five-page digital contract reported unreadable in Files while chat answered
+ * six questions from it correctly.
+ *
+ * So the contract of this module — reading a PDF that already carries its text —
+ * is honoured wherever the service runs, which is what `documentReaderCapability`
+ * has always DECLARED by reporting `pdf_text_extraction` as in-process and
+ * therefore always available. This makes the pipeline match that claim.
+ *
+ * 🚨 BOUNDED, AND HONEST WHEN IT CANNOT HELP. In-process parsing holds the whole
+ * document in the Node heap — the exact cost `pdftotext` was chosen to avoid —
+ * so it stops at the same ceiling the synchronous extractor uses. Above it the
+ * ORIGINAL poppler error is rethrown, because then `reader_unavailable` is
+ * simply true: this host really cannot read that document.
+ */
+async function inProcessPages(pdfPath: string, popplerError: unknown): Promise<string[]> {
+  const info = await stat(pdfPath);
+  const key = `${pdfPath}|${info.size}|${info.mtimeMs}`;
+  if (memo?.key === key) return memo.pages;
+
+  if (info.size > DEFAULT_MAX_INDEX_FILE_BYTES) throw popplerError;
+
+  let pages: string[];
+  try {
+    const extraction = await extractPdf(new Uint8Array(await readFile(pdfPath)));
+    pages = extraction.pages.map((p) => p.text);
+  } catch (error) {
+    /*
+     * 🚨 "NO TEXT LAYER" IS AN ANSWER, NOT A FAILURE, TO THE QUESTION ASKED HERE.
+     *
+     * An image-only PDF still HAS pages; what it lacks is text on them. Letting
+     * that throw would make `pdfPageCount` fail on a scan and leave the probe
+     * escalating to OCR only because its caller swallows every error — the
+     * right destination reached by accident. Returning the pages it does have,
+     * empty, lets the probe answer `hasTextLayer: false` on the evidence and
+     * send the document to OCR deliberately.
+     *
+     * Every other classified failure — encrypted, corrupt — is a real failure
+     * about the document and propagates untouched.
+     */
+    const failure = (error as { failure?: { kind?: string; pages?: number } })?.failure;
+    if (failure?.kind !== 'no_text_layer') throw error;
+    pages = Array.from({ length: failure.pages ?? 0 }, () => '');
+  }
+  memo = { key, pages };
+  return pages;
+}
 
 /**
  * How much text a page must hold to count as "really there".
@@ -90,18 +181,35 @@ export interface PdfTextLayerProbe {
 
 /** Page count, from poppler rather than from parsing the file ourselves. */
 export async function pdfPageCount(pdfPath: string): Promise<number> {
-  const { stdout } = await run('pdfinfo', [pdfPath], { maxBuffer: 4 * 1024 * 1024 });
-  return Number(/Pages:\s+(\d+)/.exec(stdout)?.[1] ?? 0);
+  try {
+    const { stdout } = await run('pdfinfo', [pdfPath], { maxBuffer: 4 * 1024 * 1024 });
+    return Number(/Pages:\s+(\d+)/.exec(stdout)?.[1] ?? 0);
+  } catch (error) {
+    // Only a MISSING binary falls back. A pdfinfo that ran and failed is telling
+    // us something about the document, and must not be overruled.
+    if (!binaryMissing(error, POPPLER_TEXT)) throw error;
+    return (await inProcessPages(pdfPath, error)).length;
+  }
 }
 
 /** One page of text. Its own subprocess, so peak memory is one page. */
 export async function extractPdfPageText(pdfPath: string, page: number): Promise<string> {
-  const { stdout } = await run(
-    'pdftotext',
-    ['-f', String(page), '-l', String(page), '-enc', 'UTF-8', '-q', pdfPath, '-'],
-    { maxBuffer: 8 * 1024 * 1024 },
-  );
-  return stdout.length > MAX_CHARS_PER_PAGE ? stdout.slice(0, MAX_CHARS_PER_PAGE) : stdout;
+  const cap = (text: string): string =>
+    text.length > MAX_CHARS_PER_PAGE ? text.slice(0, MAX_CHARS_PER_PAGE) : text;
+
+  try {
+    const { stdout } = await run(
+      'pdftotext',
+      ['-f', String(page), '-l', String(page), '-enc', 'UTF-8', '-q', pdfPath, '-'],
+      { maxBuffer: 8 * 1024 * 1024 },
+    );
+    return cap(stdout);
+  } catch (error) {
+    if (!binaryMissing(error, POPPLER_TEXT)) throw error;
+    // 1-based, as poppler counts, so the fallback indexes the same page the
+    // caller asked poppler for.
+    return cap((await inProcessPages(pdfPath, error))[page - 1] ?? '');
+  }
 }
 
 /**

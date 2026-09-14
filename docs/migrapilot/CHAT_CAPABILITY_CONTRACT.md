@@ -37,9 +37,9 @@ to anything.
 | Edit and resend | `IMPL/UNPROVEN` | forks a new turn; deliberately not called "Edit" |
 | **Copy the answer** | `BROKEN` in production, fixed locally | corrupts code — see §9 |
 | Feedback on an answer | `IMPL/UNPROVEN` | persisted; a failed write selects nothing |
-| Conversation history, switching | `IMPL/UNPROVEN` | |
+| Conversation history, switching | `READY FOR USER TEST` | History is its own page, not a sidebar list — by design. Switch away and back keeps the thread and its grounding |
 | Rename, delete, export | `IMPL/UNPROVEN` | real routes, optimistic with rollback |
-| Reload recovery | `IMPL/UNPROVEN` | durable in PostgreSQL; never exercised |
+| Reload recovery | `READY FOR USER TEST` | five turns, attachment chips and the grounding tray all restored from PostgreSQL — §11 |
 | Long conversations | `UNKNOWN` | never measured |
 | Useful errors | `PARTIAL` | typed refusals exist for documents, images, capabilities; coverage elsewhere unaudited |
 
@@ -71,9 +71,9 @@ with the payment terms."
 | capability | status | evidence / gap |
 | --- | --- | --- |
 | Attach any file through the composer | `IMPL/UNPROVEN` | a general picker (`multiple`, unrestricted) plus a Photos filter over the same handler |
-| PDF with a text layer — read, cited | `PARTIAL` | proven **via the API with an explicit index call**, answered with a citation. Never through the composer |
-| PDF, page-specific questions | `UNKNOWN` | page provenance exists in the extractor; never asked |
-| PDF with tables | `UNKNOWN` | |
+| PDF with a text layer — read, cited | `READY FOR USER TEST` | the full slice ran **through the real composer** on staging — see §11 |
+| PDF, page-specific questions | `READY FOR USER TEST` | "what does page 4 say about cancellation" → *not less than 90 days*, cited |
+| PDF with tables | `READY FOR USER TEST` | Leeds-Glasgow £4580.00 and the £15388.75 aggregate, read out of the rate table |
 | **Scanned / image-only PDF** | `BLOCKED BY CAPABILITY` | plumbing proven to the boundary — see §9 |
 | DOCX | `IMPL/UNPROVEN` | `docxText.ts` exists; never exercised through Chat |
 | TXT / MD / JSON / XML / YAML / code | `IMPL/UNPROVEN` | indexed |
@@ -108,10 +108,18 @@ with the payment terms."
 **Target:** "this file", "the table above", "what I said earlier", "compare that with the first
 document" must resolve. Switching away and back must not destroy working context.
 
-**Current: `UNKNOWN` — entirely.** Conversation history is durable and grounding is reconciled
-per turn, so the mechanism exists. No reference-resolution behaviour has been exercised. This is
-the least-evidenced area of the whole product and, for a chat assistant, one of the most
-load-bearing.
+**Current: `READY FOR USER TEST` for documents.** Exercised on staging, in one conversation, in
+this order: *"Does that table cover the Cardiff lane? And what payment window does this document
+give?"* resolved both — £1743.75 and the 45-day window — then the conversation was switched away
+from, returned to, and asked *"You mentioned a service credit earlier — what percentage is it,
+and who is the escalation contact?"*, which needed **4 percent** and **Regional Operations
+Manager**: two facts that appear nowhere in the transcript, so they had to come from the document
+rather than from conversation history. After a reload, a cross-page question answered from page 1
+and page 5 together.
+
+Switching to another conversation showed **no leakage** — no grounding tray, no file, none of the
+first conversation's figures. What remains `UNKNOWN` here is everything not document-shaped:
+"what I said earlier" about prose, and cross-file comparison.
 
 ---
 
@@ -193,6 +201,7 @@ Two statuses, because the cases differ:
 | blocked item | corrected status |
 | --- | --- |
 | Scanned PDF / OCR | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — install `pdftoppm`, `pdfinfo`, `tesseract` |
+| **Every OTHER PDF, on a host with no poppler** | was `INTEGRATION INCOMPLETE`, **fixed** — see §12 |
 | Image understanding | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — approve a vision model on staging; production already has one |
 | Microphone / speech-to-text | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — provide a speech runtime |
 | Image generation | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — configure a provider |
@@ -224,3 +233,89 @@ prose → legacy office → HEIC → ZIP (lowest value, largest security surface
 
 Model qualification and training stay outside this gate unless an end-to-end Chat test shows the
 model is the blocking layer — which requires first proving the information reached it intact.
+
+---
+
+## 11. The PDF acceptance slice, through the real composer
+
+Staging `readercap-09135`, signed in, five-page digital contract uploaded **through the Action
+Hub**, not the API. Every step passed:
+
+| step | result |
+| --- | --- |
+| Upload via the composer | stored, 5066 bytes, chip *"Ready — MigraPilot can read this · 5 KB"* |
+| Summary | correct, cited `pages 1-5` |
+| Page-specific — cancellation | *"not less than 90 days written notice"*, page 4 |
+| Table | **£4580.00** Leeds-Glasgow and **£15388.75** aggregate |
+| Deictic — *"that table"*, *"this document"* | Cardiff **£1743.75**, 45-day payment window |
+| Switch away to another conversation | no grounding tray, no file, no figures — clean isolation |
+| Switch back | full thread and grounding tray restored |
+| Follow-up needing NEW facts | **4 percent** credit, **Regional Operations Manager** — neither in the transcript |
+| Reload | all five turns, attachment chips and grounding tray restored from PostgreSQL |
+| Continue after reload | initial term **24 months** (page 1) + suspension **60 days unpaid, 10 days notice** (page 5) |
+
+Also observed working: the Action Hub disables Photos & images, Search the web and Email each
+with its own authority's sentence, and Dictate names `MIGRAPILOT_SPEECH_RUNTIME_URL`.
+
+🚨 **This is `READY FOR LOCAL USER TEST`, not user-proven.** An automated browser completing the
+scenario is not the owner using the product.
+
+---
+
+## 12. The defect the slice found: a readable PDF reported unreadable
+
+**`/api/files` said `reader_unavailable`, `readable: false`, *"This document could not be read:
+the page renderer is not available on this server"* — about the very document chat had just
+answered six questions from.**
+
+Three layers, captured before anything changed:
+
+| layer | state |
+| --- | --- |
+| file state | `reader_unavailable`, `readable: false` |
+| index / retrieval | indexed and retrieved; answers drew on pages 1-5 |
+| answer state | all correct, cited `meridian-agreement.pdf` |
+
+### Cause
+
+Staging has **no poppler at all** (`pdfinfo`, `pdftotext`, `pdftoppm`, `tesseract` all absent —
+measured, not assumed). `probePdfTextLayer` calls `pdfPageCount` → `pdfinfo` as its **first**
+step, so it threw before the document's content was examined. The runner's
+`.catch(() => null)` then made "I could not tell" indistinguishable from "there is no text
+layer", the document fell through to the scanned pipeline, and that failed on the missing
+rasteriser — producing a verdict about **the user's file** from the absence of a binary.
+
+The capability module had already written this down — *"`pdfinfo` … is not merely a page counter;
+it is the gate in front of the whole escalation route"* — but as a caveat, not a fix. Meanwhile it
+reported `pdf_text_extraction: available` on the grounds that it is in-process, which was true of
+`pdfText.ts` and **not** of the job pipeline that actually ran.
+
+### Fix
+
+`pdfTextLayer.ts` now falls back to the in-process reader (`unpdf`, already a dependency) when —
+and only when — the poppler binary is **missing**. The module's contract is reading a PDF that
+already carries its text; it now honours that wherever the service runs, which is what
+`documentReaderCapability` has always claimed.
+
+Bounded and honest about its limits:
+
+- a poppler that **ran and failed** is telling us about the document, and is never overruled
+- a genuine scan still reports `hasTextLayer: false` and escalates to OCR **deliberately**, rather
+  than by its caller swallowing an error
+- above the same ceiling the synchronous extractor uses, the **original** poppler error is
+  rethrown — there, `reader_unavailable` is simply true
+
+### Measured, before and after, on the real `DocumentJobRunner` with poppler removed
+
+| | state sequence | pages indexed |
+| --- | --- | ---: |
+| before | `queued → matching_known_source → rendering_pages → reader_unavailable` | 0 |
+| after | `queued → matching_known_source → reading_text ×6 → indexing → ready` | 5 |
+
+The "before" run reproduces staging's live sentence exactly.
+
+### Still the owner's call, and NOT fixed by this
+
+Installing `pdftoppm` / `pdfinfo` / `tesseract` is what unlocks **scanned** PDFs and OCR. This fix
+deliberately does not substitute for that: it stops a *text-layer* PDF being blamed on a renderer
+it never needed.

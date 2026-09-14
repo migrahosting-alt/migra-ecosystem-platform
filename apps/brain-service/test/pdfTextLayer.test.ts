@@ -200,3 +200,87 @@ test('empty OCR falls back to the text layer before reporting failure', () => {
   assert.match(jobs, /if \(map\.pages\.length === 0\)/, 'empty OCR must be detected');
   assert.match(jobs, /OCR recovered nothing; checking for a text layer/);
 })
+
+/*
+ * ---------------------------------------------------------------------------
+ * A HOST WITH NO POPPLER.
+ *
+ * 🚨 THE DEFECT THESE PIN. Staging had no poppler at all. `probePdfTextLayer`
+ * calls `pdfPageCount` — `pdfinfo` — as its FIRST step, so every PDF threw
+ * before its content was examined, the runner read that as "no text layer", and
+ * the document fell through to the scanned pipeline, which failed on the
+ * missing rasteriser. A 5 KB five-page digital contract was reported in Files as
+ * "This document could not be read: the page renderer is not available on this
+ * server" while chat answered six questions from it correctly, because the
+ * in-process reader had read it perfectly.
+ *
+ * PATH is emptied rather than mocked: the binaries are found by the OS at spawn
+ * time, so removing them from PATH reproduces the deploy target exactly, which a
+ * stubbed `execFile` would not.
+ */
+const withoutPoppler = async <T>(run: () => Promise<T>): Promise<T> => {
+  const path = process.env.PATH;
+  process.env.PATH = '/nonexistent';
+  try {
+    return await run();
+  } finally {
+    process.env.PATH = path;
+  }
+};
+
+test('a text-layer PDF is still read when poppler is not installed', async () => {
+  const { probe, extraction } = await withoutPoppler(async () => {
+    const probe = await probePdfTextLayer(TEXT_PDF);
+    return { probe, extraction: await extractPdfTextPages(TEXT_PDF, probe.pages, {}) };
+  });
+
+  assert.equal(probe.hasTextLayer, true, probe.reason);
+  assert.ok(probe.pages >= 1, 'the page count must survive the missing pdfinfo');
+  assert.equal(extraction.pages.length, probe.pages);
+  assert.ok(extraction.totalCharacters > 0, 'the text must actually come back');
+});
+
+test('a scan still escalates to OCR when poppler is not installed', async () => {
+  /*
+   * The fallback must not rescue a document it cannot read. An image-only PDF
+   * still HAS pages — so the count answers — but no text on them, so the probe
+   * says so on the evidence and the runner sends it to OCR deliberately rather
+   * than by swallowing an error.
+   */
+  const { pages, probe } = await withoutPoppler(async () => ({
+    pages: await pdfPageCount(SCANNED_PDF),
+    probe: await probePdfTextLayer(SCANNED_PDF),
+  }));
+
+  assert.ok(pages >= 1, 'a scan has pages even with no text on them');
+  assert.equal(probe.hasTextLayer, false, probe.reason);
+});
+
+test('a single page still reads by number when poppler is not installed', async () => {
+  const [viaFallback, viaPoppler] = [
+    await withoutPoppler(() => extractPdfPageText(TEXT_PDF, 1)),
+    await extractPdfPageText(TEXT_PDF, 1),
+  ];
+  // Different readers, so the exact whitespace differs; the words must not.
+  const words = (s: string) => s.replace(/\s+/g, ' ').trim().slice(0, 60);
+  assert.ok(words(viaFallback).length > 0, 'the fallback must return page 1');
+  assert.equal(words(viaFallback), words(viaPoppler));
+});
+
+test('above the in-process ceiling the truthful poppler failure survives', () => {
+  /*
+   * In-process parsing holds the whole document in the heap — the cost
+   * `pdftotext` was chosen to avoid — so the fallback stops at the same ceiling
+   * the synchronous extractor uses. Above it the ORIGINAL error is rethrown,
+   * because `reader_unavailable` is then simply TRUE: this host really cannot
+   * read that document.
+   *
+   * Asserted on the source: the ceiling is read at module load, so exercising it
+   * would need a whole child process for one branch.
+   */
+  const src = readFileSync(
+    fileURLToPath(new URL('../../src/engine/rag/pdfTextLayer.ts', import.meta.url)), 'utf8');
+  assert.match(src, /if \(info\.size > DEFAULT_MAX_INDEX_FILE_BYTES\) throw popplerError;/);
+  assert.match(src, /if \(!binaryMissing\(error, POPPLER_TEXT\)\) throw error;/,
+    'a poppler that RAN and failed is telling us about the document, and must not be overruled');
+});

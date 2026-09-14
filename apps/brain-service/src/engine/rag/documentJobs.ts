@@ -17,7 +17,7 @@ import {
   readinessFromTextExtraction,
   type TextLayerPdfJobResult,
 } from './textLayerPdfJob.js';
-import { probePdfTextLayer } from './pdfTextLayer.js';
+import { probePdfTextLayer, binaryMissing } from './pdfTextLayer.js';
 import { findRegisteredArtifact, hashFile } from './artifactReuse.js';
 import { processRegisteredArtifact, readinessFromReuse } from './reusedArtifactJob.js';
 import type { DocumentReadiness } from './documentReadiness.js';
@@ -301,10 +301,13 @@ export class DocumentJobRunner {
  * disagree about which kind of failure this was.
  */
 export function isReaderUnavailable(error: unknown): boolean {
-  const message = String((error as { message?: string })?.message ?? error);
-  // The binary name and ENOENT can appear in either order — Node reports
-  // "spawn pdftoppm ENOENT" — so neither is assumed to come first.
-  return /ENOENT/i.test(message) && /(pdftoppm|pdfinfo|tesseract)/i.test(message);
+  /*
+   * `pdftotext` is deliberately NOT in this set. It is the only binary with an
+   * in-process fallback, so its absence never reaches a user-facing state — and
+   * listing it here would classify a document this host CAN read as one it
+   * cannot.
+   */
+  return binaryMissing(error, /(pdftoppm|pdfinfo|tesseract)/i);
 }
 
 /** Map a thrown error onto the state the user should see. */
