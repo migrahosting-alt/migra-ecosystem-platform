@@ -319,3 +319,44 @@ The "before" run reproduces staging's live sentence exactly.
 Installing `pdftoppm` / `pdfinfo` / `tesseract` is what unlocks **scanned** PDFs and OCR. This fix
 deliberately does not substitute for that: it stops a *text-layer* PDF being blamed on a renderer
 it never needed.
+
+---
+
+## 13. Re-run from the beginning, on the fixed release
+
+`pdftextfallback-0914` / commit `8704b715`. The file was **deleted through the Files UI** and
+re-uploaded **through the Action Hub composer**, so the whole slice ran again from nothing.
+
+**Boundary 1, the layer that was lying, now tells the truth:**
+
+| | `/api/files` |
+| --- | --- |
+| before | `reader_unavailable`, `readable: false`, *"This document could not be read…"* |
+| after | `ready`, `readable: true`, *"Ready."* |
+
+The composer chip and the Files API now **agree**. Previously the chip said readable and the API
+said the opposite about the same file.
+
+Every step passed again: summary · rate table (£4580.00, £15388.75) · deictic *"that table"* /
+*"this document"* · switch away and back · reload · continue with facts absent from the transcript
+(4% service credit, Regional Operations Manager).
+
+### Two model-layer misses, and why they are not ours
+
+| turn | answer | truth |
+| --- | --- | --- |
+| *"What does page 4 say about cancellation? Give the notice period."* | *"No specific notice period is mentioned…"* | *"not less than **ninety** days written notice"* |
+| service credit | attributed the trigger to the 96.5% target | the credit triggers **below 94 percent** |
+
+🚨 **The first was proven to be the model, not the plumbing, before it was called that.** Asked to
+*quote* the sentence, the model reproduced it verbatim — so the text was in the retrieved context
+the whole time; it simply failed to turn a spelled-out number into an answer. The summary turn
+had already got "90 days" right, so this is **inconsistency, not incapacity**.
+
+This is the lane boundary working as written: *"Model qualification stays outside this gate unless
+an end-to-end Chat test shows the model is the blocking layer — which requires first proving the
+information reached it intact."* That proof was obtained. These two go to **MigraAI Engineer**,
+not to Chat acceptance.
+
+**Still `READY FOR LOCAL USER TEST`.** The automated browser completing the scenario twice is not
+the owner using the product.

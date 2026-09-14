@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-14",
- "updatedBy": "Claude (Opus 5) — PDF ACCEPTANCE SLICE through the real composer PASSED end to end on staging, and found one real defect: a readable text-layer PDF reported as unreadable in Files. Fixed in the Brain, proven before/after on the real job runner. NOT deployed — the deploy guard is blocked by unrelated uncommitted engineer-lane work in apps/brain-service.",
+ "updatedBy": "Claude (Opus 5) — PDF SLICE re-run from the beginning on staging pdftextfallback-0914 (commit 8704b715). The file-state defect is FIXED and verified live: /api/files now reports ready/readable:true for a text-layer PDF. Plumbing passed end to end. TWO MODEL-LAYER precision misses observed, both proven NOT to be plumbing.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3457,5 +3457,40 @@
   "preExistingSuiteFailure": "unifiedAgent.test.js 'the prompt forbids searching for something it is being asked to create' — caused by UNCOMMITTED engineer-lane edits to engineerRuntime.ts that removed a phrase HEAD still contains. NOT mine, not touched.",
   "notFixedByThis": "Installing pdftoppm/pdfinfo/tesseract is what unlocks SCANNED PDFs and OCR. This fix only stops a text-layer PDF being blamed on a renderer it never needed.",
   "deployBlocker": "docs/migrapilot is clean, but deploy-brain.sh requires apps/brain-service to be clean and it holds 3 unrelated modified engineer-lane files. Owner decision required."
+ },
+ "pdfSliceRerun_2026_09_14": {
+  "release": "pdftextfallback-0914 / commit 8704b715, deployed to staging with MIGRAPILOT_ALLOW_MIGRATIONS=1 (schema 28→29)",
+  "method": "deleted the file through the Files UI, re-uploaded through the Action Hub composer, re-ran every step",
+  "boundary1Fixed": {
+   "before": "state=reader_unavailable, readable=false, 'This document could not be read: the page renderer is not available on this server'",
+   "after": "state=ready, readable=true, 'Ready.'",
+   "note": "the chip and /api/files now AGREE; previously the chip said readable and the API said not"
+  },
+  "stepsPassed": [
+   "composer upload → chip 'Ready — MigraPilot can read this · 5 KB'",
+   "summary → 96.5%, 45 days, 24-month term, 90 days notice — all correct",
+   "page 3 rate table → £4580.00 Leeds-Glasgow + £15388.75 aggregate",
+   "deictic 'that table' / 'this document' → Cardiff-Leeds £38.75/pallet + 45-day window",
+   "switch away to another conversation, then back → thread and grounding tray intact",
+   "reload → all five turns restored",
+   "continue after reload → 4% service credit + Regional Operations Manager, neither in the transcript"
+  ],
+  "modelLayerMisses": [
+   {
+    "turn": "'What does page 4 say about cancellation? Give the notice period.'",
+    "answer": "'No specific notice period is mentioned for the general cancellation clause' — WRONG",
+    "truth": "'not less than ninety days written notice'",
+    "provenNotPlumbing": "asked to quote the sentence, the model reproduced it VERBATIM — so the text was in the retrieved context all along. The model failed to convert a spelled-out number into an answer.",
+    "note": "the SUMMARY turn got '90 days' right, so this is inconsistency, not incapacity"
+   },
+   {
+    "turn": "service credit question",
+    "answer": "attributed the credit trigger to the 96.5% target",
+    "truth": "the credit triggers below 94 percent; 96.5% is the delivery target",
+    "provenNotPlumbing": "same retrieval, correct on the 4% figure and the contact — a numeric-threshold conflation"
+   }
+  ],
+  "boundaryRuling": "Per the contract: 'A weaker model is acceptable and measurable. Missing plumbing is not.' Both misses are the model layer, and the proof required by the lane boundary — that the information reached the model intact — was obtained before saying so. These belong to MigraAI Engineer, not to Chat acceptance.",
+  "status": "READY FOR LOCAL USER TEST — an automated browser completing the scenario is not the owner using the product"
  }
 }
