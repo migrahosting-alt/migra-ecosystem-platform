@@ -66,6 +66,17 @@
 !/docs/migraauth/
 !/docs/migraauth/**
 
+# docs/governance holds CHARTER.md and governance-status.json — the doctrine every
+# architecture decision is checked against, and the machine-readable ledger the Control
+# Center reads. The root allowlist ignored both, so neither had ever been committed:
+# no history, no diff, no review, and no way to satisfy the charter's own change-control
+# clause requiring the previous version be preserved. That is also why the ledger was
+# able to sit at charter_version 1.1 for a day after v1.2 came into force without anyone
+# seeing it — a file nobody can diff is a file nobody notices aging.
+# Charter IV §11: source required by production that Git ignores is a release-blocking defect.
+!/docs/governance/
+!/docs/governance/**
+
 # docs/migrapilot holds the MigraPilot runbooks — 8 are already tracked, but the root
 # allowlist hid every NEW one, so a production deployment procedure could be written and
 # never committed. Markdown only.
