@@ -28,6 +28,13 @@ export interface ComputationProvenance {
   rowsFiltered?: number
   filter?: { column: string; equals: string }
   malformedRows?: number[]
+  /**
+   * Rows the AUTHOR labelled as a total, excluded from the arithmetic.
+   *
+   * Carried out so the disclosure can be made from data rather than left to the
+   * model to remember — the same reason `formulaDerived` is structured.
+   */
+  rowsSummary?: number
 }
 
 export interface ComputationResult {
@@ -51,6 +58,17 @@ function round(n: number): number {
   return Math.round(n * 1e6) / 1e6
 }
 
+/**
+ * Is this cell the author's own word for "this row is a total"?
+ *
+ * EQUALITY, NOT CONTAINMENT. "Total" labels a summary row; "Total Systems Ltd"
+ * is a supplier and its numbers are real data. A trailing colon is kept because
+ * people write "Total:" and mean the same thing.
+ */
+function isTotalsLabel(raw: string): boolean {
+  return /^(grand\s+|sub)?(total|totals|sum)s?:?$/i.test(raw.trim())
+}
+
 export function computeColumn(
   table: ParsedTable,
   column: TableColumn,
@@ -64,8 +82,42 @@ export function computeColumn(
     )
   }
 
+  /*
+   * 🚨 A TOTALS ROW IS NOT AN OBSERVATION, AND SUMMING IT DOUBLES THE ANSWER.
+   *
+   * MEASURED, in the real product. A Q1 sheet whose Revenue column reads
+   *
+   *     North 22200 | South 15910 | East 25443.75 | West 12160 | Total 75713.75
+   *
+   * answered "The total revenue across the four regions is $151,427.50" — the
+   * four regions summed, plus the author's own total summed again. The figure
+   * was wrong, it was produced by the deterministic layer rather than by the
+   * model, and nothing in the answer hinted at it. On a sheet with less round
+   * numbers nobody would ever catch it.
+   *
+   * Most real business sheets end in a totals row, so this was not an exotic
+   * case; it was close to the default one.
+   *
+   * DETECTED FROM WHAT THE AUTHOR WROTE, not inferred from the arithmetic. The
+   * label cell must BE a totals word, not merely contain one — "Total" is a
+   * summary row, "Total Systems Ltd" is a customer. Requiring equality is what
+   * keeps this from eating real data.
+   *
+   * Excluded from every operation, not just `sum`: the maximum of a column that
+   * includes its own total is always the total, and the average is wrong by
+   * construction.
+   */
+  const summaryRows = new Set<number>()
+  table.rows.forEach((row, i) => {
+    const labels = table.columns.filter((c) => !c.quantitative)
+    for (const c of labels) {
+      if (isTotalsLabel(row[c.index]?.raw ?? '')) { summaryRows.add(i); return }
+    }
+  })
+
   let rowsFiltered = 0
-  const candidate = table.rows.filter((row) => {
+  const candidate = table.rows.filter((row, i) => {
+    if (summaryRows.has(i)) return false
     if (!options.filter) return true
     // Compared on RAW text, case-insensitively. A filter value is a label, and
     // parsing it as a number would make status="0" match a blank.
@@ -88,6 +140,7 @@ export function computeColumn(
     rowsNonNumeric,
     ...(options.filter ? { rowsFiltered, filter: { column: options.filter.column.name, equals: options.filter.equals } } : {}),
     ...(table.malformedRows.length > 0 ? { malformedRows: table.malformedRows } : {}),
+    ...(summaryRows.size > 0 ? { rowsSummary: summaryRows.size } : {}),
   }
 
   if (operation === 'count') {

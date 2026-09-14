@@ -244,6 +244,16 @@ export interface TableEvidence {
    * to make it is not a disclosure.
    */
   formulaDerived?: boolean
+  /**
+   * How many rows the AUTHOR labelled "Total" were left out of the arithmetic.
+   *
+   * Structured for the same reason `formulaDerived` is: the provenance line was
+   * already in the evidence text and a model that does not repeat it leaves the
+   * user with a figure that silently disagrees with the total printed in their
+   * own sheet. A disclosure that depends on the model choosing to make it is not
+   * a disclosure.
+   */
+  summaryRowsExcluded?: number
 }
 
 
@@ -774,6 +784,7 @@ export async function tableEvidenceFor(
 
   const lines: string[] = []
   let formulaDerived = false
+  let summaryRowsExcluded = 0
   try {
     if (operation === 'group') {
       const groupCol = table.columns.find((c) => !c.quantitative)
@@ -797,10 +808,12 @@ export async function tableEvidenceFor(
       lines.push(`${operation} of "${value.name}": ${fmtIn(result.value, value)}${label}`)
 
       const p = result.provenance
+      if (p.rowsSummary) summaryRowsExcluded = Math.max(summaryRowsExcluded, p.rowsSummary)
       const detail = [`${rows(p.rowsUsed)} used`]
       if (p.rowsBlank) detail.push(`${p.rowsBlank} blank`)
       if (p.rowsNonNumeric) detail.push(`${p.rowsNonNumeric} non-numeric`)
       if (p.rowsFiltered) detail.push(`${p.rowsFiltered} excluded by ${p.filter!.column}=${p.filter!.equals}`)
+      if (p.rowsSummary) detail.push(`${p.rowsSummary} total row${p.rowsSummary > 1 ? 's' : ''} excluded`)
       if (p.malformedRows?.length) detail.push(`malformed rows: ${p.malformedRows.join(', ')}`)
       lines.push(`  (${detail.join(', ')})`)
       /*
@@ -832,6 +845,7 @@ export async function tableEvidenceFor(
     file: fileName,
     ...(sheetName ? { sheet: sheetName } : {}),
     ...(formulaDerived ? { formulaDerived: true } : {}),
+    ...(summaryRowsExcluded > 0 ? { summaryRowsExcluded } : {}),
     operation,
     text: composeEvidence({
       fact: [

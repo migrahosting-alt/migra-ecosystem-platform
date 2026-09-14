@@ -261,3 +261,63 @@ test('a question with no recognisable operation produces no evidence', async () 
   const { tableEvidenceFor } = await import('./tableEvidence')
   assert.equal(await tableEvidenceFor('what is this file about?', ['a.csv'], '/tmp'), null)
 })
+
+// ── a sheet that carries its own total ─────────────────────────────────────
+
+/*
+ * 🚨 THE DEFECT: THE AUTHOR'S TOTAL WAS SUMMED AS IF IT WERE DATA.
+ *
+ * Measured in the real product on a Q1 sheet ending in a Total row: "the total
+ * revenue across the four regions" came back $151,427.50 — the four regions,
+ * plus the sheet's own total added again. Produced by this deterministic layer,
+ * not by the model, and disclosed nowhere. Most real business sheets end in a
+ * totals row, so this was close to the default case rather than an exotic one.
+ */
+const WITH_TOTAL = [
+  'Region,Revenue',
+  'North,22200',
+  'South,15910',
+  'East,25443.75',
+  'West,12160',
+  'Total,75713.75',
+].join('\n')
+
+test('🚨 a row the author labelled Total is not summed as data', () => {
+  const table = parseTable(WITH_TOTAL)
+  const r = computeColumn(table, cols(table, 'Revenue'), 'sum')
+  assert.equal(r.value, 75713.75, 'the four data rows, not the data plus the total')
+  assert.equal(r.provenance.rowsUsed, 4)
+  assert.equal(r.provenance.rowsSummary, 1, 'and the exclusion is reported, not silent')
+})
+
+test('the totals row is excluded from every operation, not just sum', () => {
+  const table = parseTable(WITH_TOTAL)
+  const revenue = cols(table, 'Revenue')
+  // Otherwise the maximum of a column containing its own total is always the total.
+  const max = computeColumn(table, revenue, 'max', { labelColumn: cols(table, 'Region') })
+  assert.equal(max.value, 25443.75)
+  assert.deepEqual(max.labels, ['East'])
+  assert.equal(computeColumn(table, revenue, 'average').value, round4(75713.75 / 4))
+  assert.equal(computeColumn(table, revenue, 'count').value, 4)
+})
+
+function round4(n: number): number {
+  return Math.round(n * 1e6) / 1e6
+}
+
+test('a label that merely CONTAINS a totals word is real data', () => {
+  // "Total Systems Ltd" is a supplier, and its revenue counts.
+  const table = parseTable(
+    ['Supplier,Revenue', 'Total Systems Ltd,500', 'Acme,300', 'Total,800'].join('\n'),
+  )
+  const r = computeColumn(table, cols(table, 'Revenue'), 'sum')
+  assert.equal(r.value, 800, 'the supplier stays in; only the summary row leaves')
+  assert.equal(r.provenance.rowsSummary, 1)
+})
+
+test('a sheet with no totals row reports no exclusion', () => {
+  const table = parseTable(['Region,Revenue', 'North,10', 'South,20'].join('\n'))
+  const r = computeColumn(table, cols(table, 'Revenue'), 'sum')
+  assert.equal(r.value, 30)
+  assert.equal(r.provenance.rowsSummary, undefined)
+})

@@ -1830,6 +1830,25 @@ export async function POST(request: Request): Promise<Response> {
         emit('token', { text: boundary })
       }
 
+      /*
+       * 🚨 THE EXCLUSION IS DISCLOSED, BECAUSE THE SHEET DISAGREES WITH US.
+       *
+       * A sheet that carries its own "Total" row now has that row left OUT of
+       * the arithmetic — it is a summary, not an observation, and including it
+       * doubled the answer. But the user is looking at a sheet with a total
+       * printed in it, so a figure that differs from the one on their screen
+       * must say why, or it reads as a second error rather than the correction
+       * it is.
+       */
+      if (tableEvidence?.summaryRowsExcluded && completed && answer.trim().length > 0) {
+        const n = tableEvidence.summaryRowsExcluded
+        const disclosure =
+          `\n\nThis excludes ${n === 1 ? 'the row' : `${n} rows`} the sheet labels as a total, ` +
+          `so the figure is the sum of the data rows rather than a double count.`
+        answer += disclosure
+        emit('token', { text: disclosure })
+      }
+
       if (tableEvidence?.formulaDerived && completed && answer.trim().length > 0) {
         const disclosure =
           '\n\nThis uses the workbook\u2019s saved formula result; MigraPilot did not recalculate the formula.'
