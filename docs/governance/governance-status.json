@@ -1,0 +1,112 @@
+{
+  "charter_version": "1.2",
+  "generated": "2026-09-14T00:00:00Z",
+  "source": "docs/governance/CHARTER.md",
+  "deployment_freeze": {
+    "active": true,
+    "rule": "IV \u00a71-3",
+    "message": "Freeze is SERVICE-AWARE. A service may deploy normally only when its own article_iv is COMPLIANT. Security emergency fixes may proceed under Article V \u00a74 using an immutable emergency-release procedure.",
+    "last_permitted_overlay": "20260912-web-001",
+    "scope": "per-service"
+  },
+  "ledger": [
+    {
+      "ref": "IV \u00a71-3",
+      "item": "Production maps to an immutable release and an exact commit",
+      "state": "NON_COMPLIANT",
+      "evidence": "migrateck.service and migrateck-auth-api-stage.service were both built from uncommitted working trees; live web baseline manifest dad59faf616e86f2c567078cb8969f327a7c852b0efc702ef075e895429708ac corresponds to no commit. AUTH UPDATE 2026-09-14: the auth-api SOURCE is now reconciled to Git (P1-P4 plus P4.1) and builds reproducibly, but production still runs an on-host build that maps to no commit, so this row is unchanged. Source reconciliation is not production mapping.",
+      "blocks_deployment": true
+    },
+    {
+      "ref": "III \u00a75",
+      "item": "MFA mandatory for privileged roles",
+      "state": "NON_COMPLIANT",
+      "evidence": "0 TOTP/PASSKEY credentials estate-wide; sole active platform OWNER holds password only",
+      "blocks_deployment": false
+    },
+    {
+      "ref": "III \u00a74",
+      "item": "Privileged actions trace to a named human principal",
+      "state": "IN_PROGRESS",
+      "evidence": "platform grants revoked for the retired identity, but organization-level owner not yet transferred",
+      "blocks_deployment": false
+    },
+    {
+      "ref": "III \u00a72-3",
+      "item": "First-party recovery hostname per customer-facing product",
+      "state": "COMPLIANT",
+      "evidence": "auth.migrahosting.com serving on a valid certificate to 2026-12-11; reset mail From, DKIM d= and link all on migrahosting.com",
+      "blocks_deployment": false
+    },
+    {
+      "ref": "I \u00a72",
+      "item": "Password reset delivers end to end",
+      "state": "AWAITING_VALIDATION",
+      "evidence": "authentication proven by receiver DMARC reporting (dkim=pass spf=pass); inbox placement pending owner mailbox test of message-id c42f17c4-ef04-9822-3b3d-098f2a02dffe",
+      "blocks_deployment": false
+    }
+  ],
+  "releases": {
+    "migrateck.service": {
+      "release": "20260912-web-001",
+      "artifact_manifest_sha256": "c48ec18d35e9b7d4c4b3673d61bb0106db24c5ac712a23df9a856079464c7b88",
+      "baseline_manifest_sha256": "dad59faf616e86f2c567078cb8969f327a7c852b0efc702ef075e895429708ac",
+      "provenance_verified": false,
+      "note": "Surgically valid, governance-noncompliant: the baseline is not reproducible from Git."
+    }
+  },
+  "services": {
+    "web": {
+      "unit": "migrateck.service",
+      "article_iv": "NON_COMPLIANT",
+      "normal_deploys_blocked": true,
+      "release": "20260912-web-001",
+      "reconciliation": "IN_PROGRESS",
+      "reason": "baseline not reproducible from Git; reconciliation started 2026-09-12"
+    },
+    "auth": {
+      "unit": "migrateck-auth-api-stage.service",
+      "article_iv": "NON_COMPLIANT",
+      "normal_deploys_blocked": true,
+      "release": "/opt/migra/repos/migrateck-auth-stage/app",
+      "reconciliation": "IN_PROGRESS",
+      "reason": "Source reconciled on branch reconcile/migraauth-p2: P1 import, P2 file reconciliation, P2.1 reproducibility, P2.2 crypto fail-closed, P4 clean reproducible build, P4.1 three reviewed crypto patches. Typecheck 0, tests 134/134, all release gates pass, 248-file build byte-identical across two runs. Production is UNCHANGED and still serves the unattributed on-host build; nothing has been deployed.",
+      "phase": "P4_1_APPLIED_PENDING_P3_AND_PROMOTION",
+      "source_reconciliation": "SUBSTANTIALLY_COMPLETE",
+      "production_promotion": "NOT_COMPLETE",
+      "remaining_gates": [
+        "P3  catalog comparison against the live auth database (read-only; compare only, no migration)",
+        "P4.2 a real send under nodemailer 9 to a dedicated test recipient (never a customer address)",
+        "P5  compatibility against the 16 registered production clients",
+        "P6  immutable release with provenance and a proven rollback",
+        "P7  register the Control Center OAuth client"
+      ],
+      "freeze_still_in_force_for": [
+        "new OAuth clients",
+        "redirect/callback URL changes",
+        "schema writes",
+        "key rotation",
+        "production auth deployment"
+      ]
+    },
+    "auth_web": {
+      "unit": "migrateck-auth-web-stage.service",
+      "article_iv": "NON_COMPLIANT",
+      "normal_deploys_blocked": true,
+      "release": "/opt/migra/repos/migrateck-auth-stage/app/apps/auth-web",
+      "reconciliation": "NOT_STARTED",
+      "reason": "shares the auth repo tree; rebuilt in place 2026-09-12. NOT covered by the auth-api reconciliation - that work was scoped to apps/auth-api and packages/auth-core. This service remains unreconciled."
+    }
+  },
+  "rules": {
+    "compliance_status_scope": "compliance_status MUST be attached to each deployable service, not only to the estate overall.",
+    "source_vs_promotion": "A service may be SOURCE_RECONCILED and still NON_COMPLIANT under IV \u00a71-3. Reconciling source to Git does not make production map to a commit; only an immutable release deployed from that commit does. Report both, so the Control Center shows neither false extreme."
+  },
+  "charter_amended": "2026-09-13",
+  "published_reference": {
+    "url": "https://claude.ai/code/artifact/c747d8fc-60ce-465e-ae14-bda507d08a4c",
+    "articles_match_source": true,
+    "verified": "2026-09-14: renders v1.2, amended 2026-09-13, Article IV \u00a78-\u00a712 present",
+    "caveat": "Its embedded ledger is a 2026-09-13 snapshot and does NOT reflect the auth reconciliation progress recorded here. The articles match; the status rows inside it do not."
+  }
+}
