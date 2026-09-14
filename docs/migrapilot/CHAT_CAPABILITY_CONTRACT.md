@@ -175,7 +175,33 @@ that, "blocked" is an excuse rather than a diagnosis.
 | **Image generation** | request reaches the Brain, refusal returns as a typed SSE frame, consumer maps it to `image_generation_not_configured`. Missing piece: a generation provider. |
 | **Web search / email** | registered in the capability registry, reported unavailable with the engine's own sentence. Missing piece: configuration. |
 
-Every one of these is plumbing-complete to the boundary. **None is blocked by our implementation.**
+### 🚨 Correction: "none is blocked by our implementation" was too strong
+
+That sentence, as first written, let a truthful refusal stand in for a delivered feature. It is
+not true that nothing on our side is missing. A renderer binary our deployment does not install,
+a speech runtime nobody configured, a generation provider with no credentials — these are
+**product and deployment integration gaps on our side**, even though the code detects and reports
+them correctly.
+
+Two statuses, because the cases differ:
+
+| status | meaning |
+| --- | --- |
+| `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` | our code path is complete and measured to the boundary; the capability exists but is not installed or configured **here** |
+| `INTEGRATION INCOMPLETE` | our side has work left beyond configuration — a pipeline, a format, a wiring step |
+
+| blocked item | corrected status |
+| --- | --- |
+| Scanned PDF / OCR | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — install `pdftoppm`, `pdfinfo`, `tesseract` |
+| Image understanding | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — approve a vision model on staging; production already has one |
+| Microphone / speech-to-text | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — provide a speech runtime |
+| Image generation | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — configure a provider |
+| Web search / email | `PLUMBING VERIFIED / CAPABILITY NOT DEPLOYED` — configure; Gmail additionally needs an HTTPS origin and a redirect URI |
+| **Audio attachments** | `INTEGRATION INCOMPLETE` — there is no audio pipeline at all. Nothing to configure; a format and a route must be built |
+
+What remains true, and is the useful half: **none of these is a chat-routing defect.** The turn
+reaches the boundary and reports honestly. That is a statement about where the gap is, not a
+claim that there is no gap — and "the refusal is truthful" is never acceptance of the feature.
 
 ---
 
