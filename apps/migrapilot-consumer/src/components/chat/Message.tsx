@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import Link from 'next/link'
 import { SpeakButton } from './SpeakButton'
 import { FeedbackControls } from './FeedbackControls'
 import { useFeedback } from '@/state/FeedbackProvider'
 import {
   BarChart3,
+  Check,
   CheckCheck,
   Copy,
   ExternalLink,
@@ -20,10 +21,12 @@ import {
   Rocket,
   ShieldCheck,
   TriangleAlert,
+  X,
 } from 'lucide-react'
 import { FileTypeIcon } from '@/components/ui/FileTypeIcon'
 import { LogoMark } from '@/components/brand/Logo'
 import { RichText } from './RichText'
+import { copyableText, speakableText } from '@/features/chat/messageText'
 import { RichAnswer } from '@/features/markdown/RichAnswer'
 import { ImageViewer } from './ImageViewer'
 import { SourceIcon } from './SourceIcon'
@@ -406,6 +409,17 @@ function AssistantTurn({
 }) {
   const feedback = useFeedback()
   const blocks = message.blocks ?? []
+  /*
+   * A copy that confirms nothing is indistinguishable from one that failed.
+   * Cleared on a timer so the control returns to its resting state rather than
+   * claiming "copied" about an answer the user has since scrolled past.
+   */
+  const [copied, setCopied] = useState<'ok' | 'failed' | null>(null)
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(null), 2000)
+    return () => clearTimeout(t)
+  }, [copied])
 
   /*
    * A failed turn is a system notice, not an answer.
@@ -609,33 +623,40 @@ function AssistantTurn({
                   <span>Try again</span>
                 </button>
               )}
-              <SpeakButton
-                text={blocks
-                  .map((block) =>
-                    block.type === 'paragraph'
-                      ? block.text
-                      : [block.title, ...block.items].filter(Boolean).join('. '),
-                  )
-                  .join(' ')
-                  .replace(/\*\*/g, '')}
-              />
+              <SpeakButton text={speakableText(blocks)} />
+              {/*
+                * 🚨 THREE DEFECTS, ONE BUTTON.
+                *
+                * It stripped every `**` from the whole answer — including inside
+                * code — so `def f(*args, **kwargs)` reached the clipboard as
+                * `def f(*args, kwargs)`. Copying a code answer produced BROKEN
+                * CODE, silently, visible only after pasting somewhere else.
+                *
+                * It also confirmed nothing, so a click looked identical whether
+                * it worked or not; and it swallowed a rejected clipboard write,
+                * leaving the user certain they had copied something they had
+                * not. A clipboard is unavailable often enough — insecure
+                * context, denied permission — that silence is a real lie.
+                */}
               <button
-                aria-label="Copy answer"
-                title="Copy answer"
+                aria-label={copied === 'ok' ? 'Answer copied' : copied === 'failed' ? 'Copy failed' : 'Copy answer'}
+                title={copied === 'failed' ? 'Could not copy — your browser blocked clipboard access' : 'Copy answer'}
                 onClick={() => {
-                  const text = blocks
-                    .map((block) =>
-                      block.type === 'paragraph'
-                        ? block.text
-                        : [block.title, ...block.items].filter(Boolean).join('\n'),
-                    )
-                    .join('\n\n')
-                    .replace(/\*\*/g, '')
-                  void navigator.clipboard?.writeText(text).catch(() => undefined)
+                  const text = copyableText(blocks)
+                  const write = navigator.clipboard?.writeText(text)
+                  if (!write) { setCopied('failed'); return }
+                  void write.then(() => setCopied('ok')).catch(() => setCopied('failed'))
                 }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                className={cn(
+                  'inline-flex h-8 w-8 items-center justify-center rounded-lg transition-colors',
+                  copied === 'ok' && 'text-emerald-600',
+                  copied === 'failed' && 'text-rose-600',
+                  !copied && 'text-slate-400 hover:bg-slate-100 hover:text-slate-600',
+                )}
               >
-                <Copy className="h-4 w-4" />
+                {copied === 'ok' ? <Check className="h-4 w-4" />
+                  : copied === 'failed' ? <X className="h-4 w-4" />
+                  : <Copy className="h-4 w-4" />}
               </button>
               {/*
                 * Replaced two useState buttons that had no route behind them. The
