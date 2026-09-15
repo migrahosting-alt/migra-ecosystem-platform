@@ -1865,7 +1865,7 @@ export async function POST(request: Request): Promise<Response> {
        * rather than merely followed by something better.
        */
       if (tableEvidence?.workbookBoundary && completed && answer.trim().length > 0) {
-        const boundary = `\n\n${workbookDisclosureFor(answer)}`
+        const boundary = `\n\n${workbookDisclosureFor(answer, sheetContent.length > 0)}`
         answer += boundary
         emit('token', { text: boundary })
       }

@@ -29,6 +29,29 @@ export const SPREADSHEET_CAPABILITY_STATEMENT =
   'labels, and numeric values, but general document-style text search inside ' +
   'spreadsheets is not available yet.'
 
+/**
+ * The same sentence, for a turn where the workbook's cells WERE put in front of
+ * the model.
+ *
+ * 🚨 THE ORIGINAL SENTENCE WENT STALE THE DAY THE CELLS STARTED BEING SHOWN.
+ *
+ * A cross-file answer correctly quoted a payment term out of a workbook's Terms
+ * sheet and then closed with "general document-style text search inside
+ * spreadsheets is not available yet" — a denial contradicted by the sentence
+ * above it. That is precisely the failure this module was written to prevent,
+ * arriving from the other direction: not the model overclaiming a limit, but US
+ * asserting one we no longer have.
+ *
+ * What remains true, and is worth saying, is the narrower thing: the workbook is
+ * read in one pass rather than retrieved from, so a workbook too large to show
+ * in full is shown in part — and when that happens the truncation caveat travels
+ * with the evidence itself.
+ */
+export const SPREADSHEET_CONTENT_STATEMENT =
+  'The values above were read from this workbook’s cells. MigraPilot reads a ' +
+  'workbook in one pass rather than searching it like a document, so a very ' +
+  'large workbook may be read only in part.'
+
 /** Stated when a reply has already denied reading cell text, to contradict it in place. */
 export const CELL_TEXT_CORRECTION =
   'Correction: the labels and values above were read from this workbook’s cells.'
@@ -146,10 +169,13 @@ const TEXT_CREDITED =
  * can make a live model do on demand — leaving the one branch that exists for
  * the production defect as the one branch nothing checked.
  */
-export function workbookDisclosureFor(answer: string): string {
-  return deniesCellText(answer)
-    ? `${CELL_TEXT_CORRECTION} ${SPREADSHEET_CAPABILITY_STATEMENT}`
-    : SPREADSHEET_CAPABILITY_STATEMENT
+/**
+ * @param sheetShown true when this turn put a workbook's own cells in front of
+ *   the model, which makes the "no text search" sentence false for this answer.
+ */
+export function workbookDisclosureFor(answer: string, sheetShown = false): string {
+  const statement = sheetShown ? SPREADSHEET_CONTENT_STATEMENT : SPREADSHEET_CAPABILITY_STATEMENT
+  return deniesCellText(answer) ? `${CELL_TEXT_CORRECTION} ${statement}` : statement
 }
 
 /**

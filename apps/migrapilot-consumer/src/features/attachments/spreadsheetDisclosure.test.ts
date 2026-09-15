@@ -255,3 +255,33 @@ describe('every surface states the same boundary', () => {
     }
   })
 })
+
+// ── the statement must describe THIS turn ──────────────────────────────────
+
+describe('the disclosure describes what the turn actually did', () => {
+  /*
+   * 🚨 THE SENTENCE WENT STALE THE DAY THE CELLS STARTED BEING SHOWN.
+   *
+   * A cross-file answer correctly quoted a payment term out of a workbook's
+   * Terms sheet and then closed with "general document-style text search inside
+   * spreadsheets is not available yet" — a denial contradicted by the sentence
+   * above it. The same failure this module prevents, from the other direction:
+   * not the model overclaiming a limit, but us asserting one we no longer have.
+   */
+  it('does not deny reading cells on a turn that showed them', () => {
+    const shown = workbookDisclosureFor('The payment term is 30 days.', true)
+    assert.doesNotMatch(shown, /not available yet/)
+    assert.match(shown, /read from this workbook/i)
+  })
+
+  it('keeps the original limit when no cells were shown', () => {
+    assert.match(workbookDisclosureFor('The total is 15,688.75.', false), /not available yet/)
+  })
+
+  it('still corrects a denial in place, either way', () => {
+    const denial = 'MigraPilot cannot read any text inside spreadsheet cells.'
+    for (const shown of [true, false]) {
+      assert.match(workbookDisclosureFor(denial, shown), /Correction:/)
+    }
+  })
+})
