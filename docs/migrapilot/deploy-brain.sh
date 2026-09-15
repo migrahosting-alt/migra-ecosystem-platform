@@ -169,6 +169,33 @@ ROLLBACK_OK="$(ssh -n "$HOST" "$(release_completeness_test brain "$PREVIOUS") &&
 [ "$ROLLBACK_OK" = "yes" ] \
   || fail "the rollback target $PREVIOUS cannot serve — a brain release needs $(release_requirements brain). Deploying now would leave no validated way back."
 echo "   rollback target is complete and servable"
+
+# ── will it FIT, with room to come back from? ───────────────────────────────
+#
+# The same gate the consumer deploy carries, for the same reason and with the
+# same threshold. A deploy ran a host to zero and failed mid-extract; the
+# service was untouched because build and boot test precede cutover, but the
+# disk was then too full for release-retention.sh to sort its own candidate
+# list. "Free > one release" is NOT the bar: landing a release needs the payload,
+# the workspace to extract it in, and room for a way back to still exist.
+PAYLOAD_BYTES="$(tar -C "$APP" -cf - dist package.json 2>/dev/null | wc -c)"
+[ "${PAYLOAD_BYTES:-0}" -gt 0 ] || fail "could not size the release payload; refusing to deploy blind."
+REQUIRED_BYTES=$(( PAYLOAD_BYTES * 3 ))
+FREE_BYTES="$(ssh -n "$HOST" "df -PB1 $ROOT | awk 'NR==2 {print \$4}'")"
+human() { awk -v b="$1" 'BEGIN{ printf "%.1f GB", b/1073741824 }'; }
+echo "== free-space gate"
+echo "   payload $(human "$PAYLOAD_BYTES") x3 (payload + workspace + rollback margin) = $(human "$REQUIRED_BYTES")"
+echo "   free on $ROOT: $(human "$FREE_BYTES")"
+if [ "${FREE_BYTES:-0}" -lt "$REQUIRED_BYTES" ]; then
+  echo >&2
+  echo "not enough room on $HOST to land this release safely." >&2
+  echo "  need $(human "$REQUIRED_BYTES"), free $(human "$FREE_BYTES")." >&2
+  echo "Reclaim with the governed path, which keeps active, rollback, in-use and PINNED:" >&2
+  echo "  ssh $HOST /usr/local/bin/release-retention.sh --base=$(dirname "$ROOT") --apply" >&2
+  echo "Nothing has been created or changed on the host." >&2
+  exit 1
+fi
+echo "   enough room to land the release and keep a way back"
 # 🚨 THE RECOVERY INSTRUCTION IS ITSELF A PRODUCT, AND THIS ONE WAS DANGEROUS.
 #
 # This string is what an operator copies at the worst possible moment — it is
@@ -373,6 +400,16 @@ echo "$RUNNING" | grep -q "\"commit\":\"$COMMIT\""            || fail "$UP IS SE
 echo "$RUNNING" | grep -q "\"release\":\"$REL\""              || fail "$UP IS SERVING A DIFFERENT RELEASE — roll back: $ROLLBACK_CMD"
 echo "$RUNNING" | grep -q "\"buildId\":\"sha256:$BUILD_ID\""  || fail "$UP IS SERVING A DIFFERENT BUILD — roll back: $ROLLBACK_CMD"
 echo "$RUNNING" | grep -q '"stamped":true'                    || fail "the $DEPLOY_TARGET_NAME artifact is not stamped — roll back: $ROLLBACK_CMD"
+
+# ── reclaim, and ONLY now ───────────────────────────────────────────────────
+#
+# AFTER the health proof, never before: a pruning tool running during a wedged
+# deployment decides what to delete from a state nobody has validated. Failures
+# here are reported and do NOT fail the deploy — the release is serving.
+echo
+echo "== retention (post-cutover, keep-set proven)"
+ssh -n "$HOST" "/usr/local/bin/release-retention.sh --base=$(dirname "$ROOT") --keep=1 --apply" \
+  || echo "   retention did not complete - the release is serving; reclaim space manually."
 
 cat <<DONE
 

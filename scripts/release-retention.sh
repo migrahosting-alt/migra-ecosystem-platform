@@ -14,8 +14,9 @@
 # POLICY (conservative, set by Bonex 2026-08-27):
 #   keep the active release
 #   keep the rollback target
-#   keep the 5 most recent additional releases
+#   keep the 5 most recent additional releases   (--keep=N to narrow)
 #   keep anything a running process is using
+#   keep anything explicitly PINNED — a `.pinned` marker file inside the release
 #   staging trees are kept only while a release operation owns them
 #
 # 🚨 It never globs. Age orders the candidates; it never selects them. Every
@@ -158,6 +159,14 @@ for APP in consumer brain-service; do
     elif [ "$R" = "$ROLLBACK" ]; then reason="ROLLBACK TARGET"
     elif grep -qxF "$R" "$INUSE"; then reason="IN USE by a running process"
     elif grep -qxF "$R" "$LINKED"; then reason="TARGET of a current/previous symlink"
+    # 🚨 AN EXPLICIT PIN OUTRANKS AGE, and is the only way to keep a release
+    # that nothing points at. Automatic retention answers "what is needed to
+    # serve and to roll back"; a pin answers "a human wants this kept", which
+    # no amount of pointer-walking can infer. A marker file inside the release
+    # travels with it, survives a rename of the directory, and is visible to
+    # anyone listing it — unlike a list held somewhere else that goes stale the
+    # first time a release is removed by hand.
+    elif [ -e "$R/.pinned" ]; then reason="PINNED ($(head -c 120 "$R/.pinned" 2>/dev/null | tr -d '\n' || true))"
     elif ! servable "$R"; then reason=""  # cannot boot — it is not a spare
     elif [ "$KEPT" -lt "$KEEP_EXTRA" ]; then reason="within the $KEEP_EXTRA most recent"; KEPT=$((KEPT+1))
     fi

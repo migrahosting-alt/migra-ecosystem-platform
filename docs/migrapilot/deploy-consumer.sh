@@ -135,6 +135,51 @@ ROLLBACK_OK="$(ssh -n "$HOST" "$(release_completeness_test consumer "$PREVIOUS")
 [ "$ROLLBACK_OK" = "yes" ] \
   || fail "the rollback target $PREVIOUS cannot serve — a consumer release needs $(release_requirements consumer). Deploying now would leave no validated way back."
 echo "   rollback target is complete and servable"
+
+# ── will it FIT, with room to come back from? ───────────────────────────────
+#
+# 🚨 A DEPLOY RAN THE DISK TO ZERO AND FAILED MID-EXTRACT. Staging kept serving
+# the previous release — the build and boot test precede cutover, so nothing
+# reached the running service — but the deploy died with "No space left on
+# device" and left a truncated release directory behind. Worse, by then the disk
+# was so full that release-retention.sh could not sort its own candidate list:
+# the tool that exists to reclaim space could not run.
+#
+# 🚨 "FREE > ONE RELEASE" IS THE WRONG THRESHOLD, which is why it is not the one
+# used here. Landing a release needs room for three things at once:
+#
+#   NEW        the payload about to be extracted
+#   WORKSPACE  transient extraction, and whatever the runtime writes on start
+#   ROLLBACK   room for a way back to still exist after this one lands
+#
+# Measured from the ACTUAL payload rather than assumed: node_modules is
+# hardlinked from the live release rather than copied, so a release costs about
+# what this tar carries — nothing like the 1.3 GB a release directory appears to
+# occupy when measured on its own.
+PAYLOAD_BYTES="$(tar -C "$APP" -cf - --exclude='.next/cache' .next package.json next.config.ts public 2>/dev/null | wc -c)"
+[ "${PAYLOAD_BYTES:-0}" -gt 0 ] || fail "could not size the release payload; refusing to deploy blind."
+REQUIRED_BYTES=$(( PAYLOAD_BYTES * 3 ))
+FREE_BYTES="$(ssh -n "$HOST" "df -PB1 $ROOT | awk 'NR==2 {print \$4}'")"
+human() { awk -v b="$1" 'BEGIN{ printf "%.1f GB", b/1073741824 }'; }
+echo "== 4c. free-space gate"
+echo "   payload $(human "$PAYLOAD_BYTES") x3 (payload + workspace + rollback margin) = $(human "$REQUIRED_BYTES")"
+echo "   free on $ROOT: $(human "$FREE_BYTES")"
+if [ "${FREE_BYTES:-0}" -lt "$REQUIRED_BYTES" ]; then
+  echo >&2
+  echo "not enough room on $HOST to land this release safely." >&2
+  echo "  need $(human "$REQUIRED_BYTES") - payload $(human "$PAYLOAD_BYTES"), plus the same again for" >&2
+  echo "  extraction workspace and for a rollback target to still exist afterwards." >&2
+  echo "  free $(human "$FREE_BYTES")." >&2
+  echo >&2
+  echo "Reclaim with the governed path, which keeps the active release, the rollback" >&2
+  echo "target, anything a running process holds, and anything PINNED:" >&2
+  echo "  ssh $HOST /usr/local/bin/release-retention.sh --base=$(dirname "$ROOT")" >&2
+  echo "  ssh $HOST /usr/local/bin/release-retention.sh --base=$(dirname "$ROOT") --apply" >&2
+  echo >&2
+  echo "Nothing has been created or changed on the host." >&2
+  exit 1
+fi
+echo "   enough room to land the release and keep a way back"
 ssh -n "$HOST" "sudo -n rm -rf --one-file-system $ROOT/releases/$REL"
 ssh -n "$HOST" "sudo mkdir -p $ROOT/releases/$REL && sudo chown \$(id -un):\$(id -gn) $ROOT/releases/$REL"
 tar -C "$APP" -czf - --exclude='.next/cache' .next package.json next.config.ts public \
@@ -320,6 +365,23 @@ echo "$RUNNING" | grep -q "\"buildId\":\"$BUILD_ID\"" || fail "$UP IS SERVING A 
 # than handing them nothing. It now names the governed mechanism, which plans
 # first, checks both releases with the shared completeness predicate, swaps both
 # pointers together and then asks the running process what it serves.
+
+# ── reclaim, and ONLY now ───────────────────────────────────────────────────
+#
+# 🚨 AFTER THE HEALTH PROOF, NEVER BEFORE. Every line above this point can still
+# fail the deploy, and a pruning tool running during a wedged deployment decides
+# what to delete from a state nobody has validated. Reaching here means the
+# running process has already reported the new release, so the keep-set is known
+# good: this release is ACTIVE, the one it replaced is the ROLLBACK TARGET, and
+# one more is held behind them.
+#
+# Failures here are reported and do NOT fail the deploy. The release is serving;
+# a disk fuller than we would like is not a reason to hand back a red deployment.
+echo
+echo "== 11. retention (post-cutover, keep-set proven)"
+ssh -n "$HOST" "/usr/local/bin/release-retention.sh --base=$(dirname "$ROOT") --keep=1 --apply" \
+  || echo "   retention did not complete - the release is serving; reclaim space manually."
+
 cat <<DONE
 
 DEPLOYED — and proven, link by link:
