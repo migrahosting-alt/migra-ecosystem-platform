@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-15",
- "updatedBy": "Claude (Opus 5) — MULTIPLE ATTACHMENTS slice: THREE real defects, all ours, all fixed and live-verified (disclosure-0915). A workbook attached beside a document contributed NOTHING unless the prompt named an aggregate; a pair attached together was SPLIT on the next turn; and we then asserted a limit we no longer had. Per-file provenance now works.",
+ "updatedBy": "Claude (Opus 5) — CONTEXTUAL REFERENCES: ordinal resolution was BROKEN (\"the first document doesn't say anything about cancellation\" about a page headed Cancellation) and is FIXED + live-verified on ordinals-0915. Also: staging ran out of disk mid-deploy; owner chose to grow the volume 12G->20G rather than prune.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3630,5 +3630,41 @@
    "why": "the evidence grep filtered snapshots to paragraph/listitem/link nodes and hid their strong/text children. The bullets carried a correct attributed comparison of both figures.",
    "lesson": "a reading taken through my own instrument is a claim about the instrument until checked against raw evidence — the same shape as the pre-hydration snapshot error and the exit-0 report"
   }
+ },
+ "contextualReferences_2026_09_15": {
+  "status": "ordinals CLOSED and live-verified; other reference kinds still open",
+  "release": "ordinals-0915 / b96b8ce3",
+  "defect": {
+   "symptom": "'What does the first document say about cancellation?' -> 'The first document doesn\\'t say anything about cancellation.' The PDF's page 4 is headed 'Page 4 - Cancellation' and the citation on that answer read pages 2-5.",
+   "discrimination": "asking again with the FILE NAMED answered correctly — so the evidence was complete and the ORDINAL had nothing to resolve against",
+   "cause": "chunks are labelled with a filename and content evidence names its workbook, but nothing stated the ORDER the files were provided in",
+   "fix": "state the order as a fact (upload time, from the same listing that decides availability) and let the model resolve the reference. Not inferred — resolving 'first' ourselves would put a guess where a boundary belongs.",
+   "bounds": [
+    "nothing emitted for a single attachment",
+    "a file with no timestamp keeps its given position"
+   ]
+  },
+  "liveProof": {
+   "the first document": "the PDF — 90 days notice + the three-consecutive-months clause",
+   "Now compare that with the second file": "named both correctly and found they AGREE at 90 days; 'that' carried the topic across turns"
+  },
+  "stillOpen": [
+   "deictic sheet reference ('on that sheet') — sheet selection reads the current prompt only",
+   "'what I said earlier' about prose — conversation-history reference, untested",
+   "two similarly named files — untested"
+  ]
+ },
+ "stagingDiskFull_2026_09_15": {
+  "event": "ordinals-0915 deploy failed mid-extract: No space left on device",
+  "impact": "NONE to the running service — staging kept serving disclosure-0915 and answering 200. The release is built and boot-tested before cutover, so a disk-full build never reached production.",
+  "cause": "11 consumer releases on a 12G volume, five of them from this day's rapid fix-deploy-verify cycles",
+  "sizeNuance": "per-directory du reads 1.3G each but the tree totals 5.0G — releases share hard-linked files, so each extra costs ~506MB of new blocks",
+  "ownerDecision": "grow the volume, delete nothing",
+  "action": "pct resize 101 rootfs +8G on pve (infra-data had ~73G free); 12G -> 20G, 7.6G free, 60% used, resized ONLINE with no interruption",
+  "provenByTheFailure": [
+   "the deploy's build-then-cutover order held",
+   "release-retention.sh refused to run rather than prune on a wedged disk — a pruning tool failing closed means deleting nothing"
+  ],
+  "residual": "the incomplete ordinals-0915 directory from the failed run; the completeness predicate certifies it CANNOT SERVE, it is neither current nor previous, and the successful redeploy of the same name replaced it"
  }
 }

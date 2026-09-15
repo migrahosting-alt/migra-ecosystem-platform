@@ -617,3 +617,71 @@ reached the model intact and the model failed to use it on a comparison. Goes to
   is fine. The lesson is the one this programme keeps relearning: a reading
   taken through my own instrument is a claim about the instrument until it is
   checked against the raw evidence.
+
+---
+
+## 19. Contextual references — ordinals
+
+### 🚨 Defect — "the first document" resolved to nothing
+
+> *"What does the first document say about cancellation?"* →
+> **"The first document doesn't say anything about cancellation."**
+
+That contract's page 4 is headed *"Page 4 - Cancellation"*, and the citation on
+that same answer read `meridian-agreement.pdf · pages 2-5`.
+
+**Discriminated before it was diagnosed:** asking again with the **file named**
+answered correctly. Nothing was missing from the evidence — chunks arrive
+labelled with a filename and content evidence names its workbook — but nothing
+anywhere stated the ORDER the files were provided in, so an ordinal had nothing
+to resolve against.
+
+**Fix: stated, not inferred.** Resolving "first" ourselves and rewriting the
+prompt would put a guess where a boundary belongs, which is what `turnGrounding`
+already refuses. Order is something the product knows — upload time, from the
+same listing that decides availability — so it is stated as a fact and the model
+resolves the reference as a reader would. Nothing is emitted for a single
+attachment. A file with no timestamp keeps its given position: an unknown time
+is not a claim that it came first.
+
+### Verified live on `ordinals-0915`
+
+| reference | result |
+| --- | --- |
+| *"the first document"* | the PDF — **90 days' notice**, plus the three-consecutive-months clause |
+| *"Now compare that with the second file."* | *"The **first file**... 90 days... The **second file**, an Excel spreadsheet, also lists a 90-day cancellation notice period"* — "that" carried the topic across turns, and the two genuinely agree |
+
+### Still open in this area
+
+- **Deictic sheet reference** — *"on that sheet"* still asks which sheet. Sheet
+  selection reads the current prompt only. Unfixed.
+- **"What I said earlier" about prose** — conversation-history reference, as
+  opposed to document reference. Untested.
+- **Two similarly named files** — untested.
+
+---
+
+## 20. Operational: staging ran out of disk
+
+The `ordinals-0915` deploy failed mid-extract with **"No space left on device"**.
+Staging kept serving `disclosure-0915` throughout and answered 200 — the release
+is built and boot-tested before any cutover, so a disk-full build never reached
+the running service.
+
+Cause: **11 consumer releases on a 12 G volume**, five of them from this day's
+rapid fix-deploy-verify cycles. Per-directory `du` reads 1.3 G each but the tree
+totals 5.0 G — the releases share hard-linked files, so each additional one costs
+about 506 MB of new blocks.
+
+**Owner decision: grow the volume, delete nothing.** `pct resize 101 rootfs +8G`
+on the pve host — `infra-data` had ~73 G free. Result: **12 G → 20 G, 7.6 G free,
+60% used**, resized online with the container running and no interruption.
+
+Two things the failure proved rather than cost: the deploy's build-then-cutover
+order held, and `release-retention.sh` refused to run at all rather than prune on
+a wedged disk — a pruning tool failing closed means deleting nothing.
+
+One artefact remains: the incomplete `ordinals-0915` directory from the failed
+run, which the completeness predicate certifies **cannot serve**. It is not
+`current`, not `previous`, and retention would skip it. Left in place per the
+no-deletion decision; the successful redeploy of the same name replaced it.
