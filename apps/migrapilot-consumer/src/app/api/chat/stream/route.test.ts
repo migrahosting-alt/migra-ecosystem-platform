@@ -1630,20 +1630,39 @@ test('a COMPUTED figure is attributed too, not only retrieved text', () => {
    * `scripts/verify-table-persistence.mjs` across all three formats.
    */
   const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
-  assert.match(
-    source,
-    /\[\.\.\.new Set\(\[\.\.\.groundedFiles, tableEvidence\.file\]\)\]/,
-    'the computed file must join the attributable set',
-  )
+  /*
+   * EXTENDED once a second kind of non-retrieved evidence appeared. A workbook
+   * whose CELLS were shown to the model is a source of the answer exactly as a
+   * computed figure is, and with two documents attached a citation that credits
+   * only the retrieved one tells the user the wrong file.
+   *
+   * Asserted on the PARTS rather than one exact expression: the invariant is
+   * that all three kinds of evidence join a single set before the library
+   * intersection, and pinning the precise punctuation made a correct refactor
+   * fail for the wrong reason once already.
+   */
+  const attributable = /const attributable =[\s\S]{0,400}?\n\n/.exec(source)?.[0] ?? ''
+  assert.ok(attributable.includes('new Set('), 'attribution must union its sources')
+  for (const part of ['...groundedFiles', 'tableEvidence.file', '...shown']) {
+    assert.ok(
+      attributable.includes(part),
+      `${part} must join the attributable set before the library intersection`,
+    )
+  }
   assert.match(
     source,
     /await attributedFiles\(attributable\)/,
     'and must still pass through the ownership intersection',
   )
+  /*
+   * A turn grounded ONLY by a computation must still attribute — and so must one
+   * grounded only by a workbook whose cells were shown, which is the same
+   * situation reached by a different route.
+   */
   assert.match(
     source,
-    /\(grounded \|\| Boolean\(tableEvidence\)\) && completed/,
-    'a turn grounded ONLY by a computation must still attribute',
+    /grounded \|\| Boolean\(tableEvidence\) \|\| shown\.length > 0/,
+    'a turn grounded only by a computation or a shown sheet must still attribute',
   )
 })
 

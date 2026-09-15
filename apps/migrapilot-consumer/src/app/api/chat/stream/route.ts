@@ -69,6 +69,7 @@ import { decideAttachmentState } from '@/server/files/attachmentState'
 import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
 import { workbookDisclosureFor } from '@/features/attachments/spreadsheetDisclosure'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
+import { sheetContentEvidenceFor } from '@/server/tables/sheetContent'
 import { projectEvidenceFor } from '@/server/projects/projectEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
@@ -1111,6 +1112,30 @@ export async function POST(request: Request): Promise<Response> {
         : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
 
       /*
+       * 🚨 AN ATTACHED WORKBOOK IS SHOWN TO THE MODEL, NOT KEPT BEHIND A VERB.
+       *
+       * "Compare the payment terms in these two files" produced `grounding_active: 2`
+       * and no table evidence at all, because "compare" is not an aggregate — so the
+       * answer quoted the PDF correctly and then said "no payment terms are mentioned
+       * in the other file" about a sheet reading `Payment terms | 30`.
+       *
+       * Showing a document is not calculating with it: computed figures still require
+       * a recognised operation, and the file that produced them is excluded here so a
+       * turn never carries MigraPilot's arithmetic and the raw cells behind it as two
+       * separate claims about the same numbers.
+       */
+      const sheetContent = executing || !canGround || turnGrounding.active.length === 0
+        ? []
+        : await sheetContentEvidenceFor(
+            turnGrounding.active,
+            await userDirectory(),
+            tableEvidence?.file ?? null,
+          ).catch(() => [])
+      if (sheetContent.length > 0) {
+        trace.set('sheet_content', sheetContent.map((s) => s.file).join(','))
+      }
+
+      /*
        * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached",
        * and from "empty".
        *
@@ -1127,6 +1152,7 @@ export async function POST(request: Request): Promise<Response> {
         unreadableFiles: reconciled.unreadable,
         missingFiles: reconciled.missing,
         hasTableEvidence: Boolean(tableEvidence),
+        hasSheetContent: sheetContent.length > 0,
       })
       trace.set('attachment_state', attachmentState.kind)
 
@@ -1282,7 +1308,9 @@ export async function POST(request: Request): Promise<Response> {
        * Ordered deliberately: a project refusal must reach the model BEFORE any
        * other evidence, so it cannot be read as commentary on a table.
        */
-      const prefix = [projectEvidence?.text, tableEvidence?.text].filter(Boolean).join('\n')
+      const prefix = [projectEvidence?.text, tableEvidence?.text, ...sheetContent.map((s) => s.text)]
+        .filter(Boolean)
+        .join('\n')
       const modelPrompt = executing ? executing.prompt : prefix ? `${prefix}\n${prompt}` : prompt
 
       /*
@@ -1743,12 +1771,23 @@ export async function POST(request: Request): Promise<Response> {
        * that skipped that check would be a way to name a file the user does not
        * own.
        */
+      /*
+       * 🚨 A FILE WE PUT IN FRONT OF THE MODEL IS A SOURCE OF THE ANSWER.
+       *
+       * Attribution is what tells the user WHICH attachment a number came from,
+       * and with two documents present that is no longer a nicety. A workbook
+       * whose cells were shown must appear alongside the PDF whose pages were
+       * retrieved, or the citation quietly credits one file for both.
+       */
+      const shown = sheetContent.map((s) => s.file)
       const attributable =
-        tableEvidence && completed
-          ? [...new Set([...groundedFiles, tableEvidence.file])]
+        completed
+          ? [...new Set([...groundedFiles, ...(tableEvidence ? [tableEvidence.file] : []), ...shown])]
           : groundedFiles
       const sources =
-        (grounded || Boolean(tableEvidence)) && completed ? await attributedFiles(attributable) : []
+        (grounded || Boolean(tableEvidence) || shown.length > 0) && completed
+          ? await attributedFiles(attributable)
+          : []
 
       /*
        * THE ORDERING CAVEAT, attached only where ordering is load-bearing.

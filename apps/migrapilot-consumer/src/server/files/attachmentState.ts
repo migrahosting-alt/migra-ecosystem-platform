@@ -53,6 +53,14 @@ export interface AttachmentStateInput {
   missingFiles?: readonly string[]
   /** The deterministic table layer already produced figures for this turn. */
   hasTableEvidence?: boolean
+  /**
+   * A workbook's own cells were put in front of the model this turn.
+   *
+   * Distinct from `hasTableEvidence`, which means MigraPilot CALCULATED
+   * something. This one means the sheet was SHOWN — and a turn that was shown
+   * the file cannot honestly be refused for not being able to read it.
+   */
+  hasSheetContent?: boolean
 }
 
 /** Does the question itself ask something of a document? Index state plays no part. */
@@ -77,10 +85,20 @@ export function structuredOnly(files: readonly string[]): string[] {
  * refusal may speak over them.
  */
 export function decideAttachmentState(input: AttachmentStateInput): AttachmentTurnState {
-  const { prompt, activeFiles, unreadableFiles = [], missingFiles = [], hasTableEvidence = false } = input
+  const {
+    prompt, activeFiles, unreadableFiles = [], missingFiles = [],
+    hasTableEvidence = false, hasSheetContent = false,
+  } = input
 
   // Computed figures mean the question was answered. Nothing else applies.
   if (hasTableEvidence) return { kind: 'indexed' }
+
+  /*
+   * The workbook's cells were shown to the model, so there is something to
+   * answer from and "text search inside spreadsheets is not available" would be
+   * a refusal contradicted by the prompt it was attached to.
+   */
+  if (hasSheetContent) return { kind: 'indexed' }
 
   // A name with no file behind it is not an attachment.
   const present = activeFiles.filter((name) => !missingFiles.includes(name))
