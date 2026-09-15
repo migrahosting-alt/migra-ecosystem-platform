@@ -118,6 +118,16 @@ export class DocumentJobRunner {
            * the failure boot recovery exists to clean up, arriving here instead
            * through the front door.
            */
+          /*
+           * The raw error goes HERE, to the operator log, and nowhere near the
+           * readiness row a user can see. `describeFailure` deliberately cannot
+           * return it.
+           */
+          console.error('[documents] job failed', {
+            fileName: job.fileName,
+            state: classifyFailure(error),
+            detail: String((error as { message?: string })?.message ?? error),
+          });
           await this.deps.persist(job.scope, {
             fileName: job.fileName,
             state: classifyFailure(error),
@@ -341,7 +351,32 @@ export function describeFailure(error: unknown): string {
   const missingBinary = /ENOENT/i.test(message);
   if (missingBinary && /(pdftoppm|pdfinfo)/i.test(message)) return 'the page renderer is not available on this server';
   if (missingBinary && /tesseract/i.test(message)) return 'the text recogniser is not available on this server';
-  // Anything else that reaches `isReaderUnavailable` still gets a sentence that
-  // names the server rather than the file, so the state and the prose agree.
-  return message.slice(0, 200);
+
+  /*
+   * The recogniser ran and could not load the language it was asked for. A
+   * distinct fact from "no recogniser": the stack is installed and working, and
+   * one data file is absent. Worth its own sentence because the remedy is
+   * completely different — install a language pack, not a program.
+   */
+  if (/traineddata|Error opening data file|Failed loading language/i.test(message)) {
+    return 'the text recogniser does not have the language pack this document needs';
+  }
+
+  /*
+   * 🚨 NEVER THE RAW ERROR. This line used to be `message.slice(0, 200)`, and a
+   * user looking at their own library was shown
+   *
+   *   Command failed: tesseract /tmp/migrapilot-ocr-rkUguC/page.png
+   *   /tmp/migrapilot-ocr-rkUguC/page.png.psm3 -l hat --psm 3 tsv
+   *   Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata
+   *
+   * — server filesystem paths and a command line with its arguments, rendered
+   * as if it were a description of their document. It tells the user nothing
+   * they can act on and tells anyone reading over their shoulder how this
+   * machine is laid out.
+   *
+   * The technical detail is not lost: `runOne`'s failure path logs the raw error
+   * for operators. This function's only job is the sentence a person reads.
+   */
+  return 'this document could not be read on this server';
 }

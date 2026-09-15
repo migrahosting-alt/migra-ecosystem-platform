@@ -162,3 +162,50 @@ test('an absent counter does not turn every success into a failure', async () =>
   const runner = new DocumentJobRunner({ persist: async () => {} })
   assert.equal(runner['deps'].countIndexedChunks, undefined)
 })
+
+// ── a failure message is prose, never a shell transcript ───────────────────
+
+/*
+ * 🚨 THE LEAK. A user looking at their own library was shown, as the description
+ * of their document:
+ *
+ *   Command failed: tesseract /tmp/migrapilot-ocr-rkUguC/page.png
+ *   /tmp/migrapilot-ocr-rkUguC/page.png.psm3 -l hat --psm 3 tsv
+ *   Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata
+ *
+ * Server filesystem paths and a command line with its arguments, rendered as if
+ * it described their file. It tells the user nothing they can act on and tells
+ * anyone reading over their shoulder how this machine is laid out. The line
+ * responsible was `return message.slice(0, 200)`.
+ */
+test('describeFailure never returns a path, a command or a raw error', () => {
+  const raw =
+    'Command failed: tesseract /tmp/migrapilot-ocr-rkUguC/page.png ' +
+    '/tmp/migrapilot-ocr-rkUguC/page.png.psm3 -l hat --psm 3 tsv\n' +
+    'Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata';
+
+  for (const message of [raw, 'EACCES: permission denied, open \'/var/lib/migrapilot/uploads/x/y.pdf\'', 'boom']) {
+    const said = describeFailure(new Error(message));
+    assert.doesNotMatch(said, /\//, `leaked a path: ${said}`);
+    assert.doesNotMatch(said, /Command failed|tesseract |pdftoppm |--psm|tsv/, `leaked a command: ${said}`);
+    assert.doesNotMatch(said, /EACCES|ENOENT|Error opening/, `leaked a raw error: ${said}`);
+    assert.ok(said.length > 0 && said.length < 120, 'it must still say something short and human')
+  }
+});
+
+test('a missing language pack is its own fact, not "no recogniser"', () => {
+  /*
+   * The stack is installed and working and one data file is absent. The remedy
+   * is a language pack, not a program, so the sentences differ.
+   */
+  const missingLang = describeFailure(
+    new Error('Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata'),
+  );
+  assert.match(missingLang, /language pack/i);
+  assert.doesNotMatch(missingLang, /not available on this server/);
+
+  assert.match(
+    describeFailure(new Error('spawn tesseract ENOENT')),
+    /text recogniser is not available on this server/,
+  );
+});
