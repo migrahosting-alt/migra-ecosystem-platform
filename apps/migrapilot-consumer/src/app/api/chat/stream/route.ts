@@ -70,6 +70,7 @@ import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attach
 import { workbookDisclosureFor } from '@/features/attachments/spreadsheetDisclosure'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
 import { sheetContentEvidenceFor } from '@/server/tables/sheetContent'
+import { attachmentOrderEvidence } from '@/server/files/attachmentOrder'
 import { projectEvidenceFor } from '@/server/projects/projectEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
@@ -1309,7 +1310,27 @@ export async function POST(request: Request): Promise<Response> {
        * Ordered deliberately: a project refusal must reach the model BEFORE any
        * other evidence, so it cannot be read as commentary on a table.
        */
-      const prefix = [projectEvidence?.text, tableEvidence?.text, ...sheetContent.map((s) => s.text)]
+      /*
+       * WHICH FILE IS "THE FIRST DOCUMENT" — stated, because we know it.
+       *
+       * With two attachments, "what does the first document say about
+       * cancellation?" was answered "the first document doesn't say anything
+       * about cancellation" while the citation on that same answer named pages
+       * 2-5 of the contract whose page 4 is headed Cancellation. The text was
+       * there; nothing told the model which file was first.
+       *
+       * Ordered first, so the roll-call precedes the evidence it names.
+       */
+      const orderEvidence = executing
+        ? null
+        : attachmentOrderEvidence(turnGrounding.active, reconciled.uploadedAt)
+
+      const prefix = [
+        orderEvidence,
+        projectEvidence?.text,
+        tableEvidence?.text,
+        ...sheetContent.map((s) => s.text),
+      ]
         .filter(Boolean)
         .join('\n')
       const modelPrompt = executing ? executing.prompt : prefix ? `${prefix}\n${prompt}` : prompt
