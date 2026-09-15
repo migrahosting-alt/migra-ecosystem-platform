@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-15",
- "updatedBy": "Claude (Opus 5) — CONTEXTUAL REFERENCES: ordinal resolution was BROKEN (\"the first document doesn't say anything about cancellation\" about a page headed Cancellation) and is FIXED + live-verified on ordinals-0915. Also: staging ran out of disk mid-deploy; owner chose to grow the volume 12G->20G rather than prune.",
+ "updatedBy": "Claude (Opus 5) — release-space governance LIVE (gate + post-cutover retention + pinning; 11->3 releases, 60%->41% disk). Raw internal error text reaching the user FIXED and verified both halves. OCR stack IS installed — only the `hat` language pack is missing, and that gap came from my own incomplete install recommendation.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3542,7 +3542,7 @@
   "chipHonesty": "'Ready for table analysis — sheets, columns, labels and numeric values. Document-style text search inside spreadsheets is not available yet.'"
  },
  "scannedPdfOcr_STILL_OPEN": {
-  "status": "OPEN — NOT closed by the text-layer fix",
+  "status": "PARTIALLY UNBLOCKED — stack installed, one language pack missing",
   "why": "the §12 fix stops a READABLE pdf being blamed on a renderer it never needed. A PDF that genuinely needs rasterising and OCR is unaffected.",
   "stagingState": "pdftoppm, pdfinfo, tesseract all ABSENT; pdf_page_rendering and pdf_ocr both report unavailable",
   "required": "deploy poppler + an OCR runtime, then test as its own acceptance slice",
@@ -3555,7 +3555,13 @@
    "conclusion": "a TRUE image-only scan. Poppler alone cannot help — there is no text to extract. Needs pdftoppm AND tesseract.",
    "ownerWaitExplained": "the ~80s wait was the SSH tunnel at ~465 KB/s for 37 MB; the Brain's verdict took 451 ms",
    "installBlocked": "apt-get on the host is denied to me by the permission guard — owner must run or approve it"
-  }
+  },
+  "installedNow": "pdf_page_rendering: available, pdf_ocr: available. The pipeline rasterised all 245 pages before failing.",
+  "remainingBlocker": "the scanned pipeline requests -l hat (Haitian Creole) because this codebase MEASURED hat as preserving more diacritics than fra; installed languages are eng, fra, osd. 🚨 MY FAULT: I reported the hat measurement and then recommended installing tesseract-ocr-fra. The install followed my recommendation.",
+  "twoPartsToTheSlice": [
+   "install tesseract-ocr-hat (host change, owner)",
+   "degrade gracefully when a requested language pack is absent rather than failing the whole job (code)"
+  ]
  },
  "backlogOrder_2026_09_14": [
   "contextual/deictic references",
@@ -3666,5 +3672,25 @@
    "release-retention.sh refused to run rather than prune on a wedged disk — a pruning tool failing closed means deleting nothing"
   ],
   "residual": "the incomplete ordinals-0915 directory from the failed run; the completeness predicate certifies it CANNOT SERVE, it is neither current nor previous, and the successful redeploy of the same name replaced it"
+ },
+ "releaseSpaceGovernance_2026_09_15": {
+  "status": "LIVE, exercised by a real deploy",
+  "gate": "before anything is created on the host: 3x the MEASURED payload (payload + extraction workspace + rollback margin). 'Free > one release' is explicitly NOT the threshold.",
+  "payloadIsMeasured": "node_modules is hardlinked from the live release, so a release costs ~0.47GB (the tar), not the 1.3GB a release dir appears to occupy alone. A gate on apparent size would demand 3.9GB for a release consuming half of one.",
+  "retention": "--keep=1 (active + rollback + one more), run ONLY after the running process reports the new release. Failure is reported and does not fail the deploy.",
+  "pinning": "a .pinned marker inside a release keeps it regardless of age — automatic retention answers 'what is needed to serve and roll back'; a pin answers 'a human wants this kept'",
+  "result": "consumer 11->3, brain ->3, disk 60%->41% used (12GB free), both rollback pointers intact and complete",
+  "note": "the 20GB expansion is now headroom rather than the fix"
+ },
+ "rawErrorLeak_2026_09_15": {
+  "severity": "user-visible leak of server internals",
+  "symptom": "Files showed 'Command failed: tesseract /tmp/migrapilot-ocr-.../page.png ... Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata' as the description of the user's document",
+  "cause": "describeFailure ended with `return message.slice(0, 200)` — the raw error promoted to user-facing prose for every case the two named branches did not catch",
+  "fix": "describeFailure cannot return a raw message at all; the failure path logs the raw error for operators",
+  "verifiedLive": {
+   "user": "'the text recogniser does not have the language pack this document needs'",
+   "operatorLog": "full command, missing file, TESSDATA_PREFIX hint"
+  },
+  "newCase": "a missing language pack is distinct from 'no recogniser' — the stack is installed and one data file is absent, and the remedy is a language pack not a program"
  }
 }

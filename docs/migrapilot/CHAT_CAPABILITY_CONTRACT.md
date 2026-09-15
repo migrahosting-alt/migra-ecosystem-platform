@@ -685,3 +685,85 @@ One artefact remains: the incomplete `ordinals-0915` directory from the failed
 run, which the completeness predicate certifies **cannot serve**. It is not
 `current`, not `previous`, and retention would skip it. Left in place per the
 no-deletion decision; the successful redeploy of the same name replaced it.
+
+---
+
+## 21. Release-space governance
+
+Two changes at the two moments that matter, now exercised by a real deploy.
+
+**Before anything is created on the host — a free-space gate.** "Free > one
+release" is deliberately not the threshold: landing a release needs the payload,
+the workspace to extract it in, and enough left that a way back still exists. So
+the bar is **3× the payload**, and the payload is *measured*, not assumed —
+`node_modules` is hardlinked from the live release rather than copied, so a
+release costs about what the tar carries (**0.47 GB measured**) and nothing like
+the 1.3 GB a release directory appears to occupy alone. A gate built on the
+apparent size would have demanded 3.9 GB for a release that consumes half of one.
+When it blocks it changes nothing on the host and prints the governed way to
+reclaim.
+
+**After the running process reports the new release — retention.** `--keep=1`:
+active, rollback target, one more behind them. Only there, because every line
+above can still fail and a pruning tool running during a wedged deployment
+decides what to delete from a state nobody validated. Its failure is reported and
+does not fail the deploy.
+
+Retention also learned an explicit **pin**: a `.pinned` marker inside a release
+keeps it regardless of age. Automatic retention answers *"what is needed to serve
+and to roll back"*; a pin answers *"a human wants this kept"*, which no amount of
+pointer-walking can infer.
+
+**Result on the first real deploy through it:** consumer 11 → 3 releases, brain →
+3, disk **60% → 41% used (12 GB free)**, both rollback pointers intact and
+complete. The 20 GB expansion is now headroom rather than the fix.
+
+---
+
+## 22. 🚨 Raw internal failure text reached the user — FIXED
+
+The Files view showed, as the description of an attached document:
+
+```
+Command failed: tesseract /tmp/migrapilot-ocr-rkUguC/page.png
+/tmp/migrapilot-ocr-rkUguC/page.png.psm3 -l hat --psm 3 tsv
+Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata
+```
+
+Server filesystem paths and a command line with its arguments, rendered as if it
+described the user's file. It tells them nothing they can act on and tells anyone
+reading over their shoulder how this machine is laid out.
+
+**One line was responsible:** `return message.slice(0, 200)` — the raw error,
+truncated, promoted to user-facing prose for every failure the two named cases
+above it did not catch.
+
+`describeFailure` now cannot return a raw message at all. Verified live, both
+halves:
+
+| surface | after |
+| --- | --- |
+| user | *"the text recogniser does not have the language pack this document needs"* |
+| operator log | the full command, the missing file, and the TESSDATA_PREFIX hint |
+
+---
+
+## 23. OCR is installed — and my install advice was incomplete
+
+`pdf_page_rendering` and `pdf_ocr` both now report **`available`**. The pipeline
+genuinely runs: it rasterised all 245 pages of `liv_kreyol_AI-Training.pdf`
+before failing.
+
+It fails on one missing file. The scanned pipeline requests **`-l hat`** —
+Haitian Creole — because this codebase measured `hat` as preserving more
+diacritics than `fra` (35 v 22, 14 v 10). Installed languages are `eng`, `fra`,
+`osd`.
+
+🚨 **That gap is mine.** I reported the `hat` measurement in my own analysis and
+then recommended installing `tesseract-ocr-fra`. The install followed the
+recommendation, so the book still cannot be read.
+
+For the OCR slice: `tesseract-ocr-hat` is what this document needs, and the
+product should also degrade gracefully when a requested language pack is absent
+rather than failing the whole job — the second half is a code change, not an
+install.
