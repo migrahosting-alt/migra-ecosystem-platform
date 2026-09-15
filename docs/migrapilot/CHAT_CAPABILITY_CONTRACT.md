@@ -515,3 +515,97 @@ today on `liv_kreyol_AI-Training.pdf`: Producer `EPSON Scan`, 245 pages, **zero
 extractable characters on every page sampled**, and `unpdf` agrees
 (`no_text_layer`). Poppler alone cannot help it — there is no text to extract.
 It needs `pdftoppm` **and** `tesseract`, and the install is the owner's call.
+
+---
+
+## 18. Multiple attachments and cross-file reasoning
+
+Pair: `meridian-agreement.pdf` (5-page freight contract) + a purpose-built
+`meridian-rate-review-2026.xlsx`, designed so the two **disagree on three
+values** — payment terms 45 vs 30 days, Leeds-Glasgow 4,580.00 vs 4,880.00,
+aggregate 15,388.75 vs 15,688.75 — with one fact present only in the workbook.
+Both attached in a single picker action.
+
+### 🚨 Defect 1 — a workbook attached beside a document contributed nothing
+
+> *"Compare the payment terms in these two files."* → *"...payable within
+> forty-five days... **No payment terms are mentioned in the provided excerpts
+> from the other file.**"*
+
+The workbook's Terms sheet reads `Payment terms | 30`. The trace showed
+`grounding_active: 2` and **no table evidence at all**: both files active, one
+contributing nothing, and the model invited to characterise a file it had never
+seen. The user reads that as "the spreadsheet does not mention payment terms" —
+false about their own file, and the disagreement was the whole point of asking.
+
+**Cause:** a workbook only ever reached the model through the COMPUTED path,
+which fires on a recognised aggregate. "Compare" is not one. Neither is
+"differences", "contradict" or "which is higher" — the entire cross-file class
+was invisible.
+
+**Fix:** showing a document is not calculating with it. Computed evidence stays
+gated on an operation (the model must never derive a total); **content** evidence
+— the sheet as written — is supplied for any workbook the computed path did not
+already speak for. Bounded at 20,000 cells with the truncation caveat carried in
+the evidence.
+
+### 🚨 Defect 2 — a pair attached together was split on the next turn
+
+| turn | reason | active | withheld |
+| --- | --- | ---: | ---: |
+| 1 | `attached_this_turn` | 2 | 0 |
+| 2 | `conversation_default` | **1** | **1** |
+
+The follow-up silently dropped one file, then reported it as not mentioning a
+figure printed on its page 3.
+
+**Cause:** the rule kept the last name in a **flat list**. Right for what it was
+written for — a thread that *accumulated* unrelated documents, where reactivating
+everything made a new question cite an old scan. Never right for a set attached
+in one action, and a flat list cannot tell those apart.
+
+**Fix:** the boundary is the attachment **event**. Two files chosen in one picker
+action land **137 ms apart** (measured); the window is 120 s so a slow multi-file
+upload still counts as one action. Proven both ways — the pair survives, and a
+scan from an hour earlier still stays out.
+
+### 🚨 Defect 3 — asserting a limit we no longer have
+
+The route appends a capability sentence to every spreadsheet turn. After Defect 1
+was fixed, an answer quoted a payment term **out of the workbook's cells** and
+then closed with *"general document-style text search inside spreadsheets is not
+available yet"* — contradicted by the sentence above it. Exactly what
+`spreadsheetDisclosure` exists to prevent, from the other direction. The
+disclosure now states what the turn actually did.
+
+### After the fixes — provenance is per-file
+
+| question | result |
+| --- | --- |
+| Compare payment terms | **45 days (pdf)** vs **30 days (xlsx)**, each named; both cited |
+| Higher aggregate | £15,688.75 from the workbook, both files cited, `active 2 / withheld 0` |
+| *"What is the total?"* (ambiguous) | **asked which sheet** — did not silently pick |
+| Summarize differences | £15,388.75 → the PDF (with line provenance), £15,688.75 → the workbook's "Monthly GBP" column |
+| switch away → reload → *"Going back to those two files, which one had the 45-day term?"* | **"The Meridian Agreement PDF had the 45-day term... the Excel file mentioned 30 days."** Both cited |
+
+Citations distinguish the two correctly: `meridian-agreement.pdf · pages 2-5`
+carries pages, the workbook does not — because a workbook has no pages.
+
+### One model-layer miss, proven before it was called that
+
+The comparison turn said the PDF *"does not directly state a specific monthly
+charge"*. Asked to quote it, the model produced **"Aggregate monthly charge
+across all lanes: 15388.75 GBP."** verbatim — so the text was in the retrieved
+context the whole time. Same shape as the "ninety days" miss: the information
+reached the model intact and the model failed to use it on a comparison. Goes to
+**MigraAI Engineer**.
+
+### Not covered by this slice — stated plainly
+
+- **Two similarly named files** — not run.
+- **A genuine cross-file calculation** — the artifacts do not force one: the
+  workbook carries both pallets and rates, so it is self-sufficient. That is a
+  gap in the TEST, not a finding about the product, and needs an artifact pair
+  where neither file alone suffices.
+- **Empty list items** — the "summarize the differences" answer rendered two
+  bullets with no text in them. A rendering defect, unexamined.

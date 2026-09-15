@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
- "updated": "2026-09-14",
- "updatedBy": "Claude (Opus 5) — ROW LOOKUP SHIPPED (rowlookup-0915 / 7ec050c1), live-verified: the question that fabricated \"$54,212\" now answers $25,443.75. First item off the \"cannot do that\" list. Scanned PDF/OCR still OPEN and now MEASURED: liv_kreyol is a true EPSON scan, 245 pages, zero extractable characters — needs pdftoppm AND tesseract.",
+ "updated": "2026-09-15",
+ "updatedBy": "Claude (Opus 5) — MULTIPLE ATTACHMENTS slice: THREE real defects, all ours, all fixed and live-verified (disclosure-0915). A workbook attached beside a document contributed NOTHING unless the prompt named an aggregate; a pair attached together was SPLIT on the next turn; and we then asserted a limit we no longer had. Per-file provenance now works.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3558,13 +3558,12 @@
   }
  },
  "backlogOrder_2026_09_14": [
-  "multiple attachments",
-  "contextual references across files",
-  "image + document combinations",
-  "conversation persistence edge cases",
-  "remaining message controls",
-  "audio attachment pipeline",
+  "contextual/deictic references",
   "scanned PDF/OCR",
+  "PPTX",
+  "audio attachments",
+  "similarly-named files + true cross-file calculation (unfinished from the multi-attachment slice)",
+  "empty list-item rendering",
   "production promotion",
   "production user validation"
  ],
@@ -3586,6 +3585,45 @@
   "collisionsFoundByRunning": [
    "'How many units for West?' resolved to count; naming one row contradicts a row count",
    "'What is the capital of France?' injected a note about the spreadsheet into an unrelated turn"
+  ]
+ },
+ "multipleAttachments_2026_09_15": {
+  "status": "READY FOR LOCAL USER TEST — passed after three fixes",
+  "release": "disclosure-0915 / da897fc2 (via crossfile-0915 9154f634, coattached-0915 2af4682b)",
+  "artifacts": "meridian-agreement.pdf + purpose-built meridian-rate-review-2026.xlsx, designed to DISAGREE on three values (payment terms 45/30, Leeds-Glasgow 4580/4880, aggregate 15388.75/15688.75) with one fact present only in the workbook",
+  "defect1_workbook_contributed_nothing": {
+   "symptom": "'Compare the payment terms in these two files' -> quoted the PDF's 45 days, then 'No payment terms are mentioned in the provided excerpts from the other file'. The workbook's Terms sheet reads `Payment terms | 30`.",
+   "evidence": "grounding_active: 2, NO table evidence at all — both files active, one contributing nothing",
+   "cause": "a workbook only ever reached the model through the COMPUTED path, gated on a recognised aggregate. 'Compare' is not one; nor is 'differences', 'contradict', 'which is higher' — the whole cross-file class was invisible",
+   "fix": "showing a document is not calculating with it. Computed evidence stays gated on an operation; CONTENT evidence is supplied for any workbook the computed path did not speak for. Bounded at 20,000 cells with the truncation caveat in the evidence.",
+   "alsoCarried": [
+    "provenance — a file put in front of the model joins the attributable set",
+    "the structured_only refusal must not fire on a turn whose prompt carries the sheet"
+   ]
+  },
+  "defect2_pair_split_on_next_turn": {
+   "symptom": "turn 1 attached_this_turn active 2 withheld 0; turn 2 conversation_default active 1 WITHHELD 1. The dropped file was then reported as not mentioning a figure printed on its page 3.",
+   "cause": "the rule kept the last name in a FLAT list. Correct for a thread that ACCUMULATED unrelated documents; never correct for a set attached in one action, and a flat list cannot tell them apart.",
+   "fix": "the boundary is the attachment EVENT. Measured: two files in one picker action land 137 ms apart; window 120 s so a slow multi-file upload still counts as one action.",
+   "provenBothWays": "the pair survives the follow-up AND a scan from an hour earlier still stays out"
+  },
+  "defect3_stale_limit": {
+   "symptom": "an answer quoted a payment term out of the workbook's cells and then closed with 'general document-style text search inside spreadsheets is not available yet' — contradicted by the sentence above it",
+   "note": "exactly what spreadsheetDisclosure exists to prevent, from the other direction: not the model overclaiming a limit but US asserting one that stopped being true",
+   "fix": "the disclosure states what the turn actually did; the surviving true limit is that a workbook is read in one pass rather than retrieved from"
+  },
+  "provenanceProven": {
+   "compare payment terms": "45 (pdf) vs 30 (xlsx), each named, both cited",
+   "citations distinguish": "meridian-agreement.pdf · pages 2-5 carries pages; the workbook does not, because a workbook has no pages",
+   "ambiguous 'what is the total?'": "ASKED which sheet — did not silently pick",
+   "workbook-only fact": "invoice dispute window 14 days, read from the Terms sheet by name",
+   "after switch + reload": "'Going back to those two files, which one had the 45-day term?' -> the PDF, with the xlsx's 30 days contrasted; active 2 withheld 0"
+  },
+  "modelLayerMiss": "the comparison turn said the PDF 'does not directly state a specific monthly charge'; asked to quote it, the model produced 'Aggregate monthly charge across all lanes: 15388.75 GBP.' verbatim — the text was in context all along. Goes to MigraAI Engineer.",
+  "notCoveredStatedPlainly": [
+   "two similarly named files — not run",
+   "a genuine cross-file CALCULATION — the artifacts do not force one; the workbook carries both pallets and rates so it is self-sufficient. A gap in the TEST, not a finding about the product",
+   "empty list items — the 'summarize the differences' answer rendered two bullets with no text. A rendering defect, unexamined"
   ]
  }
 }
