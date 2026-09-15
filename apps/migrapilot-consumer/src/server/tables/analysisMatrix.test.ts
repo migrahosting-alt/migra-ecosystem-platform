@@ -313,3 +313,90 @@ test('and the words it must NOT eat, which is where a substring rule would fail'
     assert.equal(identifies(header), false, `${header} measures something`)
   }
 })
+
+// ── row lookup: the most ordinary spreadsheet question there is ────────────
+
+/*
+ * 🚨 THE DEFECT THIS CLOSES. "What revenue is listed for East?" named no
+ * aggregation, so `detectOperation` returned null, no evidence was produced,
+ * and the model answered "$54,212" about a cell reading 25443.75 — a financial
+ * figure invented out of nothing. A truthful refusal replaced the fabrication,
+ * which was correct and still a "no" to a question any spreadsheet tool
+ * answers. This makes it a yes.
+ *
+ * ONE ROW PER LABEL, which `sales.csv` deliberately is NOT — it is transactional
+ * and carries four orders per region, so a lookup by region there is genuinely
+ * ambiguous and is asserted as such below.
+ */
+writeFileSync(join(dir, 'inventory.csv'), [
+  'Item,SKU,OnHand,UnitCost,Value',
+  'Widget,SKU-100,120,"$4.50","$540.00"',
+  'Gasket,SKU-101,48,"$12.25","$588.00"',
+  'Flange,SKU-102,7,"$88.00","$616.00"',
+  'Total,,175,,"$1,744.00"',
+].join('\n'))
+
+const lookup = (q: string, file = 'inventory.csv') => tableEvidenceFor(q, [file], dir)
+
+test('🚨 a row lookup answers from the row, not from the model', async () => {
+  const ev = await lookup('What value is listed for Gasket?')
+  assert.equal(ev?.operation, 'lookup')
+  assert.match(ev!.text, /row "Gasket"/)
+  // Every cell of that row, exactly as the file stores it.
+  assert.match(ev!.text, /Value: \$588\.00/)
+  assert.match(ev!.text, /OnHand: 48/)
+  // and nothing from a neighbouring row
+  assert.doesNotMatch(ev!.text, /616\.00/)
+})
+
+test('the phrasing may vary because the FILE identifies the row', async () => {
+  for (const q of ['What is the unit cost for Flange?', 'Flange on hand?', 'how much does Widget cost']) {
+    const ev = await lookup(q)
+    assert.equal(ev?.operation, 'lookup', q)
+  }
+})
+
+test('naming one row beats a bare row count', async () => {
+  // "how many" alone counts rows; naming a row contradicts that.
+  const named = await lookup('How many on hand for Flange?')
+  assert.equal(named?.operation, 'lookup')
+  assert.match(named!.text, /row "Flange"/)
+
+  assert.equal((await lookup('How many rows are there?'))?.operation, 'count')
+})
+
+test('a totals row is never a lookup target', async () => {
+  /*
+   * It is a summary, not an observation — the same rule the arithmetic follows.
+   * Naming it does not have to produce NOTHING (saying "total" reasonably reads
+   * as an aggregate, and that is what comes back); what it must never produce is
+   * the totals ROW served up as if it were a data row.
+   */
+  for (const q of ['What value is listed for Total?', 'What is on hand for Total?']) {
+    const ev = await lookup(q)
+    assert.notEqual(ev?.operation, 'lookup', q)
+    if (ev) assert.doesNotMatch(ev.text, /row "Total"/, q)
+  }
+})
+
+test('an explicit aggregate is never demoted to a lookup', async () => {
+  assert.equal((await lookup('What is the total Value?'))?.operation, 'sum')
+  assert.equal((await lookup('Which item has the highest Value?'))?.operation, 'max')
+})
+
+test('a question that names no row produces NOTHING, not a note about the file', async () => {
+  /*
+   * The lookup gate is weak on purpose — any "what…" question trips it — so a
+   * turn that was never about the spreadsheet must come back empty rather than
+   * with "MigraPilot could not calculate this from inventory.csv" attached.
+   */
+  assert.equal(await lookup('What is the capital of France?'), null)
+})
+
+test('a label on more than one row is ambiguity, and is reported', async () => {
+  // sales.csv is transactional: four orders per region, so "for East" names two rows.
+  const ev = await lookup('What revenue is listed for East?', 'sales.csv')
+  assert.equal(ev?.operation, 'clarify:lookup')
+  assert.match(ev!.text, /more than one/)
+  assert.match(ev!.text, /do NOT pick a row/i)
+})

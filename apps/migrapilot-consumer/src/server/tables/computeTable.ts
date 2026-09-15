@@ -65,7 +65,7 @@ function round(n: number): number {
  * is a supplier and its numbers are real data. A trailing colon is kept because
  * people write "Total:" and mean the same thing.
  */
-function isTotalsLabel(raw: string): boolean {
+export function isTotalsLabel(raw: string): boolean {
   return /^(grand\s+|sub)?(total|totals|sum)s?:?$/i.test(raw.trim())
 }
 

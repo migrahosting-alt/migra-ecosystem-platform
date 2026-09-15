@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { parseTable, TableParseError, type ParsedTable, type TableColumn } from './parseTable'
-import { computeColumn, groupBy, ComputationRefused, type Operation } from './computeTable'
+import { computeColumn, groupBy, isTotalsLabel, ComputationRefused, type Operation } from './computeTable'
 import { readWorkbook, WorkbookError } from '@migrapilot/shared-types/workbook'
 import { chooseSheet, sheetToTable } from './workbookTable'
 import { composeEvidence } from '@/server/evidence/composition'
@@ -28,7 +28,7 @@ const TABLE_EXTENSIONS = /\.(csv|tsv|xlsx)$/i
 const WORKBOOK_EXTENSION = /\.xlsx$/i
 
 /** Which operation the question is asking for, if any. */
-function detectOperation(prompt: string): Operation | 'group' | 'describe' | 'list' | null {
+function detectOperation(prompt: string): Operation | 'group' | 'describe' | 'list' | 'lookup' | null {
   const p = prompt.toLowerCase()
   /*
    * 🚨 "SUMMARISE THIS SPREADSHEET" IS A QUESTION THIS CAN ANSWER.
@@ -79,8 +79,76 @@ function detectOperation(prompt: string): Operation | 'group' | 'describe' | 'li
   if (/\b(what|which) are the\b/.test(p) && /\bvalues?\b/.test(p)) return 'list'
   if (/\bshow (me )?(all |the )*(values|entries)\b/.test(p)) return 'list'
   if (/\ball (of )?the values\b/.test(p)) return 'list'
+
+  /*
+   * 🚨 A ROW LOOKUP IS THE MOST ORDINARY SPREADSHEET QUESTION THERE IS.
+   *
+   * "On the Q1 Sales sheet, what revenue is listed for East?" named no
+   * aggregation, so nothing above matched, no evidence was produced, and the
+   * turn reached the model with a workbook it could not see. It answered
+   * "$54,212" about a cell reading 25443.75 — a figure invented out of nothing.
+   * The refusal that now stands in its place is honest but still a "no" to a
+   * question any spreadsheet tool answers.
+   *
+   * THIS PATTERN DECIDES NOTHING. It is a cheap gate that says "worth opening
+   * the file", and it is deliberately weak because the real question — is a row
+   * named here? — cannot be answered from the prompt alone. `findRowByLabel`
+   * answers it from the FILE, and returns null when the prompt names no row, at
+   * which point the turn falls back to the truthful refusal exactly as before.
+   *
+   * That is why a trailing question mark is enough to try: "Flange on hand?" is
+   * an ordinary question with no interrogative in it, and letting it through
+   * costs nothing — "What is the capital of France?" trips the same gate and
+   * still comes back with nothing, because no row of the file is named in it.
+   */
+  if (/\b(what|which|how much|how many|what's|whats)\b/.test(p) || /\?\s*$/.test(p)) return 'lookup'
   return null
 }
+
+/**
+ * Which ROW is this question about?
+ *
+ * 🚨 DECIDED FROM THE FILE, NOT FROM THE PHRASING. The prompt is searched for
+ * values that actually appear in a label column, so "what revenue is listed for
+ * East", "East revenue?" and "how much did East do" all resolve by the same
+ * mechanism — the row is named — while a question that names no row resolves to
+ * nothing and is refused rather than guessed at.
+ *
+ * Three guards, each paid for by a failure this codebase has already had:
+ *  · a totals row is never a lookup target — it is a summary, not an observation
+ *  · labels shorter than three characters are skipped, because "NY" or "A"
+ *    appear inside ordinary words and would match half the prompts ever written
+ *  · MORE than one matching row is ambiguity, and ambiguity is reported rather
+ *    than resolved by picking the first — the same rule the column choice follows
+ */
+function findRowByLabel(
+  prompt: string,
+  table: ParsedTable,
+): { kind: 'row'; index: number; label: string } | { kind: 'ambiguous'; labels: string[] } | null {
+  const haystack = prompt.toLowerCase()
+  const labelColumns = table.columns.filter((c) => !c.quantitative)
+  const hits = new Map<number, string>()
+
+  table.rows.forEach((row, i) => {
+    for (const column of labelColumns) {
+      const raw = (row[column.index]?.raw ?? '').trim()
+      if (raw.length < 3 || isTotalsLabel(raw)) continue
+      // Whole-word, so "East" does not match "Easter" and a label that happens
+      // to be a substring of another word is not a hit.
+      const escaped = raw.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(haystack)) {
+        hits.set(i, raw)
+        return
+      }
+    }
+  })
+
+  if (hits.size === 0) return null
+  if (hits.size > 1) return { kind: 'ambiguous', labels: [...hits.values()] }
+  const [index, label] = [...hits.entries()][0]!
+  return { kind: 'row', index, label }
+}
+
 
 /**
  * The column to ENUMERATE — which is not the same question as which column to
@@ -279,7 +347,7 @@ async function loadTable(
   // 'list' is accepted but only compared against 'describe' below: an
   // ambiguous workbook cannot be enumerated either, so it takes the same
   // "which sheet did you mean" refusal rather than picking one.
-  operation: Operation | 'group' | 'describe' | 'list',
+  operation: Operation | 'group' | 'describe' | 'list' | 'lookup',
 ): Promise<LoadedTable> {
   const path = join(uploadRoot, fileName)
 
@@ -555,6 +623,17 @@ export async function tableEvidenceFor(
   if (loaded.kind === 'none') return null
   if (loaded.kind === 'refused') {
     /*
+     * 🚨 EXCEPT FOR A SPECULATIVE LOOKUP, WHICH STAYS SILENT.
+     *
+     * Every other operation was named by the user — "the total", "the highest" —
+     * so a load failure is genuinely about their question and saying so helps.
+     * `lookup` is different: it is reached by a weak gate that any "what…"
+     * question trips, so "What is the capital of France?" with a workbook
+     * attached would otherwise inject "MigraPilot could not calculate this from
+     * regional-sales-2026.xlsx" into a turn that was never about the file.
+     */
+    if (operation === 'lookup') return null
+    /*
      * A load-level refusal is stated, not swallowed. An ambiguous workbook is
      * the same shape of problem as an ambiguous column: going quiet leaves the
      * model holding a spreadsheet and a question about a total, which is the
@@ -632,6 +711,66 @@ export async function tableEvidenceFor(
     }
   }
 
+  /*
+   * 🚨 "HOW MANY UNITS FOR WEST" IS A LOOKUP WEARING A COUNT'S CLOTHES.
+   *
+   * `detectOperation` sees "how many" and returns `count`, which asks how many
+   * ROWS there are — a question about the table as a whole. Naming one row
+   * contradicts that: nobody asks how many rows there are and then says which
+   * row they mean. So when a count names exactly one row, the row wins.
+   *
+   * Only `count`, and only for an unambiguous single row. "The total revenue for
+   * East" is a genuine aggregate with a filter and must stay one.
+   */
+  const countNamesOneRow =
+    operation === 'count' && findRowByLabel(prompt, table)?.kind === 'row'
+
+  if (operation === 'lookup' || countNamesOneRow) {
+    const found = findRowByLabel(prompt, table)
+    if (!found) return null
+
+    if (found.kind === 'ambiguous') {
+      return {
+        file: fileName,
+        ...(sheetName ? { sheet: sheetName } : {}),
+        operation: 'clarify:lookup',
+        text: composeEvidence({
+          fact: [
+            `[MigraPilot did not read a row out of ${source}: the question names more than one`,
+            `row — ${found.labels.map((l) => `"${l}"`).join(', ')}.`,
+          ],
+          directives: [
+            `Ask which one is meant. Do NOT read values out of the file yourself and do NOT pick a row on the user's behalf.]`,
+          ],
+        }),
+      }
+    }
+
+    const row = table.rows[found.index]!
+    const cells = table.columns.map((c) => {
+      const raw = (row[c.index]?.raw ?? '').trim()
+      return `  ${c.name}: ${raw === '' ? '(blank)' : raw}`
+    })
+    const isFormula = table.columns.some((c) => formulaColumns.includes(c.index))
+
+    return {
+      file: fileName,
+      ...(sheetName ? { sheet: sheetName } : {}),
+      ...(isFormula ? { formulaDerived: true } : {}),
+      operation: 'lookup',
+      text: composeEvidence({
+        fact: [
+          `[Read directly from ${source} by MigraPilot. This is the one row labelled`,
+          `"${found.label}", cell by cell, exactly as the file stores it. Answer the question`,
+          `from these values verbatim; do not recalculate them and do not use any other row:]`,
+          `row "${found.label}":`,
+          ...cells,
+        ],
+        directives: [],
+      }),
+    }
+  }
+
   if (operation === 'count') {
     const named = table.columns.filter((c) => c.name && prompt.toLowerCase().includes(c.name.toLowerCase()))
     const target = named.length === 1 ? named[0]! : undefined
@@ -668,6 +807,19 @@ export async function tableEvidenceFor(
    * prompt, and silently sending the first 50 as if they were all of them is
    * the fabrication this module exists to prevent — so the cap is stated and
    * the true row count travels with it.
+   */
+  /*
+   * A SINGLE ROW, CELL BY CELL, EXACTLY AS STORED.
+   *
+   * The whole row rather than one guessed column: "what revenue is listed for
+   * East", "how many units for East" and "tell me about East" are the same
+   * lookup, and choosing a column on the user's behalf is the ambiguity this
+   * module refuses everywhere else. Handing over every cell answers all of them
+   * from evidence and leaves nothing to infer.
+   *
+   * `cell.raw` for the same reason the `list` path uses it: the stored literal
+   * is what the file says, and a value re-rendered even slightly differently is
+   * one the grounding gate can no longer find.
    */
   if (operation === 'list') {
     const picked = chooseListColumn(prompt, table)
