@@ -200,3 +200,65 @@ test('naming an older file still beats recency', () => {
   assert.deepEqual(selection.active, ['01_small_text_reference.pdf'])
   assert.equal(selection.reason, 'named_in_prompt')
 })
+
+// ── files attached TOGETHER stay together ──────────────────────────────────
+
+/*
+ * 🚨 THE DEFECT. A contract and a rate-review workbook were attached in one
+ * picker action and compared successfully — `attached_this_turn`, two files
+ * active. The very next question, a follow-up about the same pair, came back
+ * `conversation_default, active 1, withheld 1`: this rule kept the last name in
+ * a flat list and dropped the other half of the set. The answer then reported
+ * the dropped file as not mentioning a figure printed on its page 3.
+ *
+ * Measured: two files chosen in one picker action land 137 ms apart.
+ */
+const T = 1_700_000_000_000
+
+test('a pair attached together survives the next turn', () => {
+  const selection = selectTurnGrounding(
+    'Which document gives the higher aggregate monthly charge?',
+    [],
+    ['meridian-agreement.pdf', 'meridian-rate-review-2026.xlsx'],
+    { 'meridian-agreement.pdf': T, 'meridian-rate-review-2026.xlsx': T + 137 },
+  )
+  assert.deepEqual(
+    selection.active.sort(),
+    ['meridian-agreement.pdf', 'meridian-rate-review-2026.xlsx'],
+  )
+  assert.deepEqual(selection.withheld, [])
+  assert.equal(selection.reason, 'conversation_default')
+})
+
+test('an older unrelated file still stays out — the original defect', () => {
+  /*
+   * This is what the narrowing exists for: attaching a document to an existing
+   * thread and asking about it must not reactivate a scan from an hour ago.
+   */
+  const selection = selectTurnGrounding(
+    'What does it say about cancellation?',
+    [],
+    ['02_scanned_image_only_6pages.pdf', 'meridian-agreement.pdf'],
+    { '02_scanned_image_only_6pages.pdf': T, 'meridian-agreement.pdf': T + 3_600_000 },
+  )
+  assert.deepEqual(selection.active, ['meridian-agreement.pdf'])
+  assert.deepEqual(selection.withheld, ['02_scanned_image_only_6pages.pdf'])
+})
+
+test('a slow multi-file upload still counts as one attachment', () => {
+  // A 37 MB scan beside a small sheet is written sequentially, not instantly.
+  const selection = selectTurnGrounding(
+    'Compare them.',
+    [],
+    ['big-scan.pdf', 'rates.xlsx'],
+    { 'big-scan.pdf': T, 'rates.xlsx': T + 80_000 },
+  )
+  assert.equal(selection.active.length, 2)
+})
+
+test('with no timestamps it narrows exactly as before', () => {
+  // A caller that cannot supply times must not silently lose the narrowing.
+  const selection = selectTurnGrounding('What does it say?', [], ['a-file.pdf', 'b-file.pdf'])
+  assert.deepEqual(selection.active, ['b-file.pdf'])
+  assert.deepEqual(selection.withheld, ['a-file.pdf'])
+})

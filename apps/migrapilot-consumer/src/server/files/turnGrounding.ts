@@ -71,10 +71,26 @@ export interface TurnGroundingSelection {
  *      only the most recently attached — never the whole set, which is how a
  *      question about the first PDF came back citing an unrelated scan.
  */
+/**
+ * How far apart two uploads may be and still count as ONE attachment.
+ *
+ * 🚨 MEASURED, not guessed. Two files chosen in a single picker action land
+ * 137 ms apart; the window is set far wider so that a slow multi-file upload —
+ * a large scan beside a small sheet, written sequentially — is still recognised
+ * as the one action it was.
+ *
+ * The cost of being generous is bounded and small: a file attached two minutes
+ * ago IN THE SAME THREAD joins the working set. That is nothing like the defect
+ * this module exists for, which was an unrelated document from much earlier in
+ * a long session being reactivated forever.
+ */
+const CO_ATTACHED_WINDOW_MS = 120_000
+
 export function selectTurnGrounding(
   prompt: string,
   attachedNow: readonly string[],
   conversationFiles: readonly string[],
+  uploadedAt: Readonly<Record<string, number>> = {},
 ): TurnGroundingSelection {
   const all = [...new Set([...conversationFiles, ...attachedNow])]
   const named = all.filter((f) => mentions(prompt, f))
@@ -116,10 +132,53 @@ export function selectTurnGrounding(
     return { active: [...all], reason: all.length === 1 ? 'conversation_default' : 'none', withheld: [] }
   }
 
-  const mostRecent = all[all.length - 1]!
+  /*
+   * 🚨 "MOST RECENT" MEANS THE MOST RECENT ATTACHMENT, NOT THE LAST FILENAME.
+   *
+   * THE DEFECT. A contract and a rate-review workbook were attached TOGETHER and
+   * compared successfully — `attached_this_turn`, two files active. The very next
+   * question, a follow-up about the same pair, came back
+   * `conversation_default, active 1, withheld 1`: this rule kept the last name in
+   * a flat list and silently dropped the other half of the set. The answer then
+   * said the dropped file did not mention a figure printed on its page 3.
+   *
+   * Taking one file was right for what this rule was written for — a thread that
+   * ACCUMULATED unrelated documents over a long session. It was never right for a
+   * set the user attached in one action and is plainly still discussing.
+   *
+   * So the boundary is the attachment EVENT. Files written within moments of the
+   * newest one arrived together and stay together; anything older stays out,
+   * which is exactly what the original fix protects.
+   *
+   * Falls back to the last name when no timestamps are supplied, so a caller that
+   * cannot provide them behaves as before rather than losing the narrowing.
+   */
+  const timeOf = (f: string): number | undefined => uploadedAt[f]
+  const newest = all.reduce((best, f) => {
+    const t = timeOf(f)
+    if (t === undefined) return best
+    const bt = best === undefined ? undefined : timeOf(best)
+    return bt === undefined || t > bt ? f : best
+  }, undefined as string | undefined)
+
+  if (newest === undefined) {
+    const mostRecent = all[all.length - 1]!
+    return {
+      active: [mostRecent],
+      reason: 'conversation_default',
+      withheld: all.filter((f) => f !== mostRecent),
+    }
+  }
+
+  const newestAt = timeOf(newest)!
+  const active = all.filter((f) => {
+    const t = timeOf(f)
+    return t !== undefined && newestAt - t <= CO_ATTACHED_WINDOW_MS
+  })
+
   return {
-    active: [mostRecent],
+    active,
     reason: 'conversation_default',
-    withheld: all.filter((f) => f !== mostRecent),
+    withheld: all.filter((f) => !active.includes(f)),
   }
 }

@@ -25,6 +25,15 @@ export interface GroundingReconciliation {
   /** Names still present in the library. */
   available: string[]
   /**
+   * When each available file was last written, from the SAME listing that
+   * decided `available` so the two can never disagree.
+   *
+   * Carried so the turn's grounding boundary can tell files that ARRIVED
+   * TOGETHER from files that merely accumulated in one thread — see
+   * `selectTurnGrounding`.
+   */
+  uploadedAt: Record<string, number>
+  /**
    * Available files the approved index holds NO chunks for.
    *
    * They are stored and retained, but nothing can be answered from them. Kept separate from
@@ -119,7 +128,7 @@ async function approvedIndexState(): Promise<{ approved: boolean; counts: Record
 
 export async function reconcileGrounding(requested: string[]): Promise<GroundingReconciliation> {
   if (requested.length === 0) {
-    return { available: [], missing: [], unreadable: [], tooLarge: [], indexUnavailable: false, searchable: false, grounded: false, libraryUnreadable: false }
+    return { available: [], uploadedAt: {}, missing: [], unreadable: [], tooLarge: [], indexUnavailable: false, searchable: false, grounded: false, libraryUnreadable: false }
   }
 
   /*
@@ -141,6 +150,7 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
   if (listed === null) {
     return {
       available: [],
+      uploadedAt: {},
       missing: [],
       unreadable: [],
       tooLarge: [],
@@ -193,6 +203,9 @@ export async function reconcileGrounding(requested: string[]): Promise<Grounding
 
   return {
     available,
+    uploadedAt: Object.fromEntries(
+      listed.filter((f) => available.includes(f.name)).map((f) => [f.name, f.updatedAt]),
+    ),
     missing,
     unreadable: indexUnavailable ? [] : unreadable,
     tooLarge,

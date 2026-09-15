@@ -747,6 +747,7 @@ export async function POST(request: Request): Promise<Response> {
     : {
         grounded: false,
         available: [] as string[],
+        uploadedAt: {} as Record<string, number>,
         missing: [] as string[],
         unreadable: [] as string[],
         tooLarge: [] as string[],
@@ -773,7 +774,7 @@ export async function POST(request: Request): Promise<Response> {
    * Chosen from what actually EXISTS, not from what was requested: reconciling
    * first means a named-but-deleted file cannot become this turn's boundary.
    */
-  const turnGrounding = selectTurnGrounding(prompt, attachedNow, reconciled.available)
+  const turnGrounding = selectTurnGrounding(prompt, attachedNow, reconciled.available, reconciled.uploadedAt)
   trace.set('grounding_reason', turnGrounding.reason)
   trace.set('grounding_active', String(turnGrounding.active.length))
   trace.set('grounding_withheld', String(turnGrounding.withheld.length))
