@@ -468,3 +468,50 @@ multiple attachments → contextual references across files → image + document
 combinations → conversation persistence edge cases → remaining message controls
 → audio attachment pipeline → scanned PDF/OCR → production promotion →
 production user validation.
+
+---
+
+## 17. Row lookup — SHIPPED, the first item taken off the "can't do that" list
+
+`rowlookup-0915` / commit `7ec050c1`. The gap recorded in §15 is closed.
+
+| question | before | now |
+| --- | --- | --- |
+| *"On the Q1 Sales sheet, what revenue is listed for East?"* | **"$54,212"** (fabricated), then a truthful refusal | **$25,443.75** ✓ |
+| *"How many units for West on the Q1 Sales sheet?"* | counted rows | **640** ✓ |
+
+**The row is identified from the FILE, not the phrasing** — the prompt names a
+value that appears in a label column. So "what revenue is listed for East",
+"East revenue?" and "how much did East do" all resolve by one mechanism, and a
+prompt naming no row still produces nothing. The gate that reaches this path is
+deliberately weak (any "what…", or anything ending in "?") precisely because the
+gate decides nothing; the file does. *"What is the capital of France?"* trips the
+same gate and comes back empty.
+
+The whole row is handed over, cell by cell, exactly as stored — choosing one
+column on the user's behalf is the ambiguity this module refuses everywhere else.
+
+**Three guards, each paid for by an earlier failure:** a totals row is never a
+lookup target · labels under three characters are skipped · a label on more than
+one row is reported as ambiguity rather than resolved by picking the first.
+`isTotalsLabel` is now **one** definition, owned by the arithmetic layer, rather
+than a second private copy — the drift this codebase has been bitten by before.
+
+**Two collisions found by running it, not reading it:** `"How many units for
+West?"` resolved to `count` (a question about how many *rows* exist — naming one
+row contradicts that), and `"What is the capital of France?"` injected *"MigraPilot
+could not calculate this from regional-sales-2026.xlsx"* into a turn that was
+never about the file.
+
+### Still open, re-confirmed live
+
+**Deictic sheet reference.** *"How many units for West on that sheet?"* still
+answers *"the question doesn't specify which sheet"*. Sheet selection reads the
+current prompt only, not the conversation. It fails honestly and remains on the
+backlog under contextual reference resolution.
+
+**Scanned PDF / OCR.** Unchanged and still the biggest gap — see §16. Measured
+today on `liv_kreyol_AI-Training.pdf`: Producer `EPSON Scan`, 245 pages, **zero
+extractable characters on every page sampled**, and `unpdf` agrees
+(`no_text_layer`). Poppler alone cannot help it — there is no text to extract.
+It needs `pdftoppm` **and** `tesseract`, and the install is the owner's call.

@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
  "updated": "2026-09-14",
- "updatedBy": "Claude (Opus 5) — DOCX slice PASSED with no defects. XLSX slice found TWO REAL DEFECTS, both ours, both fixed and re-verified on staging: a FABRICATED financial figure ($54,212 for a cell reading 25443.75), and a DOUBLE COUNT from summing the sheet's own Total row ($151,427.50 for a true 75,713.75). Scanned PDF/OCR remains OPEN.",
+ "updatedBy": "Claude (Opus 5) — ROW LOOKUP SHIPPED (rowlookup-0915 / 7ec050c1), live-verified: the question that fabricated \"$54,212\" now answers $25,443.75. First item off the \"cannot do that\" list. Scanned PDF/OCR still OPEN and now MEASURED: liv_kreyol is a true EPSON scan, 245 pages, zero extractable characters — needs pdftoppm AND tesseract.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3545,7 +3545,17 @@
   "status": "OPEN — NOT closed by the text-layer fix",
   "why": "the §12 fix stops a READABLE pdf being blamed on a renderer it never needed. A PDF that genuinely needs rasterising and OCR is unaffected.",
   "stagingState": "pdftoppm, pdfinfo, tesseract all ABSENT; pdf_page_rendering and pdf_ocr both report unavailable",
-  "required": "deploy poppler + an OCR runtime, then test as its own acceptance slice"
+  "required": "deploy poppler + an OCR runtime, then test as its own acceptance slice",
+  "measured_2026_09_15": {
+   "file": "liv_kreyol_AI-Training.pdf, 37,172,099 bytes",
+   "producer": "EPSON Scan",
+   "pages": 245,
+   "pdftotext": "0 characters on pages 1, 5, 20, 60, 120, 200, 245",
+   "unpdf": "{'kind':'no_text_layer','pages':245}",
+   "conclusion": "a TRUE image-only scan. Poppler alone cannot help — there is no text to extract. Needs pdftoppm AND tesseract.",
+   "ownerWaitExplained": "the ~80s wait was the SSH tunnel at ~465 KB/s for 37 MB; the Brain's verdict took 451 ms",
+   "installBlocked": "apt-get on the host is denied to me by the permission guard — owner must run or approve it"
+  }
  },
  "backlogOrder_2026_09_14": [
   "multiple attachments",
@@ -3557,5 +3567,25 @@
   "scanned PDF/OCR",
   "production promotion",
   "production user validation"
- ]
+ ],
+ "rowLookup_2026_09_15": {
+  "status": "SHIPPED to staging, live-verified — READY FOR LOCAL USER TEST",
+  "release": "rowlookup-0915 / commit 7ec050c1",
+  "closes": "the row-lookup gap recorded in the XLSX slice",
+  "liveProof": {
+   "what revenue is listed for East": "$25,443.75 (was the $54,212 fabrication, then a refusal)",
+   "How many units for West on the Q1 Sales sheet?": "640 (previously resolved to a row COUNT)"
+  },
+  "design": "the row is identified FROM THE FILE — the prompt names a value that appears in a label column — so phrasing varies freely and a prompt naming no row yields nothing. The gate reaching this path is deliberately weak (any 'what…', or a trailing '?') because the gate decides nothing; the file does.",
+  "guards": [
+   "a totals row is never a lookup target",
+   "labels under 3 characters are skipped so 'NY' cannot match half of all prompts",
+   "a label on more than one row is AMBIGUITY and is reported, never resolved by picking the first"
+  ],
+  "oneDefinition": "isTotalsLabel deduped — owned by the arithmetic layer, not a second private copy in the evidence layer",
+  "collisionsFoundByRunning": [
+   "'How many units for West?' resolved to count; naming one row contradicts a row count",
+   "'What is the capital of France?' injected a note about the spreadsheet into an unrelated turn"
+  ]
+ }
 }
