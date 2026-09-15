@@ -607,5 +607,13 @@ reached the model intact and the model failed to use it on a comparison. Goes to
   workbook carries both pallets and rates, so it is self-sufficient. That is a
   gap in the TEST, not a finding about the product, and needs an artifact pair
   where neither file alone suffices.
-- **Empty list items** — the "summarize the differences" answer rendered two
-  bullets with no text in them. A rendering defect, unexamined.
+- ~~**Empty list items**~~ — **WITHDRAWN, this was my own measurement error.**
+  The bullets were not empty: my evidence grep filtered the snapshot to
+  `paragraph`/`listitem`/`link` nodes and hid their `strong` and `text`
+  children. The answer actually read *"**Aggregate monthly charge**: The figure
+  in the Meridian Agreement PDF is £15,388.75, while the figure in the Meridian
+  Rate Review 2026 Excel file is £15,688.75"* and the same shape for the payment
+  term — a correct bulleted comparison with both figures attributed. Rendering
+  is fine. The lesson is the one this programme keeps relearning: a reading
+  taken through my own instrument is a claim about the instrument until it is
+  checked against the raw evidence.

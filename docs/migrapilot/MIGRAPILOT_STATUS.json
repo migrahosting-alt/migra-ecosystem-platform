@@ -3622,8 +3622,13 @@
   "modelLayerMiss": "the comparison turn said the PDF 'does not directly state a specific monthly charge'; asked to quote it, the model produced 'Aggregate monthly charge across all lanes: 15388.75 GBP.' verbatim — the text was in context all along. Goes to MigraAI Engineer.",
   "notCoveredStatedPlainly": [
    "two similarly named files — not run",
-   "a genuine cross-file CALCULATION — the artifacts do not force one; the workbook carries both pallets and rates so it is self-sufficient. A gap in the TEST, not a finding about the product",
-   "empty list items — the 'summarize the differences' answer rendered two bullets with no text. A rendering defect, unexamined"
-  ]
+   "a genuine cross-file CALCULATION — the artifacts do not force one; the workbook carries both pallets and rates so it is self-sufficient. A gap in the TEST, not a finding about the product"
+  ],
+  "withdrawnFinding": {
+   "claim": "'empty list items' reported as a rendering defect",
+   "verdict": "WITHDRAWN — my own measurement error, not a product defect",
+   "why": "the evidence grep filtered snapshots to paragraph/listitem/link nodes and hid their strong/text children. The bullets carried a correct attributed comparison of both figures.",
+   "lesson": "a reading taken through my own instrument is a claim about the instrument until checked against raw evidence — the same shape as the pre-hydration snapshot error and the exit-0 report"
+  }
  }
 }
