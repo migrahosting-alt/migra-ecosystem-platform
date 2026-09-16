@@ -60,6 +60,7 @@ import { OpenAiCompatProvider, classifyProviderFailure, type ProviderFailure } f
 import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
 import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from '../observability/correlation.js';
 import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
+import { buildEngineerLoopTools } from './engineerToolCatalog.js';
 import { changesetProposals } from '../models/capabilityRegistry.js';
 import { telemetryHub } from '../observability/telemetryHub.js';
 import { auditStore, auditHash } from '../observability/auditLog.js';
@@ -206,23 +207,6 @@ const EngineerBodySchema = z.object({
   designSpec: z.string().max(20_000).optional(),
 });
 
-/** One-line input hints shown to the model per tool (kept beside the route so
- * the protocol prompt stays in sync with what this deployment exposes). */
-const INPUT_HINTS: Record<string, string> = {
-  'workspace.search': '{"rootPath","query"}',
-  'workspace.list': '{"rootPath","path"?,"depth"?,"limit"?} — the ONLY way to see what files exist',
-  'plan.update': '{"steps":["first","second",...]} to set a plan, {"complete":[1,2]} to tick steps off',
-  'workspace.find': '{"rootPath","query","kind"?,"limit"?} — find files by NAME or glob',
-  'file.read': '{"rootPath","path","maxBytes"?} — read a WHOLE file (no line numbers needed)',
-  'file.readRange': '{"rootPath","path","startLine","endLine"}',
-  'file.readSymbol': '{"rootPath","path","symbol"}',
-  'git.status': '{"rootPath"}',
-  'git.diff': '{"rootPath"}',
-  'diagnostics.get': '{"rootPath","path"?}',
-  'edit.preview': '{"rootPath","changes":[{"path","startLine","endLine","replacement"}]}',
-  'fs.proposeChangeset': '{"rootPath","ops":[{"op":"create","path":"src/x.js","content":"..."}]} (op: create|replace|patch|delete|mkdir)',
-};
-
 /** Shallow-ish workspace file listing for command side-effect detection. Skips
  * heavy/noisy dirs; bounded so a big install cannot flood the diff. */
 async function listWorkspaceFiles(root: string, limit = 5_000): Promise<string[]> {
@@ -345,27 +329,8 @@ export function registerEngineerRoutes(
    * advisory: a model that cannot call a file tool cannot quietly ground itself in
    * unapproved code, no matter how the prompt is phrased.
    */
-  const loopTools = (approvedOnly = false): EngineerToolInfo[] => [
-    ...(approvedOnly ? [] : toolDeps.registry
-      .list({ includeUnavailable: false })
-      .filter((t) => t.kind === 'tool' && t.id !== 'edit.apply' && t.readOnly)
-      .map((t) => ({
-        id: t.id,
-        description: t.description,
-        readOnly: t.readOnly,
-        // MCP tools take their OWN arguments and no rootPath — never imply one.
-        inputHint: INPUT_HINTS[t.id] ?? (t.id.startsWith('mcp.') ? '{ ...arguments for this tool; NO rootPath }' : '{"rootPath",...}'),
-      }))),
-    // Not a registry capability: plan state belongs to the LOOP, because it must
-    // survive every step and be re-shown to the model. A stateless tool cannot
-    // remember what the agent set out to do.
-    {
-      id: 'plan.update',
-      description: 'Record your plan for a multi-step task and tick steps off as you finish them.',
-      readOnly: true,
-      inputHint: INPUT_HINTS['plan.update'] as string,
-    },
-  ];
+  const loopTools = (approvedOnly = false): EngineerToolInfo[] =>
+    buildEngineerLoopTools(toolDeps.registry, approvedOnly);
 
   // Read-only store health/telemetry (Slice 2). Aggregate health + counters +
   // eviction stats + a small recent-events window — NO proposal bodies, approval

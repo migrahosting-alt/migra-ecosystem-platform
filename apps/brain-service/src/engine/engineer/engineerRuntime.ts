@@ -33,10 +33,21 @@ import { existsSync } from 'node:fs';
 import { lintChangeset, summarizeDefects } from '../../tools/changesetLint.js';
 import { FinalAnswerStreamer } from './finalAnswerStream.js';
 
+export type ToolEvidenceSemantic =
+  | 'workspace.directory_listing'
+  | 'workspace.path_discovery'
+  | 'workspace.content_search'
+  | 'workspace.file_content'
+  | 'workspace.diagnostics'
+  | 'vcs.state'
+  | 'vcs.diff';
+
 export interface EngineerToolInfo {
   id: string;
   description: string;
   readOnly: boolean;
+  /** Structural evidence this tool may produce when it succeeds. */
+  evidenceSemantics?: readonly ToolEvidenceSemantic[];
   /** One-line input shape hint shown to the model. */
   inputHint: string;
 }
@@ -888,6 +899,340 @@ const LIST_FIRST_DIRECTIVE = [
  * progress, then a summary instead of the work. Plan state lives in the LOOP
  * (not a stateless tool) so it survives every step and is rendered back into
  * each prompt. */
+
+// ── ENGINEER COMPLETION AUTHORITY 2 ─────────────────────────────────────────
+//
+// A model-authored plan is useful working memory, but it is not proof that a
+// repository inspection is complete. For repository-map tasks and requests
+// that explicitly name the required map categories, the controller maintains
+// its own evidence ledger. Only executed tools
+// may satisfy these obligations; model prose and plan.update cannot.
+//
+// This first CA2 slice is intentionally narrow: it covers the real owner-observed
+// repository-map failure without turning every workspace question into a large
+// audit.
+export type CompletionObligationId =
+  | 'repo.root'
+  | 'repo.git_state'
+  | 'repo.top_level'
+  | 'repo.manifest_contents'
+  | 'repo.framework_runtime'
+  | 'repo.source_tree'
+  | 'repo.entrypoint'
+  | 'repo.tests'
+  | 'repo.deployment_runtime';
+
+export interface CompletionEvidenceState {
+  enabled: boolean;
+  satisfied: Set<CompletionObligationId>;
+  evidence: Map<CompletionObligationId, string[]>;
+}
+
+const REPOSITORY_MAP_OBLIGATIONS: readonly CompletionObligationId[] = [
+  'repo.root',
+  'repo.git_state',
+  'repo.top_level',
+  'repo.manifest_contents',
+  'repo.framework_runtime',
+  'repo.source_tree',
+  'repo.entrypoint',
+  'repo.tests',
+  'repo.deployment_runtime',
+] as const;
+
+const COMPLETION_OBLIGATION_GUIDANCE: Record<CompletionObligationId, string> = {
+  'repo.root':
+    'list the repository root with workspace.list',
+  'repo.git_state':
+    'inspect the current Git state with git.status or git.overview',
+  'repo.top_level':
+    'enumerate the repository root with workspace.list',
+  'repo.manifest_contents':
+    'READ the package/build manifest (for example package.json), not merely list its filename',
+  'repo.framework_runtime':
+    'derive the framework/runtime from read manifest or source evidence',
+  'repo.source_tree':
+    'inspect the source tree (for example workspace.list on src or read source files)',
+  'repo.entrypoint':
+    'inspect a real source entry surface such as src/app, src/pages, src/main.*, src/index.*, app/, or pages/; configuration files alone do not count',
+  'repo.tests':
+    'inspect the tests directory or actual test files',
+  'repo.deployment_runtime':
+    'READ relevant runtime/deployment configuration or package scripts; merely naming config files does not count',
+};
+
+export function requiresRepositoryMapEvidence(input: EngineerInput): boolean {
+  const text = `${input.task ?? ''}\n${input.specification ?? ''}`.toLowerCase();
+
+  const repoSubject =
+    /\brepositor(?:y|ies)\b|\brepo\b/.test(text);
+
+  // Keep this gate narrow and evidence-based. The owner-observed task asks for
+  // a repository map with several of these categories. Ordinary "where is X?"
+  // questions must not inherit this full audit contract.
+  const explicitRepositoryMap =
+    /\brepository map\b|\brepo map\b|\bmap (?:this|the) repositor(?:y|ies)\b|\b(?:repository|repo) (?:structure|layout|inventory)\b/.test(text);
+
+  const requestedCategories = [
+    /\brepository root\b|\brepo root\b/.test(text),
+    /\btop[- ]level\b/.test(text),
+    /\bmanifest\b|\bpackage\/build\b|\bpackage\.json\b/.test(text),
+    /\bentrypoint\b|\bentry point\b/.test(text),
+    /\btest locations?\b|\btests?\b/.test(text),
+    /\bdeployment\b|\bruntime configuration\b/.test(text),
+    /\bgit state\b|\bcurrent git\b/.test(text),
+  ].filter(Boolean).length;
+
+  return repoSubject && (explicitRepositoryMap || requestedCategories >= 4);
+}
+
+export function createCompletionEvidenceState(input: EngineerInput): CompletionEvidenceState {
+  return {
+    enabled: requiresRepositoryMapEvidence(input),
+    satisfied: new Set<CompletionObligationId>(),
+    evidence: new Map<CompletionObligationId, string[]>(),
+  };
+}
+
+function completionPath(input: unknown): string {
+  if (!input || typeof input !== 'object') return '';
+  const obj = input as Record<string, unknown>;
+  return typeof obj.path === 'string'
+    ? obj.path.replace(/\\/g, '/').replace(/^\.\/+/, '')
+    : '';
+}
+
+function completionResultText(result: unknown): string {
+  try {
+    return stableStringify(result).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function addCompletionEvidence(
+  state: CompletionEvidenceState,
+  id: CompletionObligationId,
+  evidence: string,
+): boolean {
+  if (!state.enabled) return false;
+
+  const already = state.satisfied.has(id);
+  state.satisfied.add(id);
+
+  const entries = state.evidence.get(id) ?? [];
+  if (!entries.includes(evidence)) entries.push(evidence);
+  state.evidence.set(id, entries.slice(0, 8));
+
+  return !already;
+}
+
+function isManifestPath(path: string): boolean {
+  const base = path.split('/').pop()?.toLowerCase() ?? '';
+  return (
+    base === 'package.json' ||
+    base === 'pyproject.toml' ||
+    base === 'cargo.toml' ||
+    base === 'go.mod' ||
+    base === 'pom.xml' ||
+    base === 'build.gradle' ||
+    base === 'build.gradle.kts'
+  );
+}
+
+function isRuntimeConfigPath(path: string): boolean {
+  const p = path.toLowerCase();
+  const base = p.split('/').pop() ?? '';
+
+  return (
+    /^next\.config\./.test(base) ||
+    /^vite\.config\./.test(base) ||
+    /^webpack\.config\./.test(base) ||
+    /^capacitor\.config\./.test(base) ||
+    base === 'dockerfile' ||
+    base === 'docker-compose.yml' ||
+    base === 'docker-compose.yaml' ||
+    base === 'compose.yml' ||
+    base === 'compose.yaml' ||
+    base === 'vercel.json' ||
+    base === 'netlify.toml' ||
+    base === 'render.yaml' ||
+    base === 'fly.toml' ||
+    p.startsWith('.github/workflows/')
+  );
+}
+
+function isSourcePath(path: string): boolean {
+  const p = path.toLowerCase();
+  return (
+    p === 'src' ||
+    p.startsWith('src/') ||
+    p === 'app' ||
+    p.startsWith('app/') ||
+    p === 'pages' ||
+    p.startsWith('pages/')
+  );
+}
+
+function isEntrypointEvidencePath(path: string): boolean {
+  const p = path.toLowerCase();
+
+  // Configuration is deliberately excluded. This is the owner-observed defect:
+  // next.config.ts was repeatedly labelled an application entrypoint.
+  if (isRuntimeConfigPath(p)) return false;
+
+  return (
+    p === 'src/app' ||
+    p.startsWith('src/app/') ||
+    p === 'src/pages' ||
+    p.startsWith('src/pages/') ||
+    p === 'app' ||
+    p.startsWith('app/') ||
+    p === 'pages' ||
+    p.startsWith('pages/') ||
+    /(^|\/)(main|index|server|app)\.(?:[cm]?[jt]sx?|py|go|rs)$/.test(p)
+  );
+}
+
+function isTestPath(path: string): boolean {
+  const p = path.toLowerCase();
+  return (
+    p === 'test' ||
+    p === 'tests' ||
+    p.startsWith('test/') ||
+    p.startsWith('tests/') ||
+    /(?:^|\/)[^/]+\.(?:test|spec)\.[cm]?[jt]sx?$/.test(p)
+  );
+}
+
+/**
+ * Observe a SUCCESSFUL tool execution and update the controller-owned evidence
+ * ledger. The result is used only as corroboration; the model cannot satisfy
+ * obligations by saying it did something.
+ */
+export function observeCompletionEvidence(
+  state: CompletionEvidenceState,
+  toolInfo: EngineerToolInfo | undefined,
+  toolInput: unknown,
+  result: unknown,
+): number {
+  if (!state.enabled) return 0;
+
+  const before = state.satisfied.size;
+  const path = completionPath(toolInput);
+  const p = path.toLowerCase();
+  const resultText = completionResultText(result);
+  const evidence = new Set(toolInfo?.evidenceSemantics ?? []);
+
+  if (evidence.has('workspace.directory_listing')) {
+    // Empty/omitted path means repository root; normalizeInput has already bound
+    // rootPath server-side.
+    if (!p || p === '.') {
+      addCompletionEvidence(state, 'repo.root', 'workspace.list(root)');
+      addCompletionEvidence(state, 'repo.top_level', 'workspace.list(root)');
+    }
+
+    if (isSourcePath(p)) {
+      addCompletionEvidence(state, 'repo.source_tree', `workspace.list(${path || '.'})`);
+    }
+
+    if (isEntrypointEvidencePath(p)) {
+      addCompletionEvidence(state, 'repo.entrypoint', `workspace.list(${path})`);
+    }
+
+    if (isTestPath(p)) {
+      addCompletionEvidence(state, 'repo.tests', `workspace.list(${path})`);
+    }
+
+    // A root listing may itself expose framework entry surfaces. This does NOT
+    // let next.config.* count as an entrypoint; only source paths do.
+    if (resultText.includes('"src/app"') || resultText.includes('"src/pages"')) {
+      addCompletionEvidence(state, 'repo.source_tree', 'workspace.list result contains source tree');
+      addCompletionEvidence(state, 'repo.entrypoint', 'workspace.list result contains framework source entry surface');
+    }
+  }
+
+  if (evidence.has('vcs.state')) {
+    addCompletionEvidence(
+      state,
+      'repo.git_state',
+      toolInfo?.id ?? 'vcs.state',
+    );
+  }
+
+  if (evidence.has('workspace.file_content')) {
+    if (isManifestPath(p)) {
+      addCompletionEvidence(state, 'repo.manifest_contents', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+
+      // Reading the manifest is real runtime/framework evidence because it exposes
+      // package dependencies/scripts. Merely listing package.json does not.
+      addCompletionEvidence(state, 'repo.framework_runtime', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+
+      // package.json scripts are also legitimate runtime/deployment evidence.
+      if (p.endsWith('package.json')) {
+        addCompletionEvidence(state, 'repo.deployment_runtime', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+      }
+    }
+
+    if (isSourcePath(p)) {
+      addCompletionEvidence(state, 'repo.source_tree', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+    }
+
+    if (isEntrypointEvidencePath(p)) {
+      addCompletionEvidence(state, 'repo.entrypoint', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+    }
+
+    if (isTestPath(p)) {
+      addCompletionEvidence(state, 'repo.tests', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+    }
+
+    if (isRuntimeConfigPath(p)) {
+      addCompletionEvidence(state, 'repo.deployment_runtime', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
+    }
+  }
+
+  // workspace.find may discover source/test/config paths, but discovery alone
+  // intentionally does NOT satisfy manifest contents or deployment/runtime.
+  // Those require reads.
+  if (evidence.has('workspace.path_discovery')) {
+    if (resultText.includes('"src/app"') || resultText.includes('"src/pages"')) {
+      addCompletionEvidence(state, 'repo.source_tree', 'workspace.find located source entry surface');
+    }
+    if (
+      resultText.includes('"tests/') ||
+      resultText.includes('"test/') ||
+      resultText.includes('.test.') ||
+      resultText.includes('.spec.')
+    ) {
+      addCompletionEvidence(state, 'repo.tests', 'workspace.find located tests');
+    }
+  }
+
+  return state.satisfied.size - before;
+}
+
+export function missingCompletionObligations(
+  state: CompletionEvidenceState,
+): CompletionObligationId[] {
+  if (!state.enabled) return [];
+  return REPOSITORY_MAP_OBLIGATIONS.filter((id) => !state.satisfied.has(id));
+}
+
+function renderCompletionEvidenceDirective(
+  missing: readonly CompletionObligationId[],
+): string {
+  return [
+    'COMPLETION REFUSED BY THE CONTROLLER.',
+    'This repository-map task has unsatisfied evidence obligations:',
+    ...missing.map((id) => `  [ ] ${id} — ${COMPLETION_OBLIGATION_GUIDANCE[id]}`),
+    '',
+    'These obligations are controller-owned. plan.update and prose cannot satisfy them.',
+    'Use the appropriate read-only workspace tools now. Do not summarize or guess.',
+    'Configuration files such as next.config.ts are NOT application entrypoints.',
+  ].join('\n');
+}
+
+
 export interface PlanStep {
   text: string;
   done: boolean;
@@ -932,6 +1277,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   const noProgressLimit = deps.noProgressLimit ?? DEFAULT_NO_PROGRESS_LIMIT;
   const maxReplans = deps.maxReplans ?? DEFAULT_MAX_REPLANS;
   const toolIds = new Set(deps.tools.map((t) => t.id));
+  const toolInfoById = new Map(deps.tools.map((t) => [t.id, t] as const));
   const transcript: string[] = [protocolPrompt(input, deps.tools)];
 
   const resultCache = new Map<string, unknown>(); // canonical call → recorded result
@@ -944,6 +1290,11 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let proposalsEmitted = 0;
   let filesCreatedByCommand = false; // command.run side effects are real work too
   let plan: PlanStep[] = []; // the agent's own plan, carried across steps
+
+  // CA2: model-independent completion evidence for repository-map/audit tasks.
+  const completionEvidence = createCompletionEvidenceState(input);
+  let incompleteEvidenceCorrections = 0;
+  const MAX_INCOMPLETE_EVIDENCE_CORRECTIONS = 4;
 
   /*
    * ENGINEER COMPLETION AUTHORITY
@@ -1044,6 +1395,34 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
         // and showing a failure instead (observed: a 45s repo question died this
         // way). Accept substantial prose as the final rather than dead-ending.
         if (toolStepCount > 0 && looksLikeProseAnswer(reply)) {
+          const missingEvidence = missingCompletionObligations(completionEvidence);
+
+          // CA2 also owns this alternate terminal path. Otherwise a model can
+          // bypass the normal final gate simply by emitting prose instead of the
+          // JSON protocol after one shallow inspection.
+          if (missingEvidence.length > 0) {
+            incompleteEvidenceCorrections += 1;
+
+            if (incompleteEvidenceCorrections > MAX_INCOMPLETE_EVIDENCE_CORRECTIONS) {
+              stage.log('error', {
+                code: 'LOOP_NO_PROGRESS',
+                n,
+                reason: 'model repeatedly attempted prose completion with repository-map evidence missing',
+                missingEvidence,
+              });
+              yield {
+                type: 'error',
+                code: 'LOOP_NO_PROGRESS',
+                message:
+                  'the engineer repeatedly attempted to finish while required repository-map evidence remained missing',
+              };
+              return;
+            }
+
+            transcript.push(renderCompletionEvidenceDirective(missingEvidence));
+            continue;
+          }
+
           const salvaged = reply.trim() + (proposalsEmitted > 0 ? APPLIED_FOOTER : '');
           stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, salvaged: 'prose' });
           yield { type: 'final', markdown: salvaged, steps: toolStepCount };
@@ -1063,6 +1442,65 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
     }
 
     if (step.kind === 'final') {
+      // ── ENGINEER COMPLETION AUTHORITY 2 ─────────────────────────────────
+      // A repository-map final is terminal only when the controller has observed
+      // the required evidence-producing operations. The model's plan is not
+      // consulted here.
+      const missingEvidence = missingCompletionObligations(completionEvidence);
+
+      if (missingEvidence.length > 0) {
+        let legitimateExternalBlock = false;
+
+        if (step.missing !== undefined) {
+          const evidenceDecision = decideTurn({
+            intent: input.intent ?? 'UNKNOWN',
+            declaration: step.missing,
+            deferredObserved: true,
+            workspaceExists: (deps.workspaceExists ?? existsSync)(input.rootPath),
+            readCapabilityGranted: deps.tools.some((t) => READ_ONLY_TOOL_IDS.has(t.id)),
+            specificationAvailable: (input.specification ?? '').trim().length > 0,
+            producedArtifacts: proposalsEmitted > 0 || filesCreatedByCommand,
+            governanceConsumed: false,
+            mutationCapabilityGranted: false,
+          });
+
+          yield {
+            type: 'decision',
+            missingInformationKind: evidenceDecision.missingInformationKind,
+            disposition: evidenceDecision.disposition,
+            toolAuthority: evidenceDecision.toolAuthority,
+            declarationOverridden: evidenceDecision.declarationOverridden,
+            reason: evidenceDecision.reason,
+          };
+
+          legitimateExternalBlock =
+            evidenceDecision.disposition !== 'CONTINUE_TO_INSPECT';
+        }
+
+        if (!legitimateExternalBlock) {
+          incompleteEvidenceCorrections += 1;
+
+          if (incompleteEvidenceCorrections > MAX_INCOMPLETE_EVIDENCE_CORRECTIONS) {
+            stage.log('error', {
+              code: 'LOOP_NO_PROGRESS',
+              n,
+              reason: 'model repeatedly attempted to finish with repository-map evidence missing',
+              missingEvidence,
+            });
+            yield {
+              type: 'error',
+              code: 'LOOP_NO_PROGRESS',
+              message:
+                'the engineer repeatedly attempted to finish while required repository-map evidence remained missing',
+            };
+            return;
+          }
+
+          transcript.push(renderCompletionEvidenceDirective(missingEvidence));
+          continue;
+        }
+      }
+
       /*
        * ENGINEER COMPLETION AUTHORITY
        * -----------------------------
@@ -1443,6 +1881,19 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
             const stageName = tool === 'fs.proposeChangeset' || tool === 'edit.preview' ? 'proposal' : tool === 'command.run' ? 'validation' : 'tool';
             stage.log(stageName, { n, tool, durationMs: Date.now() - toolStarted, outcome: 'ok' });
             resultCache.set(canonical, result);
+
+            // CA2 evidence can only advance after a tool actually succeeds.
+            // Model prose, plans and failed calls cannot mark these obligations.
+            const completionProgress = observeCompletionEvidence(
+              completionEvidence,
+              toolInfoById.get(tool),
+              toolInput,
+              result,
+            );
+            if (completionProgress > 0) {
+              incompleteEvidenceCorrections = 0;
+            }
+
             if (isProposal) {
               yield { type: 'proposal', n, preview: result };
               proposalsEmitted++;

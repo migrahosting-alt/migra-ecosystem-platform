@@ -102,6 +102,15 @@ export interface ReadinessContext {
   mail?: EmailConnection | null;
 }
 
+export type ToolEvidenceSemantic =
+  | 'workspace.directory_listing'
+  | 'workspace.path_discovery'
+  | 'workspace.content_search'
+  | 'workspace.file_content'
+  | 'workspace.diagnostics'
+  | 'vcs.state'
+  | 'vcs.diff';
+
 export interface CapabilityDescriptor {
   kind: CapabilityKind;
   id: string;
@@ -138,6 +147,11 @@ export interface CapabilityDescriptor {
   supportsStreaming: boolean;
   inputSchemaVersion: number;
   outputSchemaVersion: number;
+  /**
+   * Structural evidence this capability can produce when successfully executed.
+   * This alone never satisfies a task obligation; input/path/result still matter.
+   */
+  evidenceSemantics: readonly ToolEvidenceSemantic[];
   /** Engine's decision: is this capability executable right now? */
   available: boolean;
   /**
@@ -370,48 +384,48 @@ async function applyChangesetAudited(input: unknown, correlationId?: string): Pr
 
 const TOOLS: RunnableCapability[] = [
   {
-    descriptor: meta('workspace.search', 'Workspace Search', 'Search workspace files for a query.', 'workspace', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('workspace.search', 'Workspace Search', 'Search workspace files for a query.', 'workspace', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.content_search'] }),
     inputSchema: WorkspaceSearchRequestSchema,
     handler: (i) => workspaceSearch(i as never),
   },
   {
     // Without this the agent has no instrument for "what files exist?" — it
     // searched content, read ranges and asked git, then GUESSED the listing.
-    descriptor: meta('workspace.list', 'List Directory', 'List the files and directories that actually exist at a workspace path.', 'workspace', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('workspace.list', 'List Directory', 'List the files and directories that actually exist at a workspace path.', 'workspace', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.directory_listing'] }),
     inputSchema: WorkspaceListRequestSchema,
     handler: (i) => workspaceList(i as never),
   },
   {
     // Finding a file by NAME. Content search answers "where is tsconfig.json?"
     // badly: it matches everything that merely mentions the string.
-    descriptor: meta('workspace.find', 'Find Files By Name', 'Find files or directories by name or glob.', 'workspace', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('workspace.find', 'Find Files By Name', 'Find files or directories by name or glob.', 'workspace', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.path_discovery'] }),
     inputSchema: WorkspaceFindRequestSchema,
     handler: (i) => workspaceFind(i as never),
   },
   {
     // Reading a whole file. file.readRange REQUIRES line numbers, so reading
     // package.json meant GUESSING a range and reasoning about a truncated file.
-    descriptor: meta('file.read', 'Read File', 'Read a whole workspace file (bounded; reports truncation).', 'file', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('file.read', 'Read File', 'Read a whole workspace file (bounded; reports truncation).', 'file', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.file_content'] }),
     inputSchema: FileReadRequestSchema,
     handler: (i) => fileRead(i as never),
   },
   {
-    descriptor: meta('file.readRange', 'Read File Range', 'Read a line range from a workspace file.', 'file', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('file.readRange', 'Read File Range', 'Read a line range from a workspace file.', 'file', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.file_content'] }),
     inputSchema: FileReadRangeRequestSchema,
     handler: (i) => fileReadRange(i as never),
   },
   {
-    descriptor: meta('file.readSymbol', 'Read Symbol', 'Read the source of a named symbol.', 'file', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('file.readSymbol', 'Read Symbol', 'Read the source of a named symbol.', 'file', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.file_content'] }),
     inputSchema: FileReadSymbolRequestSchema,
     handler: (i) => fileReadSymbol(i as never),
   },
   {
-    descriptor: meta('git.status', 'Git Status', 'Inspect the working tree status.', 'git', ['git.read'], { readOnly: true }),
+    descriptor: meta('git.status', 'Git Status', 'Inspect the working tree status.', 'git', ['git.read'], { readOnly: true, evidenceSemantics: ['vcs.state'] }),
     inputSchema: GitStatusRequestSchema,
     handler: (i) => gitStatus(i as never),
   },
   {
-    descriptor: meta('git.diff', 'Git Diff', 'Inspect staged/unstaged diffs.', 'git', ['git.read'], { readOnly: true }),
+    descriptor: meta('git.diff', 'Git Diff', 'Inspect staged/unstaged diffs.', 'git', ['git.read'], { readOnly: true, evidenceSemantics: ['vcs.diff'] }),
     inputSchema: GitDiffRequestSchema,
     handler: (i) => gitDiff(i as never),
   },
@@ -420,7 +434,7 @@ const TOOLS: RunnableCapability[] = [
   // can turn a read into a mutation. `git` is deliberately NOT on the command.run
   // allowlist and this does not change that: structured facts, never arbitrary execution.
   {
-    descriptor: meta('git.overview', 'Git Overview', 'Branch, HEAD, ahead/behind, and staged/unstaged/untracked counts.', 'git', ['git.read'], { readOnly: true }),
+    descriptor: meta('git.overview', 'Git Overview', 'Branch, HEAD, ahead/behind, and staged/unstaged/untracked counts.', 'git', ['git.read'], { readOnly: true, evidenceSemantics: ['vcs.state'] }),
     inputSchema: GitOverviewRequestSchema,
     handler: (i) => gitOverview(i as never),
   },
@@ -435,7 +449,7 @@ const TOOLS: RunnableCapability[] = [
     handler: (i) => gitBlame(i as never),
   },
   {
-    descriptor: meta('diagnostics.get', 'Get Diagnostics', 'Read synced editor diagnostics.', 'diagnostics', ['workspace.read'], { readOnly: true }),
+    descriptor: meta('diagnostics.get', 'Get Diagnostics', 'Read synced editor diagnostics.', 'diagnostics', ['workspace.read'], { readOnly: true, evidenceSemantics: ['workspace.diagnostics'] }),
     inputSchema: DiagnosticsGetRequestSchema,
     handler: (i) => diagnosticsGet(i as never),
   },
@@ -499,6 +513,7 @@ const TOOLS: RunnableCapability[] = [
       supportsStreaming: true,
       inputSchemaVersion: 1,
       outputSchemaVersion: 1,
+      evidenceSemantics: [],
     },
     inputSchema: EditApplyRequestSchema, // placeholder; unavailable so never dispatched
     handler: async () => {
@@ -725,6 +740,7 @@ export function meta(
     readOnly?: boolean; approvalRequired?: boolean; supportsDryRun?: boolean; supportsStreaming?: boolean;
     /** The words this capability owns. Empty means chat can never select it. */
     nouns?: readonly string[];
+    evidenceSemantics?: readonly ToolEvidenceSemantic[];
   } = {},
 ): Omit<CapabilityDescriptor, 'available'> {
   return {
@@ -747,6 +763,7 @@ export function meta(
     supportsStreaming: opts.supportsStreaming ?? false,
     inputSchemaVersion: 1,
     outputSchemaVersion: 1,
+    evidenceSemantics: opts.evidenceSemantics ?? [],
   };
 }
 

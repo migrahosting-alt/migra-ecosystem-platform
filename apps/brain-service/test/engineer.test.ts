@@ -2,13 +2,14 @@
 // model-in-the-loop engineer runtime. All model calls are scripted fakes; the
 // tool boundary and filesystem effects are REAL.
 
+import { buildEngineerLoopTools } from '../src/engine/engineer/engineerToolCatalog.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { commandRun, commandAllowlist, commandRunEnabled, previewCommandRun } from '../src/tools/commandRun.js';
-import { runEngineerTask, parseStep, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
+import { runEngineerTask, parseStep, requiresRepositoryMapEvidence, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
 import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
 import { ToolAudit } from '../src/engine/tools/toolAudit.js';
@@ -138,7 +139,13 @@ const TOOLS: EngineerToolInfo[] = [
   { id: 'command.run', description: 'run', readOnly: false, inputHint: '{}' },
 ];
 
-function scriptedDeps(replies: string[]) {
+const CA2_TOOLS: EngineerToolInfo[] =
+  buildEngineerLoopTools(new CapabilityRegistry());
+
+function scriptedDeps(
+  replies: string[],
+  tools: EngineerToolInfo[] = TOOLS,
+) {
   const calls: Array<{ tool: string; input: unknown }> = [];
   let i = 0;
   return {
@@ -149,7 +156,7 @@ function scriptedDeps(replies: string[]) {
         if (tool === 'edit.preview') return { tool, files: [{ path: 'a.ts', before: 'x', after: 'y' }] };
         return { tool, ok: true };
       },
-      tools: TOOLS,
+      tools,
     },
     calls,
   };
@@ -476,3 +483,285 @@ test('repeated ordinary finals against the same unfinished plan stop honestly wi
   assert.match(error.message, /plan steps.*unchecked|unchecked.*plan steps/i);
 });
 
+
+
+// ── ENGINEER COMPLETION AUTHORITY 2 ─────────────────────────────────────────
+
+test('repository map refuses final after only root listing and git state', async () => {
+  const replies = [
+    '{"action":{"tool":"workspace.list","input":{"path":"","depth":0}}}',
+    '{"action":{"tool":"git.status","input":{}}}',
+    '{"final":"Repository map complete."}',
+    '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":80}}}',
+    '{"final":"Still complete."}',
+  ];
+
+  const { deps } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 5 },
+      {
+        rootPath: '/r',
+        task:
+          'Map this repository. Identify the repository root, top-level directories, package/build manifests, application entrypoints, test locations, deployment/runtime configuration, and current Git state.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  assert.equal(
+    events.some((e) => e.type === 'final'),
+    false,
+    'root listing + git state must not satisfy the repository-map evidence contract',
+  );
+});
+
+test('repository map requires package.json contents, not merely seeing package.json in a listing', async () => {
+  const replies = [
+    '{"action":{"tool":"workspace.list","input":{"path":"","depth":1}}}',
+    '{"action":{"tool":"git.status","input":{}}}',
+    '{"final":"package.json exists, so the manifest is covered."}',
+  ];
+
+  const { deps } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 3 },
+      {
+        rootPath: '/r',
+        task: 'Create a repository map including manifests, entrypoints, tests, deployment/runtime configuration, and Git state.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  assert.equal(events.some((e) => e.type === 'final'), false);
+});
+
+test('repository map requires source and tests inspection', async () => {
+  const replies = [
+    '{"action":{"tool":"workspace.list","input":{"path":"","depth":0}}}',
+    '{"action":{"tool":"git.status","input":{}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":80}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"next.config.ts","startLine":1,"endLine":80}}}',
+    '{"final":"Repository map complete; src and tests are present."}',
+  ];
+
+  const { deps } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 5 },
+      {
+        rootPath: '/r',
+        task: 'Map this repository including source, entrypoints, tests, deployment/runtime configuration, and Git state.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  assert.equal(events.some((e) => e.type === 'final'), false);
+});
+
+test('next.config.ts cannot satisfy application entrypoint evidence', async () => {
+  const replies = [
+    '{"action":{"tool":"workspace.list","input":{"path":"","depth":0}}}',
+    '{"action":{"tool":"git.status","input":{}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":80}}}',
+    '{"action":{"tool":"workspace.list","input":{"path":"src","depth":1}}}',
+    '{"action":{"tool":"workspace.list","input":{"path":"tests","depth":1}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"next.config.ts","startLine":1,"endLine":80}}}',
+    '{"final":"next.config.ts is the application entrypoint."}',
+  ];
+
+  const { deps } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 7 },
+      {
+        rootPath: '/r',
+        task: 'Map this repository including root, top-level directories, manifests, application entrypoints, tests, runtime configuration, and Git state.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  assert.equal(
+    events.some((e) => e.type === 'final'),
+    false,
+    'configuration alone must never satisfy repo.entrypoint',
+  );
+});
+
+test('all repository-map evidence obligations permit final', async () => {
+  const replies = [
+    '{"action":{"tool":"workspace.list","input":{"path":"","depth":0}}}',
+    '{"action":{"tool":"git.status","input":{}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":100}}}',
+    '{"action":{"tool":"workspace.list","input":{"path":"src","depth":1}}}',
+    '{"action":{"tool":"workspace.list","input":{"path":"src/app","depth":1}}}',
+    '{"action":{"tool":"workspace.list","input":{"path":"tests","depth":1}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"next.config.ts","startLine":1,"endLine":100}}}',
+    '{"final":"Repository map is complete from inspected manifest, source entry surface, tests, runtime configuration, and Git state."}',
+  ];
+
+  const { deps, calls } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 10 },
+      {
+        rootPath: '/r',
+        task:
+          'Map this repository before doing anything else. Identify the repository root, top-level directories, package/build manifests, application entrypoints, test locations, deployment/runtime configuration, and current Git state. Do not modify anything. Support the map with file paths.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  const finals = events.filter((e) => e.type === 'final');
+  assert.equal(finals.length, 1);
+  assert.equal(calls.some((c) => c.tool === 'file.readRange'), true);
+  assert.equal(calls.some((c) => c.tool === 'workspace.list'), true);
+  assert.equal(calls.some((c) => c.tool === 'git.status'), true);
+});
+
+test('repository-map CA2 still allows a verified USER_PREFERENCE terminal dependency', async () => {
+  const replies = [
+    JSON.stringify({
+      final: 'Which deployment target do you want me to evaluate?',
+      missing: {
+        kind: 'USER_PREFERENCE',
+        subject: 'deployment target',
+        evidence: 'the user must choose which target they want evaluated',
+      },
+    }),
+  ];
+
+  const { deps } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 3, workspaceExists: () => true },
+      {
+        rootPath: '/r',
+        task: 'Map this repository and evaluate deployment/runtime configuration after I choose the deployment target.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  assert.equal(
+    events.some((e) => e.type === 'final'),
+    true,
+    'a genuine user-only dependency remains a legitimate terminal state',
+  );
+});
+
+test('repository-map malformed prose cannot bypass CA2 evidence gate', async () => {
+  const replies = [
+    '{"action":{"tool":"workspace.list","input":{"path":"","depth":0}}}',
+    'Repository map complete. package.json exists and next.config.ts is the entrypoint.',
+  ];
+
+  const { deps } = scriptedDeps(replies, CA2_TOOLS);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 2 },
+      {
+        rootPath: '/r',
+        task: 'Map this repository including manifests, entrypoints, tests, deployment/runtime configuration, and Git state.',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  assert.equal(
+    events.some((e) => e.type === 'final'),
+    false,
+    'prose salvage must not bypass deterministic evidence obligations',
+  );
+});
+
+test('CA2 evidence comes from the canonical production capability registry', () => {
+  const tools = buildEngineerLoopTools(new CapabilityRegistry());
+  const byId = new Map(tools.map((t) => [t.id, t]));
+
+  assert.deepEqual(
+    byId.get('workspace.list')?.evidenceSemantics,
+    ['workspace.directory_listing'],
+  );
+
+  assert.deepEqual(
+    byId.get('workspace.find')?.evidenceSemantics,
+    ['workspace.path_discovery'],
+  );
+
+  assert.deepEqual(
+    byId.get('workspace.search')?.evidenceSemantics,
+    ['workspace.content_search'],
+  );
+
+  for (const id of ['file.read', 'file.readRange', 'file.readSymbol']) {
+    assert.deepEqual(
+      byId.get(id)?.evidenceSemantics,
+      ['workspace.file_content'],
+      `${id} must expose canonical file-content evidence`,
+    );
+  }
+
+  for (const id of ['git.status', 'git.overview']) {
+    assert.deepEqual(
+      byId.get(id)?.evidenceSemantics,
+      ['vcs.state'],
+      `${id} must expose canonical VCS-state evidence`,
+    );
+  }
+
+  assert.deepEqual(
+    byId.get('git.diff')?.evidenceSemantics,
+    ['vcs.diff'],
+  );
+
+  assert.deepEqual(
+    byId.get('diagnostics.get')?.evidenceSemantics,
+    ['workspace.diagnostics'],
+  );
+
+  assert.deepEqual(
+    byId.get('plan.update')?.evidenceSemantics,
+    [],
+    'model-owned planning must never count as repository evidence',
+  );
+});
+
+test('generic repository audit does not activate the repository-map contract', () => {
+  assert.equal(
+    requiresRepositoryMapEvidence({
+      rootPath: '/r',
+      task: 'audit this repository',
+      intent: 'INSPECT',
+    }),
+    false,
+  );
+});
+
+test('explicit repository map activates the repository-map contract', () => {
+  assert.equal(
+    requiresRepositoryMapEvidence({
+      rootPath: '/r',
+      task: 'Map this repository and show its structure.',
+      intent: 'INSPECT',
+    }),
+    true,
+  );
+});
+
+test('specific repository-map requirements activate without the word map', () => {
+  assert.equal(
+    requiresRepositoryMapEvidence({
+      rootPath: '/r',
+      task:
+        'Inspect this repository and identify its top-level directories, package manifest, application entrypoint, tests, deployment configuration, and current Git state.',
+      intent: 'INSPECT',
+    }),
+    true,
+  );
+});
