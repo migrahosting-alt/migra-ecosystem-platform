@@ -314,3 +314,165 @@ test('ecosystem flag injects the ecosystem context block; absent otherwise', asy
   assert.match(prompts[0]!, /ECOSYSTEM CONTEXT/);
   assert.doesNotMatch(prompts[1]!, /ECOSYSTEM CONTEXT/);
 });
+
+
+// ── ENGINEER COMPLETION AUTHORITY 1 ──────────────────────────────────────────
+
+test('unfinished persistent plan rejects "next I would" final until every feasible step is complete', async () => {
+  const replies = [
+    // Establish controller-persistent work.
+    '{"action":{"tool":"plan.update","input":{"steps":["inspect manifest","inspect source","inspect tests"]}}}',
+
+    // Do + complete step 1.
+    '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":20}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[1]}}}',
+
+    // The measured production defect: model honestly admits work remains but
+    // nevertheless asks the runtime to terminate.
+    '{"final":"I inspected the manifest. Next I would inspect src and tests."}',
+
+    // Controller must reject that final and keep executing.
+    '{"action":{"tool":"file.readRange","input":{"path":"src/index.ts","startLine":1,"endLine":20}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[2]}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"tests/index.test.ts","startLine":1,"endLine":20}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[3]}}}',
+
+    '{"final":"Repository inspection is complete: manifest, source, and tests were inspected."}',
+  ];
+
+  const { deps, calls } = scriptedDeps(replies);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 14 },
+      { rootPath: '/r', task: 'inspect manifest, source, and tests' },
+    ),
+  );
+
+  const finals = events.filter((e) => e.type === 'final');
+  assert.equal(finals.length, 1, 'premature final must not escape the completion authority');
+  assert.match(
+    (finals[0] as { markdown: string }).markdown,
+    /inspection is complete/i,
+  );
+
+  assert.equal(
+    calls.filter((c) => c.tool === 'file.readRange').length,
+    3,
+    'all three evidence-gathering reads must execute before terminal final',
+  );
+
+  const planNotes = events
+    .filter((e) => e.type === 'note' && (e as { kind?: string }).kind === 'plan')
+    .map((e) => (e as { message: string }).message);
+
+  assert.ok(planNotes.some((m) => /PLAN \(3\/3 done\)/.test(m)), 'plan reaches 3/3 before final');
+});
+
+test('unfinished plan + WORKSPACE_FACT declaration continues to inspection', async () => {
+  const replies = [
+    '{"action":{"tool":"plan.update","input":{"steps":["inspect package manifest"]}}}',
+    JSON.stringify({
+      final: 'I still need to determine which framework this repository uses.',
+      missing: {
+        kind: 'WORKSPACE_FACT',
+        subject: 'framework used by this repository',
+        evidence: 'the package manifest has not been inspected yet',
+      },
+    }),
+    '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":30}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[1]}}}',
+    '{"final":"The manifest has now been inspected."}',
+  ];
+
+  const { deps, calls } = scriptedDeps(replies);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 10, workspaceExists: () => true },
+      {
+        rootPath: '/r',
+        task: 'determine which framework this repository uses',
+        intent: 'INSPECT',
+      },
+    ),
+  );
+
+  const decisions = events.filter((e) => e.type === 'decision') as Array<{
+    type: 'decision';
+    disposition: string;
+    toolAuthority: string;
+  }>;
+
+  assert.ok(
+    decisions.some((d) => d.disposition === 'CONTINUE_TO_INSPECT'),
+    'WORKSPACE_FACT must remain inside the tool loop',
+  );
+
+  assert.equal(calls.filter((c) => c.tool === 'file.readRange').length, 1);
+  assert.equal(events.filter((e) => e.type === 'final').length, 1);
+});
+
+test('unfinished plan does not suppress a verified USER_PREFERENCE terminal question', async () => {
+  const replies = [
+    '{"action":{"tool":"plan.update","input":{"steps":["choose deployment target","implement target config"]}}}',
+    JSON.stringify({
+      final: 'Which deployment target do you want me to use: staging or production?',
+      missing: {
+        kind: 'USER_PREFERENCE',
+        subject: 'deployment target',
+        evidence: 'the requested target is a product choice that is not encoded in the workspace',
+      },
+    }),
+  ];
+
+  const { deps } = scriptedDeps(replies);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 6 },
+      {
+        rootPath: '/r',
+        task: 'configure the deployment target',
+        intent: 'BUILD',
+      },
+    ),
+  );
+
+  const decision = events.find((e) => e.type === 'decision') as
+    | { disposition: string; missingInformationKind: string }
+    | undefined;
+
+  assert.ok(decision, 'controller decision is emitted');
+  assert.equal(decision.missingInformationKind, 'USER_PREFERENCE');
+  assert.equal(decision.disposition, 'NEEDS_USER_INPUT');
+
+  const final = events.find((e) => e.type === 'final') as { markdown: string } | undefined;
+  assert.ok(final, 'verified user preference may terminate for user input');
+  assert.match(final.markdown, /staging or production/i);
+});
+
+test('repeated ordinary finals against the same unfinished plan stop honestly with LOOP_NO_PROGRESS', async () => {
+  const replies = [
+    '{"action":{"tool":"plan.update","input":{"steps":["inspect source"]}}}',
+    '{"final":"Next I would inspect the source."}',
+    '{"final":"More commands should be run before this is complete."}',
+    '{"final":"I still need to inspect the source."}',
+  ];
+
+  const { deps } = scriptedDeps(replies);
+  const events = await drain(
+    runEngineerTask(
+      { ...deps, maxSteps: 10 },
+      { rootPath: '/r', task: 'inspect the source tree' },
+    ),
+  );
+
+  assert.equal(events.some((e) => e.type === 'final'), false);
+
+  const error = events.find((e) => e.type === 'error') as
+    | { code: string; message: string }
+    | undefined;
+
+  assert.ok(error);
+  assert.equal(error.code, 'LOOP_NO_PROGRESS');
+  assert.match(error.message, /plan steps.*unchecked|unchecked.*plan steps/i);
+});
+

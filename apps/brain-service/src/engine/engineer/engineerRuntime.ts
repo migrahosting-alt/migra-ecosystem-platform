@@ -944,6 +944,21 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let proposalsEmitted = 0;
   let filesCreatedByCommand = false; // command.run side effects are real work too
   let plan: PlanStep[] = []; // the agent's own plan, carried across steps
+
+  /*
+   * ENGINEER COMPLETION AUTHORITY
+   *
+   * `finalCorrected` governs answer-quality repair. An unfinished plan is not
+   * an answer-quality problem: it is authoritative execution state saying the
+   * requested work is still outstanding.
+   *
+   * Keep a separate bounded counter so a model cannot repeatedly emit a final
+   * instead of executing the remaining feasible work, while also ensuring the
+   * controller cannot loop forever if the model refuses to comply.
+   */
+  let incompletePlanCorrections = 0;
+  const MAX_INCOMPLETE_PLAN_CORRECTIONS = 2;
+
   let lintCorrections = 0;
   const MAX_LINT_CORRECTIONS = 2; // bounded self-correction on defective proposals
   const stage = deps.stage ?? NOOP_STAGE_LOGGER;
@@ -1048,6 +1063,141 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
     }
 
     if (step.kind === 'final') {
+      /*
+       * ENGINEER COMPLETION AUTHORITY
+       * -----------------------------
+       * A syntactically valid {"final":"..."} is only a model REQUEST to finish.
+       * It is not authoritative while the controller's own persistent plan says
+       * feasible work remains.
+       *
+       * This is deliberately based on loop state, not phrases such as
+       * "next I would..." or "more commands should be run". Those phrases are
+       * useful regression examples, but model wording never owns completion.
+       */
+      const remainingPlan = plan
+        .map((s, i) => ({ ...s, index: i + 1 }))
+        .filter((s) => !s.done);
+
+      if (remainingPlan.length > 0) {
+        /*
+         * A declared missing-information condition gets the SAME existing
+         * authority decision used elsewhere in this runtime. This preserves the
+         * distinction between:
+         *
+         *   WORKSPACE_FACT  -> inspect with available read tools
+         *   USER_PREFERENCE -> user input may genuinely be required
+         *   EXTERNAL_FACT   -> user/external input may genuinely be required
+         *
+         * Ordinary prose with unfinished plan state never gets to terminate.
+         */
+        if (step.missing !== undefined) {
+          const completionDecision = decideTurn({
+            intent: input.intent ?? 'UNKNOWN',
+            declaration: step.missing,
+            deferredObserved: true,
+            workspaceExists: (deps.workspaceExists ?? existsSync)(input.rootPath),
+            readCapabilityGranted: deps.tools.some((t) => READ_ONLY_TOOL_IDS.has(t.id)),
+            specificationAvailable: (input.specification ?? '').trim().length > 0,
+            producedArtifacts: proposalsEmitted > 0 || filesCreatedByCommand,
+            governanceConsumed: false,
+            mutationCapabilityGranted: false,
+          });
+
+          yield {
+            type: 'decision',
+            missingInformationKind: completionDecision.missingInformationKind,
+            disposition: completionDecision.disposition,
+            toolAuthority: completionDecision.toolAuthority,
+            declarationOverridden: completionDecision.declarationOverridden,
+            reason: completionDecision.reason,
+          };
+
+          /*
+           * A verified user/external dependency is a legitimate terminal state.
+           * Everything the controller says is still discoverable from this
+           * workspace remains WORKING.
+           */
+          if (completionDecision.disposition !== 'CONTINUE_TO_INSPECT') {
+            // Fall through to the existing final guards/finalization. The later
+            // deferral authority block must not run a second time for this same
+            // declaration, so mark it as already consumed below.
+          } else {
+            incompletePlanCorrections += 1;
+
+            if (incompletePlanCorrections > MAX_INCOMPLETE_PLAN_CORRECTIONS) {
+              stage.log('error', {
+                code: 'LOOP_NO_PROGRESS',
+                n,
+                reason: 'model repeatedly attempted to finish with unchecked plan steps',
+                remainingPlan: remainingPlan.map((s) => ({ index: s.index, text: s.text })),
+              });
+              yield {
+                type: 'error',
+                code: 'LOOP_NO_PROGRESS',
+                message:
+                  'the engineer repeatedly attempted to finish while feasible plan steps remained unchecked',
+              };
+              return;
+            }
+
+            const remaining = remainingPlan
+              .map((s) => `  [ ] ${s.index}. ${s.text}`)
+              .join('\n');
+
+            transcript.push(
+              [
+                'COMPLETION REFUSED BY THE CONTROLLER.',
+                'The persistent execution plan still contains feasible unchecked work:',
+                remaining,
+                '',
+                'A final answer cannot complete this run while those steps remain.',
+                'Do NOT summarize what you would do next.',
+                'Use the appropriate workspace tool for the NEXT unchecked step now,',
+                'then mark that step complete with plan.update.',
+                'If a step genuinely cannot proceed, return a precise missing-information',
+                'declaration; WORKSPACE_FACT must be discovered with available read tools.',
+              ].join('\n'),
+            );
+            continue;
+          }
+        } else {
+          incompletePlanCorrections += 1;
+
+          if (incompletePlanCorrections > MAX_INCOMPLETE_PLAN_CORRECTIONS) {
+            stage.log('error', {
+              code: 'LOOP_NO_PROGRESS',
+              n,
+              reason: 'model repeatedly attempted to finish with unchecked plan steps',
+              remainingPlan: remainingPlan.map((s) => ({ index: s.index, text: s.text })),
+            });
+            yield {
+              type: 'error',
+              code: 'LOOP_NO_PROGRESS',
+              message:
+                'the engineer repeatedly attempted to finish while feasible plan steps remained unchecked',
+            };
+            return;
+          }
+
+          const remaining = remainingPlan
+            .map((s) => `  [ ] ${s.index}. ${s.text}`)
+            .join('\n');
+
+          transcript.push(
+            [
+              'COMPLETION REFUSED BY THE CONTROLLER.',
+              'The persistent execution plan still contains unchecked work:',
+              remaining,
+              '',
+              'A plan is not the deliverable and an ordinary final is not authoritative.',
+              'Do NOT say what you would inspect next. Perform the next unchecked step',
+              'with the appropriate tool now, then mark it complete with plan.update.',
+            ].join('\n'),
+          );
+          continue;
+        }
+      }
+
       // The weak-final check enforces a real COMPLETION REPORT — it only applies
       // once the agent has actually done work. This agent also answers ordinary
       // questions, where finishing on step 1 with a short direct answer is the
@@ -1136,7 +1286,12 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
        * failure. Turns that DID produce a proposal keep their ending untouched,
        * so "here are the files, want tests too?" is never treated as a deferral.
        */
-      if (producedNothing && (deferredObserved || step.missing !== undefined) && !finalCorrected) {
+      if (
+        producedNothing &&
+        (deferredObserved || step.missing !== undefined) &&
+        !finalCorrected &&
+        !plan.some((s) => !s.done)
+      ) {
         // Step 6B. THE REGEX IS NOW AN OBSERVATION ONLY. It answers exactly one
         // question — "did the model appear to defer?" — and has no say in whether the
         // turn continues into tools. That decision belongs to the controller, and rests
@@ -1221,7 +1376,15 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
     // steps and be re-shown to the model every time, which a stateless tool
     // cannot do. Intercepted here, before dispatch.
     if (step.tool === 'plan.update') {
+      const completedBefore = plan.filter((s) => s.done).length;
       plan = applyPlanUpdate(plan, step.input);
+      const completedAfter = plan.filter((s) => s.done).length;
+
+      // A newly completed plan item is objective progress. Give the model a fresh
+      // completion-authority allowance rather than carrying an old refusal across
+      // later, genuinely advancing work.
+      if (completedAfter > completedBefore) incompletePlanCorrections = 0;
+
       const rendered = renderPlan(plan);
       yield { type: 'note', n, kind: 'plan', message: rendered };
       transcript.push(`${rendered}\n\nWork the next unchecked step. Mark steps done as you finish them.`);
