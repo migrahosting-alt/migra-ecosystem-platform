@@ -1,3 +1,4 @@
+import { allowRemoteModelsFromEnv } from './engine/models/eligibilityPolicy.js';
 import Fastify from 'fastify';
 import {
   normalizePreferences,
@@ -52,6 +53,7 @@ import { registerTestRunRoutes } from './engine/tools/testRunRoutes.js';
 import { registerAnswerRoutes } from './engine/chat/answerRoutes.js';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { registerEngineerRoutes } from './engine/engineer/engineerRoutes.js';
+import { PostgresEngineerCheckpointStore } from './engine/engineer/postgresEngineerCheckpointStore.js';
 import { LiveConnectorRegistry } from './engine/liveKnowledge/liveResearch.js';
 import { buildAuthoritativeConnectors } from './engine/liveKnowledge/connectors/index.js';
 import { startMcp } from './mcp/mcpRuntime.js';
@@ -461,6 +463,7 @@ async function main(): Promise<void> {
     toolDeps: () => answerToolDeps,
     defaultModel: process.env.MIGRAPILOT_AGENT_MODEL ?? 'qwen3-coder:30b',
     cloudModel: process.env.MIGRAPILOT_AGENT_CLOUD_MODEL ?? 'gpt-oss:120b-cloud',
+    allowRemoteModels: allowRemoteModelsFromEnv(),
   });
   // ── Durable state (MigraAI Durable State) ──────────────────────────────────
   // The adapter is chosen explicitly (MIGRAPILOT_PERSISTENCE); PostgreSQL is the
@@ -1255,6 +1258,11 @@ async function main(): Promise<void> {
     );
   }
 
+  const engineerCheckpointStore =
+    durable instanceof PostgresDurableStore
+      ? new PostgresEngineerCheckpointStore(durable)
+      : undefined;
+
   registerEngineerRoutes(
     app,
     env,
@@ -1267,6 +1275,7 @@ async function main(): Promise<void> {
     indexedBranchFor,
     undefined,
     liveKnowledgeRegistry,
+    engineerCheckpointStore,
   );
   // MigraAI Engine agent orchestration (/api/ai/agents): the engine owns the
   // public agent contract; runs execute through the SAME tool boundary + approval

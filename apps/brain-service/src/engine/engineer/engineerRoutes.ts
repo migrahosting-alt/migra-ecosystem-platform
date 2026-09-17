@@ -1,3 +1,12 @@
+import {
+  ENGINEER_CHECKPOINT_VERSION,
+  type EngineerCheckpointPayloadV1,
+  type EngineerCheckpointStore,
+  type EngineerWorkspaceSnapshotV1,
+} from './engineerCheckpointStore.js';
+import {
+  engineerWorkspaceSnapshotFromGit,
+} from './engineerWorkspaceSnapshot.js';
 // POST /api/ai/engineer — SSE surface for the model-in-the-loop workspace
 // engineer (Slice 2). Local-only: no pilot-api involvement anywhere on this
 // path, so disabled remote delegation can never block ordinary local work.
@@ -54,12 +63,18 @@ import {
 import { resolveEffectivePolicy } from '../providers/executionPolicy.js';
 import { assessCodingOutcome } from '../providers/codingAssessment.js';
 import type { EscalationController } from '../providers/escalationController.js';
-import type { ChatTurnRequest } from '@migrapilot/shared-types';
+import type { ChatTurnRequest, EngineeringTask, EngineeringTaskStage } from '@migrapilot/shared-types';
 import { StubProvider, type ProviderAdapter } from '../../providers/providerRegistry.js';
 import { OpenAiCompatProvider, classifyProviderFailure, type ProviderFailure } from '../../providers/openAiCompatProvider.js';
 import { executeToolCore, type ToolExecDeps } from '../tools/toolExecutor.js';
 import { newCorrelationId, makeStageLogger, jsonLineSink, type StageLogger } from '../observability/correlation.js';
-import { runEngineerTask, type EngineerToolInfo } from './engineerRuntime.js';
+import {
+  runEngineerTask,
+  createCompletionEvidenceState,
+  snapshotCompletionEvidence,
+  type EngineerRuntimeCheckpoint,
+  type EngineerToolInfo,
+} from './engineerRuntime.js';
 import { buildEngineerLoopTools } from './engineerToolCatalog.js';
 import { changesetProposals } from '../models/capabilityRegistry.js';
 import { telemetryHub } from '../observability/telemetryHub.js';
@@ -111,6 +126,12 @@ function controllerIntent(task: string, hasSpecification: boolean): TurnDecision
 const EngineerBodySchema = z.object({
   rootPath: z.string().min(1),
   task: z.string().min(1),
+
+  /**
+   * Explicit durable continuation request.
+   * x-correlation-id alone never means resume.
+   */
+  resumeCorrelationId: z.string().trim().min(1).optional(),
   ecosystem: z.boolean().optional(),
   /**
    * Answer ONLY from the approved semantic index.
@@ -275,6 +296,13 @@ export function registerEngineerRoutes(
    * existing callers and tests keep working.
    */
   liveKnowledgeRegistry?: LiveConnectorRegistry,
+  /**
+   * Durable semantic continuation store.
+   *
+   * Absent on SQLite/off/degraded persistence: the route remains usable but
+   * restart-safe continuation is unavailable rather than simulated in memory.
+   */
+  checkpointStore?: EngineerCheckpointStore,
 ): void {
   /**
    * Real DNS resolution for the fetch layer's address checks.
@@ -482,14 +510,120 @@ export function registerEngineerRoutes(
       };
     }
     const body = parsed.data;
+    const resolvedControllerIntent = controllerIntent(
+      body.task,
+      Boolean(body.designSpec),
+    );
 
-    // Correlation id for the WHOLE execution (accept a caller-supplied id via
-    // header for cross-service tracing, else mint one). Emits one structured
-    // line per stage: request → route → loop-step → tool/proposal → apply → …
-    const headerId = String((request.headers['x-correlation-id'] as string | undefined) ?? '').trim();
-    const correlationId = headerId || newCorrelationId();
-    const stage: StageLogger = makeStageLogger(correlationId, jsonLineSink((line) => request.log.info(line)));
+    const headerId = String(
+      (request.headers['x-correlation-id'] as string | undefined) ?? '',
+    ).trim();
+
     const scope: Scope = scopeFrom(request);
+    const requestedResumeId = body.resumeCorrelationId;
+
+    if (
+      requestedResumeId &&
+      headerId &&
+      headerId !== requestedResumeId
+    ) {
+      reply.code(409);
+      return {
+        ok: false,
+        code: 'ENGINEER_RESUME_CORRELATION_MISMATCH',
+        error:
+          'x-correlation-id and resumeCorrelationId identify different Engineer runs.',
+      };
+    }
+
+    let resumeCheckpoint: EngineerCheckpointPayloadV1 | undefined;
+
+    if (requestedResumeId) {
+      if (!checkpointStore) {
+        reply.code(409);
+        return {
+          ok: false,
+          code: 'ENGINEER_RESUME_UNAVAILABLE',
+          error:
+            'Durable Engineer continuation is unavailable on this Brain.',
+        };
+      }
+
+      let loaded: EngineerCheckpointPayloadV1 | null;
+
+      try {
+        loaded = await checkpointStore.load(
+          {
+            owner: scope.owner,
+            workspace: scope.workspace,
+          },
+          requestedResumeId,
+        );
+      } catch {
+        reply.code(409);
+        return {
+          ok: false,
+          code: 'ENGINEER_RESUME_CHECKPOINT_INVALID',
+          error:
+            'The durable Engineer checkpoint could not be validated.',
+        };
+      }
+
+      if (!loaded) {
+        reply.code(404);
+        return {
+          ok: false,
+          code: 'ENGINEER_RESUME_NOT_FOUND',
+          error:
+            'No durable Engineer checkpoint exists in this owner/workspace scope.',
+        };
+      }
+
+      if (loaded.status === 'COMPLETED') {
+        reply.code(409);
+        return {
+          ok: false,
+          code: 'ENGINEER_RESUME_ALREADY_COMPLETED',
+          error:
+            'This Engineer task is already durably complete.',
+        };
+      }
+
+      if (loaded.status === 'FAILED') {
+        reply.code(409);
+        return {
+          ok: false,
+          code: 'ENGINEER_RESUME_FAILED_TASK',
+          error:
+            'FAILED Engineer checkpoints are not resumable in the R2 contract.',
+        };
+      }
+
+      if (
+        loaded.rootPath !== body.rootPath ||
+        loaded.objective !== body.task ||
+        loaded.intent !== resolvedControllerIntent
+      ) {
+        reply.code(409);
+        return {
+          ok: false,
+          code: 'ENGINEER_RESUME_IDENTITY_MISMATCH',
+          error:
+            'Workspace, objective, or controller intent does not match the durable checkpoint.',
+        };
+      }
+
+      resumeCheckpoint = loaded;
+    }
+
+    const correlationId =
+      resumeCheckpoint?.correlationId ??
+      (headerId || newCorrelationId());
+
+    const stage: StageLogger = makeStageLogger(
+      correlationId,
+      jsonLineSink((line) => request.log.info(line)),
+    );
     stage.log('request', { rootPath: body.rootPath, ecosystem: Boolean(body.ecosystem) });
     await auditStore.append({ correlationId, type: 'execution.started', component: 'engineer', requestId: headerId || undefined, fields: { workspace: auditHash(body.rootPath), ecosystem: Boolean(body.ecosystem) } });
 
@@ -560,6 +694,23 @@ export function registerEngineerRoutes(
       }
     };
 
+    const task: EngineeringTask = {
+      taskId: correlationId,
+      workspaceRoot: body.rootPath,
+      stage: 'inspect',
+      checkpoint: 'Brain accepted the engineering request and is gathering repository evidence.',
+      observedFiles: [],
+      evidence: [],
+      commands: [],
+      repairAttempts: 0,
+      completion: 'in_progress',
+    };
+    const taskStage = (stage: EngineeringTaskStage, checkpoint: string): void => {
+      task.stage = stage;
+      task.checkpoint = checkpoint;
+      send('task', { task: { ...task, observedFiles: [...task.observedFiles], evidence: [...task.evidence], commands: [...task.commands] } });
+    };
+
     /*
      * The client runs the workspace tools when it says it can. The delegate is
      * created here because it needs `send`, and registered under the run's
@@ -614,6 +765,7 @@ export function registerEngineerRoutes(
     }, KEEPALIVE_MS);
     keepalive.unref?.();
     request.raw.on('close', () => clearInterval(keepalive));
+    taskStage('inspect', task.checkpoint);
 
     // ── Capability authority: does this model have STANDING for this work? ─────
     // Computed from measured benchmark grants, disclosed by the host, and audited. This
@@ -896,6 +1048,372 @@ export function registerEngineerRoutes(
       .catch(() => [] as Array<{ path: string; startLine: number; endLine: number; snippet: string }>);
     stage.log('request', { seededChunks: seededContext.length });
 
+    /*
+     * R2 — DURABLE ENGINEER SEMANTIC LIFECYCLE.
+     *
+     * The checkpoint begins HERE, after routing/capability/admission/grounding
+     * have succeeded and immediately before the semantic controller begins.
+     *
+     * A refusal before this point is not resumable work and must not create a
+     * misleading RUNNING row.
+     */
+    const checkpointCreatedAt =
+      resumeCheckpoint?.createdAt ??
+      new Date().toISOString();
+
+    const checkpointResumeEpoch =
+      resumeCheckpoint
+        ? resumeCheckpoint.resumeEpoch + 1
+        : 0;
+
+    const workspaceSnapshotFrom = (
+      state: EngineerRuntimeCheckpoint | undefined,
+    ): EngineerWorkspaceSnapshotV1 => {
+      const observations = state?.observations ?? [];
+
+      const statusObservation = [...observations]
+        .reverse()
+        .find((observation) => observation.tool === 'git.status');
+
+      const overviewObservation = [...observations]
+        .reverse()
+        .find((observation) => observation.tool === 'git.overview');
+
+      /*
+       * Restart-safe repository identity needs both authoritative views:
+       *
+       *   git.overview -> HEAD + branch
+       *   git.status   -> exact per-file working-tree state
+       *
+       * Partial evidence is UNKNOWN, not equivalence.
+       */
+      if (!statusObservation || !overviewObservation) {
+        return {
+          gitHead: null,
+          gitBranch: null,
+          dirtyFingerprint: null,
+        };
+      }
+
+      try {
+        return engineerWorkspaceSnapshotFromGit(
+          statusObservation.result,
+          overviewObservation.result,
+        );
+      } catch {
+        /*
+         * Malformed historical/tool evidence cannot become durable continuation
+         * authority. Persist UNKNOWN so later resume revalidation fails closed.
+         */
+        return {
+          gitHead: null,
+          gitBranch: null,
+          dirtyFingerprint: null,
+        };
+      }
+    };
+
+    const initialEvidence = snapshotCompletionEvidence(
+      createCompletionEvidenceState({
+        rootPath: body.rootPath,
+        task: body.task,
+        ...(body.designSpec ? { specification: body.designSpec } : {}),
+        intent: resolvedControllerIntent,
+      }),
+    );
+
+    let latestRuntimeCheckpoint: EngineerRuntimeCheckpoint | undefined;
+
+    let revalidatedWorkspaceSnapshot:
+      | EngineerWorkspaceSnapshotV1
+      | undefined;
+
+    const executeResumePrecondition = async (
+      tool: string,
+      input: unknown,
+    ): Promise<unknown> => {
+      if (delegate && CLIENT_WORKSPACE_TOOLS.has(tool)) {
+        stage.log('tool', {
+          tool,
+          delegated: true,
+          resumeRevalidation: true,
+        });
+
+        return delegate.request(tool, input);
+      }
+
+      const known = toolDeps.registry
+        .list({ includeUnavailable: true })
+        .find((candidate) => candidate.id === tool);
+
+      toolGate.assertPermitted(
+        tool,
+        known?.readOnly ?? false,
+      );
+
+      const outcome = await executeToolCore(toolDeps, {
+        tool,
+        input,
+        requestId: `eng-resume-${Date.now().toString(36)}`,
+        stage,
+      });
+
+      if (!outcome.ok) {
+        throw new Error(`${outcome.code}: ${outcome.error}`);
+      }
+
+      if (outcome.status === 'approval_required') {
+        throw new Error(
+          'APPROVAL_REQUIRED: resume revalidation must remain read-only.',
+        );
+      }
+
+      return outcome.result ?? outcome.preview;
+    };
+
+    let restoredResume:
+      | {
+          plan: EngineerCheckpointPayloadV1['plan'];
+          completionEvidence:
+            EngineerCheckpointPayloadV1['completionEvidence'];
+          observations:
+            EngineerCheckpointPayloadV1['observations'];
+        }
+      | undefined;
+
+    let resumeWorkspaceState:
+      | 'fresh'
+      | 'unchanged'
+      | 'changed' = 'fresh';
+
+    if (resumeCheckpoint) {
+      let freshStatus: unknown;
+      let freshOverview: unknown;
+
+      try {
+        await executeResumePrecondition(
+          'workspace.list',
+          {
+            rootPath: body.rootPath,
+            path: '.',
+            depth: 0,
+            limit: 1,
+          },
+        );
+
+        freshStatus = await executeResumePrecondition(
+          'git.status',
+          {
+            rootPath: body.rootPath,
+          },
+        );
+
+        freshOverview = await executeResumePrecondition(
+          'git.overview',
+          {
+            rootPath: body.rootPath,
+          },
+        );
+
+        revalidatedWorkspaceSnapshot =
+          engineerWorkspaceSnapshotFromGit(
+            freshStatus,
+            freshOverview,
+          );
+      } catch (err) {
+        stage.log('error', {
+          code: 'ENGINEER_RESUME_REVALIDATION_FAILED',
+        });
+
+        send('error', {
+          type: 'error',
+          code: 'ENGINEER_RESUME_REVALIDATION_FAILED',
+          error:
+            'The workspace could not be freshly revalidated. No resumed model work was started.',
+          detail: sanitizeError(err),
+        });
+
+        send('done', {
+          correlationId,
+          outcome: 'refused',
+          code: 'ENGINEER_RESUME_REVALIDATION_FAILED',
+        });
+
+        clearInterval(keepalive);
+        unregisterDelegate(correlationId);
+        raw.end();
+        return;
+      }
+
+      const priorSnapshot =
+        resumeCheckpoint.workspaceSnapshot;
+      const freshSnapshot =
+        revalidatedWorkspaceSnapshot;
+
+      const unchanged =
+        priorSnapshot.dirtyFingerprint !== null &&
+        priorSnapshot.gitHead === freshSnapshot.gitHead &&
+        priorSnapshot.gitBranch === freshSnapshot.gitBranch &&
+        priorSnapshot.dirtyFingerprint ===
+          freshSnapshot.dirtyFingerprint;
+
+      if (unchanged) {
+        resumeWorkspaceState = 'unchanged';
+
+        restoredResume = {
+          plan: resumeCheckpoint.plan.map(
+            (step) => ({ ...step }),
+          ),
+          completionEvidence: {
+            enabled:
+              resumeCheckpoint.completionEvidence.enabled,
+            satisfied: [
+              ...resumeCheckpoint.completionEvidence.satisfied,
+            ],
+            evidence:
+              resumeCheckpoint.completionEvidence.evidence.map(
+                ([id, evidence]) => [
+                  id,
+                  [...evidence],
+                ],
+              ),
+          },
+          observations:
+            resumeCheckpoint.observations.map(
+              (observation) => ({
+                tool: observation.tool,
+                input: observation.input,
+                result: observation.result,
+              }),
+            ),
+        };
+
+        latestRuntimeCheckpoint = {
+          sequence: 0,
+          plan: restoredResume.plan.map(
+            (step) => ({ ...step }),
+          ),
+          completionEvidence: {
+            enabled:
+              restoredResume.completionEvidence.enabled,
+            satisfied: [
+              ...restoredResume.completionEvidence.satisfied,
+            ],
+            evidence:
+              restoredResume.completionEvidence.evidence.map(
+                ([id, evidence]) => [
+                  id,
+                  [...evidence],
+                ],
+              ),
+          },
+          observations:
+            restoredResume.observations.map(
+              (observation) => ({
+                tool: observation.tool,
+                input: observation.input,
+                result: observation.result,
+              }),
+            ),
+        };
+      } else {
+        resumeWorkspaceState = 'changed';
+        restoredResume = undefined;
+        latestRuntimeCheckpoint = undefined;
+      }
+
+      send('resume', {
+        correlationId,
+        resumeEpoch: checkpointResumeEpoch,
+        workspaceState: resumeWorkspaceState,
+        restoredSemanticState:
+          resumeWorkspaceState === 'unchanged',
+      });
+    }
+
+
+    const durableCheckpoint = (
+      runtime: EngineerRuntimeCheckpoint | undefined,
+      status: EngineerCheckpointPayloadV1['status'],
+      updatedAt: string,
+    ): EngineerCheckpointPayloadV1 => ({
+      taskStateVersion: ENGINEER_CHECKPOINT_VERSION,
+      correlationId,
+      rootPath: body.rootPath,
+      objective: body.task,
+      intent: resolvedControllerIntent,
+      plan: runtime?.plan.map((step) => ({ ...step })) ?? [],
+      completionEvidence:
+        runtime?.completionEvidence ?? initialEvidence,
+      observations:
+        runtime?.observations.map((observation) => ({
+          tool: observation.tool,
+          input: observation.input,
+          result: observation.result,
+        })) ?? [],
+      workspaceSnapshot: (() => {
+        const runtimeSnapshot = workspaceSnapshotFrom(runtime);
+
+        if (
+          runtimeSnapshot.gitHead !== null ||
+          runtimeSnapshot.gitBranch !== null ||
+          runtimeSnapshot.dirtyFingerprint !== null
+        ) {
+          return runtimeSnapshot;
+        }
+
+        return (
+          revalidatedWorkspaceSnapshot ??
+          runtimeSnapshot
+        );
+      })(),
+      resumeEpoch: checkpointResumeEpoch,
+      status,
+      createdAt: checkpointCreatedAt,
+      updatedAt,
+    });
+
+    if (checkpointStore) {
+      try {
+        await checkpointStore.save(
+          { owner: scope.owner, workspace: scope.workspace },
+          durableCheckpoint(
+            latestRuntimeCheckpoint,
+            'RUNNING',
+            new Date().toISOString(),
+          ),
+        );
+      } catch (err) {
+        stage.log('error', {
+          code: 'ENGINEER_CHECKPOINT_UNAVAILABLE',
+        });
+        await auditStore.append({
+          correlationId,
+          type: 'execution.failed',
+          component: 'engineer',
+          outcome: 'ENGINEER_CHECKPOINT_UNAVAILABLE',
+          fields: {
+            refusedBeforeModelCall: true,
+          },
+        });
+        send('error', {
+          type: 'error',
+          code: 'ENGINEER_CHECKPOINT_UNAVAILABLE',
+          error:
+            'Durable Engineer continuation could not be initialized. No model work was started.',
+        });
+        send('done', {
+          correlationId,
+          outcome: 'failed',
+          code: 'ENGINEER_CHECKPOINT_UNAVAILABLE',
+        });
+        clearInterval(keepalive);
+        unregisterDelegate(correlationId);
+        raw.end();
+        return;
+      }
+    }
+
     const events = runEngineerTask(
       {
         complete: async (prompt) => {
@@ -985,6 +1503,34 @@ export function registerEngineerRoutes(
         },
         listFiles: async (root) => listWorkspaceFiles(root),
         stage,
+
+        ...(checkpointStore
+          ? {
+              checkpoint: async (
+                runtimeCheckpoint: EngineerRuntimeCheckpoint,
+              ): Promise<void> => {
+                /*
+                 * Controller-authoritative state becomes durable before the
+                 * corresponding visible semantic transition. runEngineerTask
+                 * owns that ordering; this callback only persists its snapshot.
+                 */
+                latestRuntimeCheckpoint = runtimeCheckpoint;
+
+                await checkpointStore.save(
+                  {
+                    owner: scope.owner,
+                    workspace: scope.workspace,
+                  },
+                  durableCheckpoint(
+                    runtimeCheckpoint,
+                    'RUNNING',
+                    new Date().toISOString(),
+                  ),
+                );
+              },
+            }
+          : {}),
+
         // Advertised set and executed set are filtered by the SAME gate object, so they
         // cannot drift apart the way an advertisement-only narrowing did.
         tools: permittedTools(toolGate, loopTools(toolsWithheld)),
@@ -996,7 +1542,38 @@ export function registerEngineerRoutes(
         // assembly, so there is exactly ONE place that decides how a specification
         // is presented to the model — and the controller keeps it as evidence.
         ...(body.designSpec ? { specification: body.designSpec } : {}),
-        intent: controllerIntent(body.task, Boolean(body.designSpec)),
+        intent: resolvedControllerIntent,
+        ...(restoredResume
+          ? {
+              resume: {
+                plan: restoredResume.plan.map(
+                  (step) => ({ ...step }),
+                ),
+                completionEvidence: {
+                  enabled:
+                    restoredResume.completionEvidence.enabled,
+                  satisfied: [
+                    ...restoredResume.completionEvidence.satisfied,
+                  ],
+                  evidence:
+                    restoredResume.completionEvidence.evidence.map(
+                      ([id, evidence]) => [
+                        id,
+                        [...evidence],
+                      ],
+                    ),
+                },
+                observations:
+                  restoredResume.observations.map(
+                    (observation) => ({
+                      tool: observation.tool,
+                      input: observation.input,
+                      result: observation.result,
+                    }),
+                  ),
+              },
+            }
+          : {}),
         ecosystem: body.ecosystem,
         history: body.history,
         context: seededContext,
@@ -1013,6 +1590,14 @@ export function registerEngineerRoutes(
 
     await auditStore.append({ correlationId, type: 'loop.started', component: 'engineer' });
     let failure: ProviderFailure | undefined;
+
+    /*
+     * A controller-accepted final is provisional until the terminal COMPLETED
+     * checkpoint is durable.
+     */
+    let pendingFinalEvent: unknown;
+    let terminalCheckpointWriteFailed = false;
+
     // FIVE terminal states, not two. `completed | failed` could not say that a
     // deadline fired while the work was still running, that a human stopped it, or
     // that the client went away mid-answer — so all three were reported as
@@ -1023,12 +1608,52 @@ export function registerEngineerRoutes(
     try {
       for await (const ev of events) {
         if (closed) break; // client went away — stop driving the model
-        if (ev.type === 'final') {
+        if (ev.type === 'step') {
+          const step = ev as { tool?: string; summary?: string };
+          if (step.tool && !task.observedFiles.includes(step.tool)) task.observedFiles.push(step.tool);
+          taskStage(step.tool?.includes('search') || step.tool?.includes('read') ? 'inspect' : 'plan', step.summary ?? 'Brain completed an engineering step.');
+        } else if (ev.type === 'proposal') {
+          const preview = (ev as {
+            preview?: {
+              proposalHash?: string;
+              ops?: Array<{ path?: string; op?: string; kind?: string; before?: string | null; after?: string | null; content?: string }>;
+              files?: Array<{ path?: string; before?: string | null; after?: string | null }>;
+            };
+          }).preview;
+          if (preview?.proposalHash) {
+            const operations = preview.ops?.length
+              ? preview.ops.map((op) => ({
+                  path: op.path ?? '',
+                  operation: op.kind ?? op.op ?? 'modify',
+                  ...(op.before !== undefined ? { before: op.before } : {}),
+                  ...(op.after !== undefined ? { after: op.after } : {}),
+                  ...(op.content !== undefined ? { after: op.content } : {}),
+                }))
+              : (preview.files ?? []).map((file) => ({
+                  path: file.path ?? '',
+                  operation: 'edit',
+                  ...(file.before !== undefined ? { before: file.before } : {}),
+                  ...(file.after !== undefined ? { after: file.after } : {}),
+                }));
+            task.proposal = {
+              proposalHash: preview.proposalHash,
+              approvalState: 'pending',
+              operations,
+              expectedVerification: ['Run the narrowest repository test or build command that covers the changed files.'],
+            };
+          }
+          taskStage('awaiting_approval', 'A structured changeset is ready for operator review.');
+        } else if (ev.type === 'final') {
           engineCompleted = true;
           terminal = 'completed';
           const f = ev as { content?: string; summary?: string; text?: string };
           finalText = String(f.content ?? f.summary ?? f.text ?? '');
+
+          // Controller-accepted, but not yet durably terminal.
+          pendingFinalEvent = ev;
+          continue;
         }
+
         send(ev.type, ev);
       }
     } catch (err) {
@@ -1037,6 +1662,7 @@ export function registerEngineerRoutes(
       // "too slow to start" from "went silent" from "the user pressed Stop", which
       // made a 60s total-deadline defect look like an unexplained engine fault.
       failure = classifyProviderFailure(err);
+      taskStage('failed', 'The Brain could not complete the engineering task.');
       send('error', {
         type: 'error', code: failure.code, cause: failure.cause,
         ...(failure.limitMs ? { limitMs: failure.limitMs } : {}),
@@ -1057,7 +1683,90 @@ export function registerEngineerRoutes(
       engineCompleted,
       ...(failure && failure.code === 'ENGINE_FAILURE' ? { error: { message: failure.cause } } : {}),
     });
+    /*
+     * The route owns process/request lifecycle, so it owns terminal checkpoint
+     * classification too.
+     *
+     * A stale RUNNING row after a hard process death remains intentionally
+     * possible; recovery/resume code treats that as interrupted work, never as
+     * permission to auto-execute.
+     */
+    if (checkpointStore) {
+      const checkpointStatus =
+        terminal === 'completed'
+          ? 'COMPLETED'
+          : terminal === 'failed'
+            ? 'FAILED'
+            : 'INTERRUPTED';
+
+      const updatedAt = new Date().toISOString();
+
+      try {
+        /*
+         * Save the last semantic state with the terminal status when one exists.
+         * This is stronger than status-only mutation because it makes terminal
+         * durability self-contained even if the last semantic callback occurred
+         * immediately before process/request teardown.
+         */
+        await checkpointStore.save(
+          {
+            owner: scope.owner,
+            workspace: scope.workspace,
+          },
+          durableCheckpoint(
+            latestRuntimeCheckpoint,
+            checkpointStatus,
+            updatedAt,
+          ),
+        );
+      } catch (err) {
+        stage.log('error', {
+          code: 'ENGINEER_CHECKPOINT_TERMINAL_WRITE_FAILED',
+        });
+        await auditStore.append({
+          correlationId,
+          type: 'execution.failed',
+          component: 'engineer',
+          outcome: 'ENGINEER_CHECKPOINT_TERMINAL_WRITE_FAILED',
+          fields: {
+            terminal,
+          },
+        });
+
+        if (terminal === 'completed') {
+          terminalCheckpointWriteFailed = true;
+          terminal = 'failed';
+
+          taskStage(
+            'failed',
+            'The Brain accepted the answer but could not durably record completion.',
+          );
+
+          send('error', {
+            type: 'error',
+            code: 'ENGINEER_CHECKPOINT_TERMINAL_WRITE_FAILED',
+            error:
+              'The answer was generated, but durable completion could not be recorded. The accepted final was not published.',
+            outcome: 'failed',
+          });
+        }
+      }
+    }
+
+    /*
+     * DURABLE-BEFORE-VISIBLE.
+     *
+     * At this point terminal=completed means the terminal COMPLETED checkpoint
+     * succeeded. Only now may the accepted final become client-visible.
+     */
+    if (terminal === 'completed' && pendingFinalEvent) {
+      send('final', pendingFinalEvent);
+    }
+
     if (terminal === 'completed') {
+      if (task.stage !== 'awaiting_approval') taskStage('verified', 'Brain completed the inspect/plan phase; workspace mutation remains approval-gated.');
+      task.completion = 'complete';
+      send('task', { task });
       await auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });
       await auditStore.append({ correlationId, type: 'execution.completed', component: 'engineer', outcome: 'ok' });
     } else {
@@ -1086,7 +1795,12 @@ export function registerEngineerRoutes(
       localSavings = escalation.recordLocalUsage({ correlationId, providerId: decision.model.provider, modelId: decision.model.id, mode: 'engineer', policy: String(routing.policy ?? 'auto'), outcome: 'ok', request: escRequest });
     }
     let escalationOffer: Record<string, unknown> | undefined;
-    if (escalation && providerRouting && terminal === 'failed') {
+    if (
+      escalation &&
+      providerRouting &&
+      terminal === 'failed' &&
+      !terminalCheckpointWriteFailed
+    ) {
       const off = await escalation.offer({ correlationId, policy: resolved?.effective ?? providerRouting.policy, outcome: { hadLocalModel: true, terminal: 'failed', output: finalText, errorMessage: 'local engineer loop failed' }, request: escRequest, requiredCaps: { coding: true } });
       if (off.offered) {
         escalationOffer = { offerId: off.offerId, token: off.token, reason: off.reason, target: off.target, estimatedCostUsd: off.estimate?.estimatedCostUsd, worstCaseCostUsd: off.worstCaseCostUsd, costCeilingUsd: off.costCeilingUsd, remainingBudgetUsd: off.remainingBudgetUsd, dataLeavesLocal: off.dataLeavesLocal, expiresAt: off.expiresAt, request: escRequest };
@@ -1096,6 +1810,9 @@ export function registerEngineerRoutes(
     send('done', {
       correlationId,
       outcome: terminal,
+      ...(terminalCheckpointWriteFailed
+        ? { code: 'ENGINEER_CHECKPOINT_TERMINAL_WRITE_FAILED' }
+        : {}),
       routing: { policy: routing.policy, requestedPolicy: routing.requestedPolicy, effectivePolicy: routing.effectivePolicy, policyReason: routing.policyReason, model: decision.model.id, providerId: decision.model.provider, fallbackRecommended, reasons: [...routing.fallbackReasons, ...assessment.reasons] },
       ...(escalationOffer ? { escalationOffer } : {}),
       ...(localSavings ? { localSavings } : {}),

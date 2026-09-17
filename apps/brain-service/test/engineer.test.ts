@@ -5,11 +5,15 @@
 import { buildEngineerLoopTools } from '../src/engine/engineer/engineerToolCatalog.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileRead, fileReadRange, workspaceList, workspaceFind, gitStatus } from '@migrapilot/workspace-tools';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { commandRun, commandAllowlist, commandRunEnabled, previewCommandRun } from '../src/tools/commandRun.js';
-import { runEngineerTask, parseStep, requiresRepositoryMapEvidence, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
+import {
+  restoreCompletionEvidence,
+  missingCompletionObligations, runEngineerTask, parseStep, requiresRepositoryMapEvidence, createCompletionEvidenceState, observeCompletionEvidence, type EngineerDeps, type EngineerEvent, type EngineerToolInfo } from '../src/engine/engineer/engineerRuntime.js';
 import { CapabilityRegistry } from '../src/engine/models/capabilityRegistry.js';
 import { ToolApprovalStore } from '../src/engine/tools/toolApprovalStore.js';
 import { ToolAudit } from '../src/engine/tools/toolAudit.js';
@@ -151,7 +155,7 @@ function scriptedDeps(
   return {
     deps: {
       complete: async () => replies[Math.min(i++, replies.length - 1)]!,
-      executeTool: async (tool: string, input: unknown) => {
+      executeTool: async (tool: string, input: unknown): Promise<unknown> => {
         calls.push({ tool, input });
         if (tool === 'edit.preview') return { tool, files: [{ path: 'a.ts', before: 'x', after: 'y' }] };
         return { tool, ok: true };
@@ -592,24 +596,34 @@ test('next.config.ts cannot satisfy application entrypoint evidence', async () =
   );
 });
 
-test('all repository-map evidence obligations permit final', async () => {
+test('all repository-map evidence obligations permit final from real filesystem reads', async (t) => {
   const replies = [
     '{"action":{"tool":"workspace.list","input":{"path":"","depth":0}}}',
     '{"action":{"tool":"git.status","input":{}}}',
     '{"action":{"tool":"file.readRange","input":{"path":"package.json","startLine":1,"endLine":100}}}',
     '{"action":{"tool":"workspace.list","input":{"path":"src","depth":1}}}',
-    '{"action":{"tool":"workspace.list","input":{"path":"src/app","depth":1}}}',
+    '{"action":{"tool":"file.read","input":{"path":"src/app/page.ts"}}}',
     '{"action":{"tool":"workspace.list","input":{"path":"tests","depth":1}}}',
     '{"action":{"tool":"file.readRange","input":{"path":"next.config.ts","startLine":1,"endLine":100}}}',
     '{"final":"Repository map is complete from inspected manifest, source entry surface, tests, runtime configuration, and Git state."}',
   ];
 
+  const root = repositoryFixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const { deps, calls } = scriptedDeps(replies, CA2_TOOLS);
+  deps.executeTool = async (tool: string, input: unknown): Promise<unknown> => {
+    calls.push({ tool, input });
+    if (tool === 'workspace.list') return workspaceList(input as never);
+    if (tool === 'file.read') return fileRead(input as never);
+    if (tool === 'file.readRange') return fileReadRange(input as never);
+    if (tool === 'git.status') return gitStatus(input as never);
+    throw new Error(`Unexpected tool ${tool}`);
+  };
   const events = await drain(
     runEngineerTask(
       { ...deps, maxSteps: 10 },
       {
-        rootPath: '/r',
+        rootPath: root,
         task:
           'Map this repository before doing anything else. Identify the repository root, top-level directories, package/build manifests, application entrypoints, test locations, deployment/runtime configuration, and current Git state. Do not modify anything. Support the map with file paths.',
         intent: 'INSPECT',
@@ -763,5 +777,443 @@ test('specific repository-map requirements activate without the word map', () =>
       intent: 'INSPECT',
     }),
     true,
+  );
+});
+
+// Authoritative final delivery, including streaming providers.
+function streamed(replies: string[]): EngineerDeps {
+  let index = 0;
+  return {
+    complete: async () => { throw new Error('streaming provider must be used'); },
+    completeStream: async function* () {
+      const reply = replies[index++];
+      assert.ok(reply, 'unexpected extra generation');
+      for (const char of reply) yield char;
+    },
+    executeTool: async () => ({ ok: true }),
+    tools: buildEngineerLoopTools(new CapabilityRegistry()),
+    maxSteps: 12,
+  };
+}
+
+async function collect(deps: EngineerDeps, task: string): Promise<EngineerEvent[]> {
+  const events: EngineerEvent[] = [];
+  for await (const event of runEngineerTask(deps, { rootPath: '/workspace', task })) {
+    assert.notEqual(event.type, 'token', 'provisional model text must never escape the controller');
+    events.push(event);
+  }
+  return events;
+}
+
+test('streamed premature final stays private while unfinished plan continues', async () => {
+  const events = await collect(streamed([
+    '{"action":{"tool":"plan.update","input":{"steps":["read source"]}}}',
+    '{"final":"Next I would read the source."}',
+    '{"action":{"tool":"file.readRange","input":{"path":"src/index.ts","startLine":1,"endLine":5}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[1]}}}',
+    '{"final":"The source was inspected; no changes were proposed."}',
+  ]), 'Inspect the source');
+  const finals = events.filter(e => e.type === 'final');
+  assert.equal(finals.length, 1);
+  assert.match(finals[0]!.markdown, /source was inspected/);
+  assert.ok(events.some(e => e.type === 'step' && e.tool === 'file.readRange'));
+});
+
+test('repository-map evidence rejection never publishes attempted streamed finals', async () => {
+  const deps = streamed(Array(5).fill('{"final":"Repository map complete."}'));
+  const events = await collect(deps, 'Create a repository map');
+  assert.equal(events.some(e => e.type === 'final'), false);
+  assert.ok(events.some(e => e.type === 'error' && e.code === 'LOOP_NO_PROGRESS'));
+});
+
+test('malformed streamed final is discarded before a corrected answer is accepted', async () => {
+  const events = await collect(streamed([
+    '{"final":"This incomplete answer must stay private',
+    '{"final":"A function maps its inputs to an output."}',
+  ]), 'What is a function?');
+  assert.deepEqual(events.filter(e => e.type === 'final').map(e => e.markdown), [
+    'A function maps its inputs to an output.',
+  ]);
+});
+
+test('interrupted provider stream publishes no partial answer', async () => {
+  const deps = streamed([]);
+  deps.completeStream = async function* () {
+    yield '{"final":"I finished everything';
+    throw new Error('provider disconnected');
+  };
+  await assert.rejects(collect(deps, 'Explain this code'), /provider disconnected/);
+});
+
+
+function repositoryFixture(): string {
+  const root = ws();
+  mkdirSync(path.join(root, 'src/app'), { recursive: true });
+  mkdirSync(path.join(root, 'tests'));
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({
+    name: 'fixture', scripts: { test: 'node --test', start: 'node src/index.js' },
+    dependencies: { next: '1.0.0' },
+  }, null, 2));
+  writeFileSync(path.join(root, 'src/app/page.ts'), 'export default function Page() { return "hello"; }');
+  writeFileSync(path.join(root, 'tests/page.test.ts'), 'import assert from "node:assert/strict"; assert.ok(true);');
+  writeFileSync(path.join(root, 'next.config.ts'), 'export default {};');
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
+  return root;
+}
+
+test('manifest obligations require actual complete contents, including scripts for runtime', async (t) => {
+  const root = repositoryFixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tool = (id: string) => CA2_TOOLS.find(t => t.id === id)!;
+  const state = createCompletionEvidenceState({ rootPath: root, task: 'Map this repository' });
+  const input = { rootPath: root, path: 'package.json' };
+  const observe = (id: string, result: unknown) => observeCompletionEvidence(state, tool(id), input, result);
+
+  assert.equal(observe('file.read', { ok: true }), 0, 'dispatch success is not read evidence');
+  assert.equal(observe('file.read', await fileRead({ ...input, maxBytes: 5 })), 0, 'truncation is not a complete manifest');
+  assert.equal(observe('file.readRange', await fileReadRange({ ...input, startLine: 1, endLine: 2 })), 0);
+  assert.equal(observe('file.read', { ...(await fileRead(input)), path: 'different.json' }), 0, 'wrong file cannot satisfy requested read');
+  writeFileSync(path.join(root, input.path), '');
+  assert.equal(observe('file.read', await fileRead(input)), 0, 'empty file is not framework evidence');
+  writeFileSync(path.join(root, input.path), '{broken');
+  assert.equal(observe('file.read', await fileRead(input)), 0, 'invalid JSON cannot establish manifest facts');
+  writeFileSync(path.join(root, input.path), '{"name":"library","dependencies":{}}');
+  observe('file.read', await fileRead(input));
+  assert.ok(state.satisfied.has('repo.manifest_contents'));
+  assert.ok(state.satisfied.has('repo.framework_runtime'));
+  assert.equal(state.satisfied.has('repo.deployment_runtime'), false, 'scriptless manifest has no runtime command evidence');
+  writeFileSync(path.join(root, input.path), '{"scripts":{"start":"node main.js"}}');
+  observe('file.readRange', await fileReadRange({ ...input, startLine: 1, endLine: 100 }));
+  assert.ok(state.satisfied.has('repo.deployment_runtime'));
+});
+
+test('entrypoint obligation requires source contents rather than a real directory listing', async (t) => {
+  const root = repositoryFixture();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const state = createCompletionEvidenceState({ rootPath: root, task: 'Map this repository' });
+  const input = { rootPath: root, path: 'src/app' };
+  observeCompletionEvidence(state, CA2_TOOLS.find(t => t.id === 'workspace.list'), input, await workspaceList(input));
+  assert.ok(state.satisfied.has('repo.source_tree'));
+  assert.equal(state.satisfied.has('repo.entrypoint'), false);
+  const entry = { rootPath: root, path: 'src/app/page.ts' };
+  observeCompletionEvidence(state, CA2_TOOLS.find(t => t.id === 'file.read'), entry, await fileRead(entry));
+  assert.ok(state.satisfied.has('repo.entrypoint'));
+});
+
+
+test('a failed path search cannot establish test locations from its query text', async (t) => {
+  const root = ws();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const state = createCompletionEvidenceState({ rootPath: root, task: 'Map this repository' });
+  const input = { rootPath: root, query: '*.test.ts' };
+  const result = await workspaceFind(input);
+  assert.deepEqual(result.matches, []);
+  observeCompletionEvidence(state, CA2_TOOLS.find(t => t.id === 'workspace.find'), input, result);
+  assert.equal(state.satisfied.has('repo.tests'), false, 'the echoed query is not a found path');
+});
+
+
+test('prose recovery cannot finish an unchecked plan', async () => {
+  const prose = 'The source was inspected and this is a detailed inspection report. The tests still require inspection before this task can finish.';
+  const events = await collect(streamed([
+    '{"action":{"tool":"plan.update","input":{"steps":["inspect source","inspect tests"]}}}',
+    '{"action":{"tool":"file.readRange","input":{"path":"src/index.ts","startLine":1,"endLine":5}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[1]}}}',
+    prose, prose,
+    '{"action":{"tool":"file.readRange","input":{"path":"tests/index.test.ts","startLine":1,"endLine":5}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[2]}}}',
+    '{"final":"The source and tests have both been inspected."}',
+  ]), 'Inspect source and tests');
+  assert.deepEqual(events.filter(e => e.type === 'final').map(e => e.markdown), [
+    'The source and tests have both been inspected.',
+  ]);
+  assert.equal(events.filter(e => e.type === 'step' && e.tool === 'file.readRange').length, 2);
+});
+
+test('proposal summary recovery cannot finish while plan work remains', async () => {
+  const { deps } = scriptedDeps([
+    '{"action":{"tool":"plan.update","input":{"steps":["propose source","inspect tests"]}}}',
+    '{"action":{"tool":"edit.preview","input":{"changes":[{"path":"a.ts","startLine":1,"endLine":1,"replacement":"y"}]}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[1]}}}',
+    'not json', 'still not json',
+    '{"action":{"tool":"file.readRange","input":{"path":"tests/a.test.ts","startLine":1,"endLine":5}}}',
+    '{"action":{"tool":"plan.update","input":{"complete":[2]}}}',
+    '{"final":"The change is proposed and existing tests were inspected. No commands were run."}',
+  ]);
+  const events = await drain(runEngineerTask(deps, { rootPath: '/workspace', task: 'Propose source and inspect tests' }));
+  const finals = events.filter(e => e.type === 'final');
+  assert.equal(finals.length, 1);
+  assert.match(finals[0]!.markdown, /existing tests were inspected/);
+  assert.match(finals[0]!.markdown, /NOT applied/);
+  assert.ok(events.find(e => e.type === 'step' && e.tool === 'file.readRange'));
+});
+
+test('R2: controller semantic state survives a simulated Brain restart without repeating accepted inspection', async () => {
+  type RuntimeCheckpoint = import('../src/engine/engineer/engineerRuntime.js').EngineerRuntimeCheckpoint;
+
+  const mapTask =
+    'Map this repository. Identify the repository root, top-level directories, package/build manifests, application entrypoints, test locations, deployment/runtime configuration, and current Git state. Do not modify anything. Support the map with file paths.';
+
+  const toolCalls: Array<{ run: number; tool: string; input: unknown }> = [];
+  let durable: RuntimeCheckpoint | undefined;
+
+  const tools: EngineerToolInfo[] = [
+    {
+      id: 'workspace.list',
+      description: 'list',
+      readOnly: true,
+      evidenceSemantics: ['workspace.directory_listing'],
+      inputHint: '{}',
+    },
+    {
+      id: 'git.status',
+      description: 'git',
+      readOnly: true,
+      evidenceSemantics: ['vcs.state'],
+      inputHint: '{}',
+    },
+    {
+      id: 'file.read',
+      description: 'read',
+      readOnly: true,
+      evidenceSemantics: ['workspace.file_content'],
+      inputHint: '{}',
+    },
+  ];
+
+  // ── Process / Brain instance #1 ──────────────────────────────────────────
+  {
+    const replies = [
+      '{"action":{"tool":"plan.update","input":{"steps":["inspect root and git","read manifest","inspect source entrypoint","inspect tests"]}}}',
+      '{"action":{"tool":"workspace.list","input":{"path":"."}}}',
+      '{"action":{"tool":"git.status","input":{}}}',
+      '{"action":{"tool":"file.read","input":{"path":"package.json"}}}',
+      '{"action":{"tool":"plan.update","input":{"complete":[1,2]}}}',
+      // More work would follow, but the process disappears here.
+    ];
+
+    let i = 0;
+
+    const gen = runEngineerTask(
+      {
+        complete: async () => replies[Math.min(i++, replies.length - 1)]!,
+        executeTool: async (tool, input) => {
+          toolCalls.push({ run: 1, tool, input });
+
+          if (tool === 'workspace.list') {
+            return {
+              dir: '.',
+              entries: ['package.json', 'src', 'tests'],
+              truncated: false,
+            };
+          }
+
+          if (tool === 'git.status') {
+            return {
+              branch: 'main',
+              head: 'abc123',
+              clean: true,
+            };
+          }
+
+          if (tool === 'file.read') {
+            return {
+              path: 'package.json',
+              content: JSON.stringify({
+                scripts: { build: 'next build', test: 'node --test' },
+                dependencies: { next: '15.0.0' },
+              }),
+              truncated: false,
+            };
+          }
+
+          throw new Error(`unexpected tool ${tool}`);
+        },
+        tools,
+        maxSteps: 20,
+        checkpoint: async (state) => {
+          durable = structuredClone(state);
+        },
+      },
+      {
+        rootPath: '/w',
+        task: mapTask,
+        intent: 'INSPECT',
+      },
+    );
+
+    /*
+     * Drive until package.json and the 2/4 plan checkpoint are durable, then
+     * terminate the generator as though the Brain process disappeared.
+     */
+    for await (const ev of gen) {
+      if (
+        ev.type === 'note' &&
+        (ev as { kind?: string; message?: string }).kind === 'plan' &&
+        /PLAN \(2\/4 done\)/.test(
+          (ev as { message?: string }).message ?? '',
+        )
+      ) {
+        break;
+      }
+    }
+  }
+
+  assert.ok(durable, 'semantic checkpoint must exist before restart');
+  assert.equal(durable!.plan.filter((s) => s.done).length, 2);
+
+  assert.deepEqual(
+    [...durable!.completionEvidence.satisfied].sort(),
+    [
+      'repo.deployment_runtime',
+      'repo.framework_runtime',
+      'repo.git_state',
+      'repo.manifest_contents',
+      'repo.root',
+      'repo.top_level',
+    ].sort(),
+    'first Brain must durably checkpoint every obligation earned before restart',
+  );
+  assert.ok(
+    durable!.observations.some(
+      (o) =>
+        o.tool === 'file.read' &&
+        JSON.stringify(o.input).includes('package.json'),
+    ),
+    'package manifest observation survived',
+  );
+
+  const callsBeforeResume = toolCalls.length;
+
+  // ── Process / Brain instance #2 ──────────────────────────────────────────
+  {
+    const prompts: string[] = [];
+
+    const replies = [
+      /*
+       * Deliberately ask for the SAME package read first. The reconstructed
+       * duplicate cache must reuse the accepted observation rather than execute
+       * it again.
+       */
+      '{"action":{"tool":"file.read","input":{"path":"package.json"}}}',
+      '{"action":{"tool":"workspace.list","input":{"path":"src/app"}}}',
+      '{"action":{"tool":"file.read","input":{"path":"src/app/page.tsx"}}}',
+      '{"action":{"tool":"workspace.list","input":{"path":"tests"}}}',
+      '{"action":{"tool":"plan.update","input":{"complete":[3,4]}}}',
+      '{"final":"Repository mapping is complete: the manifest, source entrypoint, tests, deployment/runtime configuration, root structure, and Git state were inspected."}',
+    ];
+
+    let i = 0;
+
+    const events = await drain(
+      runEngineerTask(
+        {
+          complete: async (prompt) => {
+            prompts.push(prompt);
+            return replies[Math.min(i++, replies.length - 1)]!;
+          },
+          executeTool: async (tool, input) => {
+            toolCalls.push({ run: 2, tool, input });
+
+            const path =
+              typeof input === 'object' &&
+              input !== null &&
+              'path' in input
+                ? String((input as { path?: unknown }).path ?? '')
+                : '';
+
+            if (tool === 'workspace.list' && path === 'src/app') {
+              return {
+                dir: 'src/app',
+                entries: ['page.tsx', 'layout.tsx'],
+                truncated: false,
+              };
+            }
+
+            if (tool === 'file.read' && path === 'src/app/page.tsx') {
+              return {
+                path,
+                content: 'export default function Page(){ return null; }',
+                truncated: false,
+              };
+            }
+
+            if (tool === 'workspace.list' && path === 'tests') {
+              return {
+                dir: 'tests',
+                entries: ['payments.test.ts'],
+                truncated: false,
+              };
+            }
+
+            throw new Error(
+              `unexpected resumed execution: ${tool} ${path}`,
+            );
+          },
+          tools,
+          maxSteps: 20,
+          checkpoint: async (state) => {
+            durable = structuredClone(state);
+          },
+        },
+        {
+          rootPath: '/w',
+          task: mapTask,
+          intent: 'INSPECT',
+          resume: durable!,
+        },
+      ),
+    );
+
+    assert.ok(
+      prompts[0]?.includes('ENGINEER RESUME STATE'),
+      'the resumed model receives explicit controller-owned resume context',
+    );
+
+    assert.ok(
+      prompts[0]?.includes('package.json'),
+      'accepted manifest observation is supplied to the resumed model',
+    );
+
+    assert.ok(
+      events.some(
+        (ev) =>
+          ev.type === 'note' &&
+          (ev as { kind?: string }).kind === 'duplicate',
+      ),
+      'the already accepted package read is reused rather than re-executed',
+    );
+
+    assert.equal(
+      events.filter((ev) => ev.type === 'final').length,
+      1,
+      'resumed task reaches exactly one accepted final',
+    );
+  }
+
+  const resumedCalls = toolCalls.slice(callsBeforeResume);
+
+  assert.equal(
+    resumedCalls.filter(
+      (c) =>
+        c.tool === 'file.read' &&
+        JSON.stringify(c.input).includes('package.json'),
+    ).length,
+    0,
+    'accepted package read must not execute again after restart',
+  );
+
+  assert.equal(
+    durable!.plan.filter((s) => s.done).length,
+    4,
+    'restored plan continues to completion rather than restarting at zero',
+  );
+
+  assert.deepEqual(
+    missingCompletionObligations(
+      restoreCompletionEvidence(durable!.completionEvidence),
+    ),
+    [],
+    'controller completion evidence remains authoritative across restart',
   );
 });

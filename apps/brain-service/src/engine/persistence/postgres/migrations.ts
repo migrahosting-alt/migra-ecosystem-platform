@@ -1495,6 +1495,68 @@ CREATE INDEX IF NOT EXISTS model_qualification_env_idx
   WHERE revoked_at IS NULL;
 `;
 
+
+/**
+ * Migration 30 — Engineer semantic checkpoints.
+ *
+ * This table is deliberately separate from `agent_runs`. Engineer inspection
+ * does not begin life as approval-pending governed coding work, so storing it in
+ * that lifecycle would manufacture `approval.requested` history that never
+ * happened.
+ *
+ * Scope is part of the primary key AND protected by FORCE RLS. A correlation id
+ * is an execution identifier, not tenant authority.
+ */
+const M30_ENGINEER_CHECKPOINTS = `
+CREATE TABLE IF NOT EXISTS engineer_checkpoints (
+  owner_scope         TEXT NOT NULL,
+  workspace_scope     TEXT NOT NULL,
+  correlation_id      TEXT NOT NULL,
+
+  task_state_version  INTEGER NOT NULL,
+  status              TEXT NOT NULL
+    CHECK (status IN ('RUNNING', 'INTERRUPTED', 'COMPLETED', 'FAILED')),
+  resume_epoch        INTEGER NOT NULL DEFAULT 0,
+
+  root_path           TEXT NOT NULL,
+  objective           TEXT NOT NULL,
+  intent              TEXT NOT NULL,
+
+  checkpoint_json     JSONB NOT NULL,
+
+  created_at          BIGINT NOT NULL,
+  updated_at          BIGINT NOT NULL,
+
+  PRIMARY KEY (owner_scope, workspace_scope, correlation_id)
+);
+
+CREATE INDEX IF NOT EXISTS engineer_checkpoints_status_idx
+  ON engineer_checkpoints (owner_scope, workspace_scope, status, updated_at DESC);
+
+ALTER TABLE engineer_checkpoints ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engineer_checkpoints FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS engineer_checkpoints_scope_policy ON engineer_checkpoints;
+CREATE POLICY engineer_checkpoints_scope_policy
+  ON engineer_checkpoints
+  USING (
+    owner_scope = current_setting('migrapilot.owner_scope', true)
+    AND workspace_scope = current_setting('migrapilot.workspace_scope', true)
+  )
+  WITH CHECK (
+    owner_scope = current_setting('migrapilot.owner_scope', true)
+    AND workspace_scope = current_setting('migrapilot.workspace_scope', true)
+  );
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'migrapilot_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON engineer_checkpoints TO migrapilot_app;
+  END IF;
+END
+$$;
+`;
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'foundation', sql: M1_FOUNDATION },
   { version: 2, name: 'tenancy_primitives', sql: M2_TENANCY },
@@ -1525,6 +1587,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 27, name: 'mail_connections', sql: M27_MAIL_CONNECTIONS },
   { version: 28, name: 'mail_oauth_pending', sql: M28_MAIL_OAUTH_PENDING },
   { version: 29, name: 'qualification_policy_binding', sql: M29_QUALIFICATION_POLICY_BINDING },
+  { version: 30, name: 'engineer_checkpoints', sql: M30_ENGINEER_CHECKPOINTS },
 ];
 
 

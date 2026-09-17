@@ -1,3 +1,11 @@
+import {
+  decodeEngineerCheckpointPayloadV1,
+} from '../engineer/engineerCheckpointStore.js';
+import type {
+  EngineerCheckpointPayloadV1,
+  EngineerCheckpointScope,
+  EngineerCheckpointStatus,
+} from '../engineer/engineerCheckpointStore.js';
 /**
  * The PostgreSQL DurableStore.
  *
@@ -881,6 +889,151 @@ export class PostgresDurableStore implements DurableStore {
     });
   }
 
+
+  /* ── Engineer semantic checkpoints ──────────────────────────────────────
+   *
+   * R2 restart continuation is PostgreSQL-only. Every operation executes through
+   * `inScope`, so the same transaction-scoped owner/workspace RLS context used by
+   * all other tenant-owned data is authoritative here too.
+   */
+
+  async saveEngineerCheckpoint(
+    scope: EngineerCheckpointScope,
+    checkpoint: EngineerCheckpointPayloadV1,
+  ): Promise<void> {
+    const createdAt = Date.parse(checkpoint.createdAt);
+    const updatedAt = Date.parse(checkpoint.updatedAt);
+
+    if (!Number.isFinite(createdAt) || !Number.isFinite(updatedAt)) {
+      throw new Error('INVALID_ENGINEER_CHECKPOINT_TIMESTAMP');
+    }
+
+    await this.inScope(scope, async (client) => {
+      await client.query(
+        `
+          INSERT INTO engineer_checkpoints (
+            owner_scope,
+            workspace_scope,
+            correlation_id,
+            task_state_version,
+            status,
+            resume_epoch,
+            root_path,
+            objective,
+            intent,
+            checkpoint_json,
+            created_at,
+            updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
+          ON CONFLICT (owner_scope, workspace_scope, correlation_id)
+          DO UPDATE SET
+            task_state_version = EXCLUDED.task_state_version,
+            status = EXCLUDED.status,
+            resume_epoch = EXCLUDED.resume_epoch,
+            root_path = EXCLUDED.root_path,
+            objective = EXCLUDED.objective,
+            intent = EXCLUDED.intent,
+            checkpoint_json = EXCLUDED.checkpoint_json,
+            updated_at = EXCLUDED.updated_at
+        `,
+        [
+          scope.owner,
+          scope.workspace,
+          checkpoint.correlationId,
+          checkpoint.taskStateVersion,
+          checkpoint.status,
+          checkpoint.resumeEpoch,
+          checkpoint.rootPath,
+          checkpoint.objective,
+          checkpoint.intent,
+          JSON.stringify(checkpoint),
+          createdAt,
+          updatedAt,
+        ],
+      );
+    });
+  }
+
+  async loadEngineerCheckpoint(
+    scope: EngineerCheckpointScope,
+    correlationId: string,
+  ): Promise<EngineerCheckpointPayloadV1 | null> {
+    return this.inScope(scope, async (client) => {
+      const result = await client.query(
+        `
+          SELECT checkpoint_json
+          FROM engineer_checkpoints
+          WHERE owner_scope = $1
+            AND workspace_scope = $2
+            AND correlation_id = $3
+          LIMIT 1
+        `,
+        [scope.owner, scope.workspace, correlationId],
+      );
+
+      const row = result.rows[0] as { checkpoint_json?: unknown } | undefined;
+      if (!row) return null;
+
+      const checkpoint = decodeEngineerCheckpointPayloadV1(
+        row.checkpoint_json,
+      );
+
+      if (checkpoint.correlationId !== correlationId) {
+        throw new Error('ENGINEER_CHECKPOINT_IDENTITY_MISMATCH');
+      }
+
+      return checkpoint;
+    });
+  }
+
+  async markEngineerCheckpointStatus(
+    scope: EngineerCheckpointScope,
+    correlationId: string,
+    status: EngineerCheckpointStatus,
+    updatedAt: string,
+  ): Promise<boolean> {
+    const updatedMs = Date.parse(updatedAt);
+    if (!Number.isFinite(updatedMs)) {
+      throw new Error('INVALID_ENGINEER_CHECKPOINT_TIMESTAMP');
+    }
+
+    return this.inScope(scope, async (client) => {
+      const result = await client.query(
+        `
+          UPDATE engineer_checkpoints
+          SET
+            status = $4,
+            checkpoint_json =
+              jsonb_set(
+                jsonb_set(
+                  checkpoint_json,
+                  '{status}',
+                  to_jsonb($4::text),
+                  true
+                ),
+                '{updatedAt}',
+                to_jsonb($5::text),
+                true
+              ),
+            updated_at = $6
+          WHERE owner_scope = $1
+            AND workspace_scope = $2
+            AND correlation_id = $3
+        `,
+        [
+          scope.owner,
+          scope.workspace,
+          correlationId,
+          status,
+          updatedAt,
+          updatedMs,
+        ],
+      );
+
+      return (result.rowCount ?? 0) === 1;
+    });
+  }
 
   /* ── MigraPilot preferences ────────────────────────────────────────────
    *

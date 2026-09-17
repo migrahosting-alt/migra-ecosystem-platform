@@ -28,10 +28,20 @@
 // side effects (npm install, etc.) are permitted, contained, and reported.
 
 import { NOOP_STAGE_LOGGER, type StageLogger } from '../observability/correlation.js';
+
+import {
+  COMPLETION_OBLIGATION_IDS,
+  type CompletionEvidenceSnapshot,
+  type CompletionObligationId,
+} from './engineerCompletionContract.js';
+
+export type {
+  CompletionEvidenceSnapshot,
+  CompletionObligationId,
+} from './engineerCompletionContract.js';
 import { decideTurn, type MissingInformationDeclaration, type TurnDecision, type TurnIntent } from './turnDecision.js';
 import { existsSync } from 'node:fs';
 import { lintChangeset, summarizeDefects } from '../../tools/changesetLint.js';
-import { FinalAnswerStreamer } from './finalAnswerStream.js';
 
 export type ToolEvidenceSemantic =
   | 'workspace.directory_listing'
@@ -55,10 +65,8 @@ export interface EngineerToolInfo {
 export interface EngineerDeps {
   /** One buffered completion (prompt → text) on an engine-selected coding model. */
   complete(prompt: string): Promise<string>;
-  /** Optional token-streaming completion. When present the loop uses it and
-   * reports the final ANSWER as it is generated, so the user is not left
-   * watching nothing during a long local generation. Falls back to `complete`
-   * wherever it is absent, so every existing caller is unaffected. */
+  /** Optional provider stream. Its text remains private until the controller
+   * accepts a final; provider deltas are not authoritative answer events. */
   completeStream?(prompt: string): AsyncIterable<string>;
   /** Execute a tool through the capability registry (validated + audited). */
   executeTool(tool: string, input: unknown): Promise<unknown>;
@@ -85,11 +93,27 @@ export interface EngineerDeps {
   noProgressLimit?: number;
   /** How many times the loop may force a re-plan before LOOP_NO_PROGRESS. */
   maxReplans?: number;
+
+  /**
+   * Durable semantic checkpoint sink.
+   *
+   * The runtime owns WHAT state means; persistence owns only WHERE it survives.
+   * Called only after controller-authoritative semantic progress.
+   */
+  checkpoint?(state: EngineerRuntimeCheckpoint): Promise<void>;
 }
 
 export interface EngineerInput {
   rootPath: string;
   task: string;
+
+  /**
+   * Controller state restored after a Brain restart.
+   *
+   * This is semantic state only. It contains no approval token, process
+   * identity, provider stream, AbortController, or pending delegated call.
+   */
+  resume?: EngineerRuntimeResumeState;
   /** Attach the MigraTeck ecosystem context block (detected by the caller). */
   ecosystem?: boolean;
   /** Prior turns of the conversation, oldest first. The unified agent handles
@@ -213,10 +237,25 @@ function protocolPrompt(input: EngineerInput, tools: EngineerToolInfo[]): string
     '  with the tools below, ending in a proposed changeset. This includes requests that',
     '  are phrased as a plan, a mission, a numbered slice, a quoted instruction, or an',
     '  aside like "you can now build it" — the WORDING never decides; the INTENT does.',
-    '  DO NOT SEARCH FOR SOMETHING YOU ARE BEING ASKED TO CREATE. A thing you are told',
-    '  to build does not exist yet — that is WHY they asked — so "I could not find it in',
-    '  the workspace" is never a valid answer, and neither is asking which files it lives',
-    '  in. Pick sensible defaults and propose complete, runnable files immediately.',
+    '  FIRST DECIDE: does this request reference an EXISTING product, system or service',
+    '  already in this workspace or ecosystem (e.g. "in MigraPanel", "on the admin site",',
+    '  "for the invoicing app")? If so, you MUST locate the REAL owning code — the actual',
+    '  user/admin/account/invitation/auth module that already handles this — with',
+    '  workspace.search / workspace.find / file.read BEFORE proposing anything. Propose',
+    '  your change AGAINST that real module. Inventing a new top-level file (e.g. a fresh',
+    '  src/whatever.ts) for a request that names an existing product is WRONG even if the',
+    '  file would technically run — it is not the change the user asked for.',
+    '  A request that is actually OPERATIONAL rather than a code change (creating a user',
+    '  account, granting an invitation, changing a setting) is not "no capability exists" —',
+    '  say plainly that this is an operational action outside a code changeset, and name',
+    '  the real mechanism you found (e.g. "MigraPanel invites admins via the Invite User',
+    '  flow in <path> — I can change or extend that code, but I cannot create the account',
+    '  myself from here").',
+    '  DO NOT SEARCH FOR SOMETHING YOU ARE BEING ASKED TO CREATE FROM NOTHING — i.e. a',
+    '  brand-new script, page, component or app with NO existing counterpart in this',
+    '  workspace. That case is BUILD FROM SCRATCH below: a thing with no existing analog',
+    '  does not exist yet, so "I could not find it in the workspace" is never a valid',
+    '  answer for THAT case, and neither is asking which files it lives in.',
     '- To see WHAT FILES EXIST use workspace.list. It is the only tool that can answer',
     '  "what is in this repo/folder" — searching content cannot, and git.status shows',
     '  only CHANGES, not contents. NEVER state that a directory is empty, that a file is',
@@ -911,34 +950,39 @@ const LIST_FIRST_DIRECTIVE = [
 // This first CA2 slice is intentionally narrow: it covers the real owner-observed
 // repository-map failure without turning every workspace question into a large
 // audit.
-export type CompletionObligationId =
-  | 'repo.root'
-  | 'repo.git_state'
-  | 'repo.top_level'
-  | 'repo.manifest_contents'
-  | 'repo.framework_runtime'
-  | 'repo.source_tree'
-  | 'repo.entrypoint'
-  | 'repo.tests'
-  | 'repo.deployment_runtime';
-
 export interface CompletionEvidenceState {
   enabled: boolean;
   satisfied: Set<CompletionObligationId>;
   evidence: Map<CompletionObligationId, string[]>;
 }
 
-const REPOSITORY_MAP_OBLIGATIONS: readonly CompletionObligationId[] = [
-  'repo.root',
-  'repo.git_state',
-  'repo.top_level',
-  'repo.manifest_contents',
-  'repo.framework_runtime',
-  'repo.source_tree',
-  'repo.entrypoint',
-  'repo.tests',
-  'repo.deployment_runtime',
-] as const;
+export function snapshotCompletionEvidence(
+  state: CompletionEvidenceState,
+): CompletionEvidenceSnapshot {
+  return {
+    enabled: state.enabled,
+    satisfied: [...state.satisfied],
+    evidence: [...state.evidence.entries()].map(([id, values]) => [
+      id,
+      [...values],
+    ]),
+  };
+}
+
+export function restoreCompletionEvidence(
+  snapshot: CompletionEvidenceSnapshot,
+): CompletionEvidenceState {
+  return {
+    enabled: snapshot.enabled,
+    satisfied: new Set(snapshot.satisfied),
+    evidence: new Map(
+      snapshot.evidence.map(([id, values]) => [id, [...values]]),
+    ),
+  };
+}
+
+const REPOSITORY_MAP_OBLIGATIONS:
+  readonly CompletionObligationId[] = COMPLETION_OBLIGATION_IDS;
 
 const COMPLETION_OBLIGATION_GUIDANCE: Record<CompletionObligationId, string> = {
   'repo.root':
@@ -948,17 +992,17 @@ const COMPLETION_OBLIGATION_GUIDANCE: Record<CompletionObligationId, string> = {
   'repo.top_level':
     'enumerate the repository root with workspace.list',
   'repo.manifest_contents':
-    'READ the package/build manifest (for example package.json), not merely list its filename',
+    'READ the complete package/build manifest with file.read (or a range covering every line); empty, truncated and filename-only results do not count',
   'repo.framework_runtime':
     'derive the framework/runtime from read manifest or source evidence',
   'repo.source_tree':
     'inspect the source tree (for example workspace.list on src or read source files)',
   'repo.entrypoint':
-    'inspect a real source entry surface such as src/app, src/pages, src/main.*, src/index.*, app/, or pages/; configuration files alone do not count',
+    'READ nonempty source from an entrypoint such as src/app/page.*, src/main.*, or src/index.*; directory listings and configuration files do not count',
   'repo.tests':
     'inspect the tests directory or actual test files',
   'repo.deployment_runtime':
-    'READ relevant runtime/deployment configuration or package scripts; merely naming config files does not count',
+    'READ nonempty runtime/deployment configuration or a complete package.json containing scripts; filenames and scriptless manifests do not count',
 };
 
 export function requiresRepositoryMapEvidence(input: EngineerInput): boolean {
@@ -1000,14 +1044,6 @@ function completionPath(input: unknown): string {
   return typeof obj.path === 'string'
     ? obj.path.replace(/\\/g, '/').replace(/^\.\/+/, '')
     : '';
-}
-
-function completionResultText(result: unknown): string {
-  try {
-    return stableStringify(result).toLowerCase();
-  } catch {
-    return '';
-  }
 }
 
 function addCompletionEvidence(
@@ -1107,8 +1143,8 @@ function isTestPath(path: string): boolean {
 
 /**
  * Observe a SUCCESSFUL tool execution and update the controller-owned evidence
- * ledger. The result is used only as corroboration; the model cannot satisfy
- * obligations by saying it did something.
+ * ledger. Validate returned content and coverage, not only the requested path.
+ * A successful dispatch with no evidence is not a successful inspection.
  */
 export function observeCompletionEvidence(
   state: CompletionEvidenceState,
@@ -1121,38 +1157,45 @@ export function observeCompletionEvidence(
   const before = state.satisfied.size;
   const path = completionPath(toolInput);
   const p = path.toLowerCase();
-  const resultText = completionResultText(result);
+  const record = result && typeof result === 'object' && !Array.isArray(result)
+    ? result as Record<string, unknown> : {};
+  if (record.ok === false || record.error) return 0;
+  const content = typeof record.content === 'string' ? record.content : '';
+  const matchingPath = completionPath(record) === path;
+  const hasContent = matchingPath && content.trim().length > 0;
+  const completeContent = hasContent && (
+    record.truncated === false || (
+      record.startLine === 1 && typeof record.totalLines === 'number' &&
+      record.totalLines > 0 && typeof record.endLine === 'number' &&
+      record.endLine >= record.totalLines
+    )
+  );
   const evidence = new Set(toolInfo?.evidenceSemantics ?? []);
 
-  if (evidence.has('workspace.directory_listing')) {
+  if (evidence.has('workspace.directory_listing') && Array.isArray(record.entries) &&
+      typeof record.dir === 'string' && (completionPath({ path: record.dir }) || '.') === (path || '.')) {
     // Empty/omitted path means repository root; normalizeInput has already bound
     // rootPath server-side.
     if (!p || p === '.') {
       addCompletionEvidence(state, 'repo.root', 'workspace.list(root)');
-      addCompletionEvidence(state, 'repo.top_level', 'workspace.list(root)');
+      if (record.truncated === false) addCompletionEvidence(state, 'repo.top_level', 'workspace.list(root)');
     }
 
     if (isSourcePath(p)) {
       addCompletionEvidence(state, 'repo.source_tree', `workspace.list(${path || '.'})`);
     }
 
-    if (isEntrypointEvidencePath(p)) {
-      addCompletionEvidence(state, 'repo.entrypoint', `workspace.list(${path})`);
-    }
-
     if (isTestPath(p)) {
       addCompletionEvidence(state, 'repo.tests', `workspace.list(${path})`);
     }
 
-    // A root listing may itself expose framework entry surfaces. This does NOT
-    // let next.config.* count as an entrypoint; only source paths do.
-    if (resultText.includes('"src/app"') || resultText.includes('"src/pages"')) {
+    // Structured returned paths establish discovery, never source behavior.
+    if (record.entries.some(entry => isSourcePath(completionPath(entry)))) {
       addCompletionEvidence(state, 'repo.source_tree', 'workspace.list result contains source tree');
-      addCompletionEvidence(state, 'repo.entrypoint', 'workspace.list result contains framework source entry surface');
     }
   }
 
-  if (evidence.has('vcs.state')) {
+  if (evidence.has('vcs.state') && (typeof record.branch === 'string' || record.branch === null)) {
     addCompletionEvidence(
       state,
       'repo.git_state',
@@ -1160,8 +1203,17 @@ export function observeCompletionEvidence(
     );
   }
 
-  if (evidence.has('workspace.file_content')) {
-    if (isManifestPath(p)) {
+  if (evidence.has('workspace.file_content') && hasContent) {
+    let packageManifest: Record<string, unknown> | undefined;
+    if (completeContent && p.endsWith('package.json')) {
+      try {
+        const parsed: unknown = JSON.parse(content);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          packageManifest = parsed as Record<string, unknown>;
+        }
+      } catch { /* An invalid manifest cannot establish framework or script facts. */ }
+    }
+    if (isManifestPath(p) && completeContent && (!p.endsWith('package.json') || packageManifest)) {
       addCompletionEvidence(state, 'repo.manifest_contents', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
 
       // Reading the manifest is real runtime/framework evidence because it exposes
@@ -1169,7 +1221,9 @@ export function observeCompletionEvidence(
       addCompletionEvidence(state, 'repo.framework_runtime', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
 
       // package.json scripts are also legitimate runtime/deployment evidence.
-      if (p.endsWith('package.json')) {
+      const scripts = packageManifest?.scripts;
+      if (scripts && typeof scripts === 'object' && !Array.isArray(scripts) &&
+          Object.values(scripts).some(value => typeof value === 'string' && value.trim())) {
         addCompletionEvidence(state, 'repo.deployment_runtime', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
       }
     }
@@ -1186,7 +1240,7 @@ export function observeCompletionEvidence(
       addCompletionEvidence(state, 'repo.tests', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
     }
 
-    if (isRuntimeConfigPath(p)) {
+    if (isRuntimeConfigPath(p) && completeContent) {
       addCompletionEvidence(state, 'repo.deployment_runtime', `${toolInfo?.id ?? 'workspace.file_content'}(${path})`);
     }
   }
@@ -1194,16 +1248,11 @@ export function observeCompletionEvidence(
   // workspace.find may discover source/test/config paths, but discovery alone
   // intentionally does NOT satisfy manifest contents or deployment/runtime.
   // Those require reads.
-  if (evidence.has('workspace.path_discovery')) {
-    if (resultText.includes('"src/app"') || resultText.includes('"src/pages"')) {
-      addCompletionEvidence(state, 'repo.source_tree', 'workspace.find located source entry surface');
+  if (evidence.has('workspace.path_discovery') && Array.isArray(record.matches)) {
+    if (record.matches.some(match => isSourcePath(completionPath(match)))) {
+      addCompletionEvidence(state, 'repo.source_tree', 'workspace.find located source tree');
     }
-    if (
-      resultText.includes('"tests/') ||
-      resultText.includes('"test/') ||
-      resultText.includes('.test.') ||
-      resultText.includes('.spec.')
-    ) {
+    if (record.matches.some(match => isTestPath(completionPath(match)))) {
       addCompletionEvidence(state, 'repo.tests', 'workspace.find located tests');
     }
   }
@@ -1236,6 +1285,30 @@ function renderCompletionEvidenceDirective(
 export interface PlanStep {
   text: string;
   done: boolean;
+}
+
+export interface EngineerRuntimeObservation {
+  /** Successful read-only tool only. */
+  tool: string;
+  /** Already-normalized input, including authoritative rootPath. */
+  input: unknown;
+  /** Actual successful tool result. */
+  result: unknown;
+}
+
+export interface EngineerRuntimeResumeState {
+  plan: PlanStep[];
+  completionEvidence: CompletionEvidenceSnapshot;
+  observations: EngineerRuntimeObservation[];
+}
+
+export interface EngineerRuntimeCheckpoint extends EngineerRuntimeResumeState {
+  /**
+   * Monotonic semantic sequence within this invocation.
+   *
+   * Persistence may use its own row version/resume epoch independently.
+   */
+  sequence: number;
 }
 
 const MAX_PLAN_STEPS = 12;
@@ -1280,21 +1353,106 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   const toolInfoById = new Map(deps.tools.map((t) => [t.id, t] as const));
   const transcript: string[] = [protocolPrompt(input, deps.tools)];
 
+  /*
+   * RESTART-SAFE SEMANTIC RESTORE.
+   *
+   * Reconstruct ephemeral acceleration structures FROM durable semantic
+   * observations rather than persisting those implementation details directly.
+   */
+  const observations: EngineerRuntimeObservation[] =
+    input.resume?.observations.map((o) => ({
+      tool: o.tool,
+      input: o.input,
+      result: o.result,
+    })) ?? [];
+
   const resultCache = new Map<string, unknown>(); // canonical call → recorded result
   const seenResultHashes = new Set<string>();
+
+  for (const observation of observations) {
+    const canonical =
+      `${observation.tool}\u0000${stableStringify(observation.input)}`;
+    resultCache.set(canonical, observation.result);
+    seenResultHashes.add(stableStringify(observation.result));
+  }
+
   let noProgressStreak = 0;
   let replans = 0;
-  let toolStepCount = 0;
-  const executedTools = new Set<string>(); // for cross-checking claims made in the final
+
+  /*
+   * Prior successful observations are real work. Treating a resumed task as
+   * toolStepCount=0 would re-enable "answered directly" guards and let the
+   * controller contradict its own restored evidence.
+   */
+  let toolStepCount = observations.length;
+
+  const executedTools = new Set<string>(
+    observations.map((o) => o.tool),
+  );
+
   let finalCorrected = false;
   let proposalsEmitted = 0;
-  let filesCreatedByCommand = false; // command.run side effects are real work too
-  let plan: PlanStep[] = []; // the agent's own plan, carried across steps
+  let filesCreatedByCommand = false; // mutation state is NOT restored in R2
+  let plan: PlanStep[] =
+    input.resume?.plan.map((step) => ({ ...step })) ?? [];
 
   // CA2: model-independent completion evidence for repository-map/audit tasks.
-  const completionEvidence = createCompletionEvidenceState(input);
+  const completionEvidence = input.resume
+    ? restoreCompletionEvidence(input.resume.completionEvidence)
+    : createCompletionEvidenceState(input);
   let incompleteEvidenceCorrections = 0;
   const MAX_INCOMPLETE_EVIDENCE_CORRECTIONS = 4;
+
+  let checkpointSequence = 0;
+
+  const emitCheckpoint = async (): Promise<void> => {
+    if (!deps.checkpoint) return;
+
+    checkpointSequence += 1;
+    await deps.checkpoint({
+      sequence: checkpointSequence,
+      plan: plan.map((step) => ({ ...step })),
+      completionEvidence: snapshotCompletionEvidence(completionEvidence),
+      observations: observations.map((observation) => ({
+        tool: observation.tool,
+        input: observation.input,
+        result: observation.result,
+      })),
+    });
+  };
+
+  if (input.resume) {
+    const resumedFacts = observations
+      .slice(-20)
+      .map((observation, index) => {
+        const rendered = cap(stableStringify(observation.result), resultCap);
+        return [
+          `OBSERVATION ${index + 1}:`,
+          `tool: ${observation.tool}`,
+          `input: ${stableStringify(observation.input)}`,
+          `result: ${rendered}`,
+        ].join('\n');
+      });
+
+    transcript.push(
+      [
+        'ENGINEER RESUME STATE — CONTROLLER AUTHORITY.',
+        'This task survived a Brain restart.',
+        'Do not redo work merely because this is a new model invocation.',
+        'The plan and observations below were already accepted by the controller.',
+        '',
+        renderPlan(plan),
+        '',
+        'CONTROLLER COMPLETION EVIDENCE:',
+        stableStringify(snapshotCompletionEvidence(completionEvidence)),
+        ...(resumedFacts.length
+          ? ['', 'PREVIOUSLY ACCEPTED READ-ONLY OBSERVATIONS:', ...resumedFacts]
+          : []),
+        '',
+        'Continue with the next genuinely unfinished obligation.',
+      ].join('\n'),
+    );
+  }
 
   /*
    * ENGINEER COMPLETION AUTHORITY
@@ -1342,102 +1500,42 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       : `${toolCalls} tool call${toolCalls === 1 ? '' : 's'} ran but produced nothing, so any files named above do not exist.`) +
     ' Ask again to have them actually built.';
 
-  // One completion, reported as it arrives. The streamer emits nothing until the
-  // reply is confirmed to be a final answer, so a tool call never leaks protocol
-  // text into the chat. `holder` carries the raw reply back out of the generator.
-  async function* completing(prompt: string, holder: { reply: string; streamed: string }): AsyncGenerator<EngineerEvent> {
-    holder.streamed = '';
-    if (!deps.completeStream) {
-      holder.reply = await deps.complete(prompt);
-      return;
-    }
-    const streamer = new FinalAnswerStreamer();
+  // Consume provider streams without publishing provisional model answers.
+  // Every terminal path below remains subject to its controller checks; tool,
+  // plan and correction events still report progress while the loop works.
+  async function completing(prompt: string): Promise<string> {
+    if (!deps.completeStream) return deps.complete(prompt);
     let raw = '';
-    for await (const delta of deps.completeStream(prompt)) {
-      raw += delta;
-      const text = streamer.push(delta);
-      if (text) yield { type: 'token', text };
-    }
-    holder.reply = raw;
-    holder.streamed = streamer.text;
+    for await (const delta of deps.completeStream(prompt)) raw += delta;
+    return raw;
   }
 
-  const held = { reply: '', streamed: '' };
-  let lastStreamed = '';
   for (let n = 1; n <= maxSteps; n++) {
-    // Reaching the top of the loop with streamed text behind us means a final
-    // answer was shown and then REJECTED by a quality correction. Say so, rather
-    // than letting a second answer silently appear under the first.
-    if (lastStreamed) {
-      yield { type: 'note', n, kind: 'replan', message: 'revising that answer' };
-      lastStreamed = '';
-    }
-    yield* completing(transcript.join('\n\n'), held);
-    let reply = held.reply;
-    let streamedThisAttempt = held.streamed;
-    lastStreamed = streamedThisAttempt;
+    let reply = await completing(transcript.join('\n\n'));
     let step = parseStep(reply);
     if (step.kind === 'malformed') {
       transcript.push(`Your last reply was invalid (${step.reason}). Reply with ONLY the JSON protocol object.`);
-      yield* completing(transcript.join('\n\n'), held);
-      reply = held.reply;
-      streamedThisAttempt = held.streamed;
-      lastStreamed = streamedThisAttempt;
+      reply = await completing(transcript.join('\n\n'));
       step = parseStep(reply, { lenient: true });
       if (step.kind === 'malformed') {
         // Record a capped sample of what the model actually said. Without it a
         // protocol break is undiagnosable — the run just dies with "not valid
         // JSON" and no evidence of which shape the model emitted.
         stage.log('error', { code: 'MALFORMED_MODEL_OUTPUT', n, reply: cap(reply.trim(), 400) });
-        // Very often the "malformed" reply IS the answer — the model wrote its
-        // markdown directly instead of wrapping it in the protocol. After real
-        // tool work, discarding that means throwing away a correct, cited answer
-        // and showing a failure instead (observed: a 45s repo question died this
-        // way). Accept substantial prose as the final rather than dead-ending.
+        // Recover answer formatting without granting completion authority.
+        // Prose and machine-authored proposal summaries must pass the SAME
+        // evidence, unfinished-plan and truth checks as a protocol final.
         if (toolStepCount > 0 && looksLikeProseAnswer(reply)) {
-          const missingEvidence = missingCompletionObligations(completionEvidence);
-
-          // CA2 also owns this alternate terminal path. Otherwise a model can
-          // bypass the normal final gate simply by emitting prose instead of the
-          // JSON protocol after one shallow inspection.
-          if (missingEvidence.length > 0) {
-            incompleteEvidenceCorrections += 1;
-
-            if (incompleteEvidenceCorrections > MAX_INCOMPLETE_EVIDENCE_CORRECTIONS) {
-              stage.log('error', {
-                code: 'LOOP_NO_PROGRESS',
-                n,
-                reason: 'model repeatedly attempted prose completion with repository-map evidence missing',
-                missingEvidence,
-              });
-              yield {
-                type: 'error',
-                code: 'LOOP_NO_PROGRESS',
-                message:
-                  'the engineer repeatedly attempted to finish while required repository-map evidence remained missing',
-              };
-              return;
-            }
-
-            transcript.push(renderCompletionEvidenceDirective(missingEvidence));
-            continue;
-          }
-
-          const salvaged = reply.trim() + (proposalsEmitted > 0 ? APPLIED_FOOTER : '');
-          stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, salvaged: 'prose' });
-          yield { type: 'final', markdown: salvaged, steps: toolStepCount };
+          step = { kind: 'final', markdown: reply.trim() };
+        } else if (proposalsEmitted > 0) {
+          step = {
+            kind: 'final',
+            markdown: salvagedFinal(proposalsEmitted, 'the model broke protocol on its summary step'),
+          };
+        } else {
+          yield { type: 'error', code: 'MALFORMED_MODEL_OUTPUT', message: `step ${n}: ${step.reason}` };
           return;
         }
-        // Work already recorded must not be thrown away because the model's NEXT
-        // reply was unusable. Observed live: a build proposed all three files,
-        // then broke protocol on the summary step — and the whole run surfaced as
-        // "Engineer run failed" with the proposals stranded above it.
-        if (proposalsEmitted > 0) {
-          yield { type: 'final', markdown: salvagedFinal(proposalsEmitted, 'the model broke protocol on its summary step') + APPLIED_FOOTER, steps: toolStepCount };
-          return;
-        }
-        yield { type: 'error', code: 'MALFORMED_MODEL_OUTPUT', message: `step ${n}: ${step.reason}` };
-        return;
       }
     }
 
@@ -1802,11 +1900,7 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });
-      // The client has already rendered `streamedThisAttempt`. Tell it whether
-      // that text is still a prefix of what we are sending, so it can append the
-      // remainder instead of repeating the whole answer.
-      const streamedPrefix = streamedThisAttempt.length > 0 && markdown.startsWith(streamedThisAttempt);
-      yield { type: 'final', markdown, steps: toolStepCount, streamedPrefix };
+      yield { type: 'final', markdown, steps: toolStepCount };
       return;
     }
 
@@ -1824,8 +1918,20 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       if (completedAfter > completedBefore) incompletePlanCorrections = 0;
 
       const rendered = renderPlan(plan);
-      yield { type: 'note', n, kind: 'plan', message: rendered };
       transcript.push(`${rendered}\n\nWork the next unchecked step. Mark steps done as you finish them.`);
+
+      /*
+       * DURABLE-BEFORE-VISIBLE.
+       *
+       * Once the client sees a plan transition, that semantic state must already
+       * be recoverable. An async generator pauses at `yield`; checkpointing after
+       * the frame created a crash window where the UI could show 2/4 complete
+       * while durable state still said 0/4.
+       */
+      await emitCheckpoint();
+
+      yield { type: 'note', n, kind: 'plan', message: rendered };
+
       noProgressStreak = 0; // recording intent is progress
       continue;
     }
@@ -1892,6 +1998,23 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
             );
             if (completionProgress > 0) {
               incompleteEvidenceCorrections = 0;
+            }
+
+            /*
+             * R2 persists successful READ-ONLY observations only.
+             *
+             * Mutations, command side effects, proposals and approval state have
+             * different reconciliation requirements and belong to later restart
+             * scenarios. They are deliberately excluded here.
+             */
+            const toolInfo = toolInfoById.get(tool);
+            if (toolInfo?.readOnly === true) {
+              observations.push({
+                tool,
+                input: toolInput,
+                result,
+              });
+              await emitCheckpoint();
             }
 
             if (isProposal) {
