@@ -95,6 +95,22 @@ export async function sheetContentEvidenceFor(
   activeFiles: readonly string[],
   uploadRoot: string,
   computedFor: string | null = null,
+  /**
+   * Where each file sits in the conversation's ordering, 1-based.
+   *
+   * 🚨 THE EVIDENCE CARRIES ITS OWN POSITION. "What budget does the first
+   * document give?" was answered with the SECOND document's figure, on a turn
+   * whose trace proved the order was resolved correctly and whose model, asked
+   * directly, named the right file as number 1. It knew which file was first and
+   * still read the wrong block, because the ordinal lived in a preamble and the
+   * filename lived on the block — a join the model had to make and sometimes
+   * did not.
+   *
+   * Stating the position ON the evidence removes the join. It is not a hint
+   * about phrasing; it is the same identity the preamble already gives, written
+   * where the values are.
+   */
+  positions: Readonly<Record<string, number>> = {},
 ): Promise<SheetContentEvidence[]> {
   const candidates = structuredOnly(activeFiles).filter((name) => name !== computedFor)
   const out: SheetContentEvidence[] = []
@@ -111,7 +127,9 @@ export async function sheetContentEvidenceFor(
         sheetNames: workbook.sheets.map((sheet) => sheet.name).filter((n) => n.trim() !== ''),
         text: composeEvidence({
           fact: [
-            `[Read directly from ${fileName} by MigraPilot. These are the stored cell values,`,
+            `[Read directly from ${fileName}${
+              positions[fileName] ? ` — this is document ${positions[fileName]} of the attached files` : ''
+            } by MigraPilot. These are the stored cell values,`,
             `sheet by sheet, exactly as the file holds them. Use them verbatim.`,
             ...(rendered.complete
               ? []

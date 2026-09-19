@@ -1110,6 +1110,8 @@ export async function POST(request: Request): Promise<Response> {
        */
       const executing = regeneration?.kind === 'execute' ? regeneration : null
 
+      const attachments = orderAttachments(turnGrounding.active, reconciled.uploadedAt)
+
       /*
        * 🚨 AN ATTACHED WORKBOOK IS SHOWN TO THE MODEL, NOT KEPT BEHIND A VERB.
        *
@@ -1129,6 +1131,7 @@ export async function POST(request: Request): Promise<Response> {
             turnGrounding.active,
             await userDirectory(),
             null,
+            Object.fromEntries(attachments.map((a) => [a.name, a.position])),
           ).catch(() => [])
       if (sheetContent.length > 0) {
         trace.set('sheet_content', sheetContent.map((s) => s.file).join(','))
@@ -1147,7 +1150,7 @@ export async function POST(request: Request): Promise<Response> {
        * workbook with more than one sheet, in play, whose sheet this question did
        * not name. Every other turn pays nothing.
        */
-      const attachments = orderAttachments(turnGrounding.active, reconciled.uploadedAt)
+
       /*
        * The ORDER this turn resolved, in the trace, because "the first document"
        * answered with the alphabetically-first file once and there was no way to

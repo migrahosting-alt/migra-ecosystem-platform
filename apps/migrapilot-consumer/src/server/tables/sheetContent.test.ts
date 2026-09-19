@@ -48,3 +48,36 @@ test('the file the computed path already spoke for is excluded', async () => {
   const out = await sheetContentEvidenceFor(['other.xlsx'], dir, 'other.xlsx')
   assert.deepEqual(out, [], 'the computed file must not also be shown raw')
 })
+
+test('the evidence states its own position among the attachments', async () => {
+  /*
+   * 🚨 "What budget does the first document give?" was answered with the SECOND
+   * document's figure, on a turn whose trace proved the order was resolved
+   * correctly and whose model, asked directly, named the right file as number 1.
+   * It knew which file was first and still read the wrong block: the ordinal
+   * lived in a preamble and the filename lived on the block, and that join is
+   * one the model had to make and sometimes did not.
+   */
+  const { mkdtempSync, copyFileSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'positions-'))
+  const src = join(process.cwd(), '../../.playwright-mcp/alpha-report-v2.xlsx')
+  copyFileSync(src, join(dir, 'alpha-report-v2.xlsx'))
+
+  const out = await sheetContentEvidenceFor(['alpha-report-v2.xlsx'], dir, null, {
+    'alpha-report-v2.xlsx': 1,
+  })
+  assert.equal(out.length, 1)
+  assert.match(out[0]!.text, /this is document 1 of the attached files/)
+})
+
+test('a file with no stated position says nothing about one', async () => {
+  const { mkdtempSync, copyFileSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'nopos-'))
+  copyFileSync(
+    join(process.cwd(), '../../.playwright-mcp/alpha-report-v2.xlsx'),
+    join(dir, 'alpha-report-v2.xlsx'),
+  )
+  const out = await sheetContentEvidenceFor(['alpha-report-v2.xlsx'], dir)
+  assert.equal(out.length, 1)
+  assert.doesNotMatch(out[0]!.text, /this is document/)
+})
