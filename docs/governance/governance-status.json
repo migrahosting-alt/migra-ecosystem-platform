@@ -56,6 +56,28 @@
     }
   },
   "services": {
+    "migrapilot_consumer": {
+      "unit": "migrapilot-consumer.service",
+      "host": "migrapilot-app-core",
+      "article_iv": "COMPLIANT",
+      "normal_deploys_blocked": false,
+      "release": "chat-platform-rc-0908",
+      "commit": "0f494d27111ce91c30cbbc7ce077c18fd90155c6",
+      "build_id": "AV5gDWNOlGsz3wDMI-NIf",
+      "rollback_target": "chat-platform-rc-0907b",
+      "reconciliation": "NOT_REQUIRED",
+      "measured": "2026-09-19",
+      "measured_by": "Chat lane, against the running production host",
+      "evidence": {
+        "iv_1_not_sideways": "commit 0f494d27 is reachable in canonical repository history",
+        "iv_2_identity": "the running process answers /api/version with commit, build_id, release and stamped:true — identity is stamped into the artifact, never read from configuration",
+        "iv_3_clean_tree": "deploy-consumer.sh fails closed on a dirty apps/migrapilot-consumer or docs/migrapilot",
+        "iv_5_provenance": "every deploy proves expected commit -> built artifact -> boot-tested artifact -> activated release -> running process reporting the same one",
+        "iv_6_rollback": "previous -> chat-platform-rc-0907b, verified to carry .next, package.json and node_modules. The pointer was ABSENT before 2026-09-19 and was established that day to satisfy IV §6; no deployment was required."
+      },
+      "note": "Recorded per rules.compliance_status_scope — a deployable service carries its own status. Absence of a row is NOT compliance: under an active per-service freeze it fails closed, which is why promotion was correctly blocked until this was measured.",
+      "outstanding": "Production runs 0f494d27 while the accepted staging line is far ahead. Promoting it is a behaviour-CHANGING release, so IV §9 requires an explicit product-change approval attached to that promotion — compliance recorded here does not by itself authorise it."
+    },
     "web": {
       "unit": "migrateck.service",
       "article_iv": "NON_COMPLIANT",
