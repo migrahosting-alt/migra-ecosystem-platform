@@ -935,3 +935,74 @@ The OCR fix in §26 is waiting on this.
 
 Not mine to fix: the remedy is the Engineer lane committing its working copy.
 Committing it on their behalf would bundle unfinished work into a release.
+
+---
+
+## 28. Conversation fundamentals — the controls a user actually touches
+
+| control | result |
+| --- | --- |
+| **Stop generating** | works, and genuinely aborts: text stayed byte-stable over 6s and the server recorded `outcome: cancelled` |
+| Stopped answer survives reload | **no — by design**, see below |
+| **Try again** | appended a new turn rather than replacing — consistent with this codebase's "fork, never rewrite history" rule |
+| Try again produces *another* answer | **NO — byte-identical.** Defect, fixed |
+| Copy / Listen / feedback controls | present and correctly gated; Listen names its missing runtime |
+
+### Stopped answers are discarded, deliberately
+
+> *"the answer is stored ONLY when the stream completes… writing a truncated
+> answer would leave a durable conversation whose history claims the model said
+> something it never finished saying."*
+
+Sound reasoning, and it still costs the user text they read — ChatGPT keeps
+stopped answers. The better resolution is to persist it **labelled as stopped**
+rather than delete it, which needs a message-level field the Brain does not have.
+**Flagged, not inverted**: a written decision is not overturned in passing.
+
+### 🚨 Defect — "Try again" could not produce another answer
+
+Asked *"in one short sentence, what is a bill of lading?"*, the retry reproduced
+the previous reply **character for character**. A control whose label is *"ask
+this question again for another answer"* that cannot produce another answer is a
+dead control — the user clicked it precisely because they wanted something else.
+
+**One setting, two defects.** Both model calls ran at `temperature: 0.1`:
+
+- the **tool** call decides which capability to invoke and its output is parsed —
+  a decision should be the same decision every time, so it stays at 0.1
+- the **answer** turn is prose a person reads, and near-determinism made retry
+  useless *and* made long-form generation collapse into repetition — which is
+  exactly what made Creole look hopeless in §25, where every model looped at
+  temperature 0 and produced coherent prose at 0.7
+
+The answer turn now names its own sampling (`0.7 / top_p 0.9`); the tool turn
+keeps its determinism, so the two cannot drift apart the next time either is
+tuned.
+
+Raising it does not loosen grounded figures: evidence blocks state figures and
+instruct verbatim use, and copying a token already in context is not the branch
+point sampling acts on. **To be re-proven against the grounded document cases,
+not assumed** — blocked on sign-in below.
+
+---
+
+## 29. `HEAD` repaired, both Brain fixes deployed
+
+The blocker in §27 is cleared. Owner chose repair over revert; the Engineer
+lane's working copy was committed **unchanged**, in commits that say whose work
+it is and why. Their suite was already green, so nothing unfinished shipped:
+**3415/3415**, and `HEAD` now compiles standalone.
+
+Deployed as `ocrlang-sampling-0919`, carrying both queued fixes. Migration 30
+(`engineer_checkpoints`) is a `CREATE TABLE IF NOT EXISTS` for a new table —
+purely additive, and a code-only rollback leaves an unused empty table.
+
+`liv_kreyol_AI-Training.pdf` is re-running through OCR with the measured `fra`
+fallback. **In progress, unverified.**
+
+### 🚨 Blocked on sign-in
+
+The staging session expired and `/api/auth/login` now serves the real MigraAuth
+form. Authentication is never worked around, so the live re-verification —
+retry producing a genuinely different answer, and grounded figures still exact
+at the new sampling — waits for a manual sign-in at `http://127.0.0.1:3200`.
