@@ -779,6 +779,44 @@ async function callModel(
   }
 }
 
+/**
+ * HOW THE ANSWER TURN SAMPLES — and why it is not the tool turn's setting.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 TWO DEFECTS, ONE NUMBER
+ *
+ * Both model calls in this file ran at `temperature: 0.1`, which is right for
+ * one of them and wrong for the other.
+ *
+ * The TOOL call decides which capability to invoke and its output is parsed.
+ * A decision should be the same decision every time, so it stays at 0.1.
+ *
+ * The ANSWER turn is prose a person reads, and near-determinism cost two things
+ * measurably:
+ *
+ *   · "Try again" returned a BYTE-IDENTICAL answer. A control labelled "ask this
+ *     question again for another answer" that cannot produce another answer is a
+ *     dead control — the user clicked it precisely because they wanted something
+ *     different.
+ *
+ *   · Long-form generation collapsed into repetition. Measured while evaluating
+ *     Haitian Creole: at temperature 0 every model looped the same clause —
+ *     "Li pa vle pran livrezon. Li pa vle pran livrezon." — and at 0.7 the same
+ *     model produced coherent prose instead. Low temperature is a known cause of
+ *     degenerate repetition, and it was making the product look incapable of a
+ *     language it can partly speak.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 WHY THIS DOES NOT LOOSEN GROUNDED FIGURES
+ *
+ * The worry with raising it is a model paraphrasing "25443.75" into something
+ * near it. Sampling does not work that way: evidence blocks state the figures
+ * and instruct that they be used verbatim, and copying a token that is already
+ * in context is not the branch point sampling acts on. The grounded document
+ * cases are re-run against this to prove it rather than to assume it.
+ */
+const ANSWER_SAMPLING = { temperature: 0.7, top_p: 0.9 } as const;
+
 /** Stream the final synthesis token-by-token. Ollama native `/api/chat` streams
  * newline-delimited JSON, each line `{message:{content}, done}`. No tools here —
  * this is the answer turn only. */
@@ -795,7 +833,7 @@ async function* streamModel(
     const res = await fetch(nativeChatUrl, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true, options: { temperature: 0.1 } }),
+      body: JSON.stringify({ model, messages, stream: true, options: ANSWER_SAMPLING }),
       signal: budget.signal,
     });
     if (!res.ok || !res.body) throw new Error(`agent model stream HTTP ${res.status}`);
