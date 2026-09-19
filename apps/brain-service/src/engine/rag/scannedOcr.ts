@@ -226,6 +226,90 @@ function summarise(pass: OcrPass) {
   };
 }
 
+
+/**
+ * WHICH LANGUAGE CAN THIS HOST ACTUALLY RECOGNISE?
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 THE DEFECT. `hat` was requested unconditionally, and on a host whose
+ * tesseract has only `eng`, `fra` and `osd` the whole job died:
+ *
+ *   Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata
+ *
+ * A 245-page Haitian Creole book rendered all 245 pages successfully and then
+ * recovered nothing, because one data file was missing. Rendering is the
+ * expensive half and it had already been paid for.
+ *
+ * ---------------------------------------------------------------------------
+ * 🚨 THE ORDER IS MEASURED, NOT ASSUMED
+ *
+ * This codebase measured the alternatives on the actual book: `hat` preserves
+ * more Haitian diacritics than `fra` (35 v 22, 14 v 10). So `fra` is a real
+ * second best for Creole — worse, and far better than nothing — and `eng` is
+ * the last resort before giving up.
+ *
+ * DEGRADING IS REPORTED, NEVER SILENT. A page recognised with `fra` instead of
+ * `hat` has measurably fewer diacritics, and a reader who is told the text is
+ * Creole deserves to know it was read by a French recogniser.
+ */
+let installedLanguages: Set<string> | null = null;
+
+export async function ocrLanguagesAvailable(): Promise<Set<string>> {
+  if (installedLanguages) return installedLanguages;
+  try {
+    const { stdout } = await run('tesseract', ['--list-langs'], { maxBuffer: 1024 * 1024 });
+    // The first line is a header; every line after it is one language code.
+    installedLanguages = new Set(
+      stdout.split('\n').slice(1).map((l) => l.trim()).filter((l) => l !== ''),
+    );
+  } catch {
+    // Cannot ask. NOT cached: a missing binary now is not a permanent answer,
+    // and caching an empty set would make one install invisible until restart.
+    return new Set<string>();
+  }
+  return installedLanguages;
+}
+
+export interface OcrLanguageChoice {
+  language: string;
+  /** The language that was asked for, when it is not the one being used. */
+  degradedFrom?: string;
+}
+
+/**
+ * The best recognition language available, preferring the one asked for.
+ *
+ * Returns null when tesseract has NOTHING usable — which is a different fact
+ * from "the recogniser is missing", and the caller words it differently.
+ */
+export async function chooseOcrLanguage(
+  preferred: string,
+  /**
+   * The installed set, for tests.
+   *
+   * 🚨 INJECTABLE BECAUSE THE FIRST VERSION OF THESE TESTS PASSED VACUOUSLY: on
+   * a machine with no tesseract every case hit an early return and asserted
+   * nothing, which reads as coverage and is the absence of it.
+   */
+  injected?: ReadonlySet<string>,
+): Promise<OcrLanguageChoice | null> {
+  const available = injected ?? (await ocrLanguagesAvailable());
+  // Nothing listed means the question could not be asked; try what was wanted
+  // rather than refusing on the strength of an answer we never got.
+  if (available.size === 0) return { language: preferred };
+  if (available.has(preferred)) return { language: preferred };
+
+  for (const fallback of FALLBACK_ORDER[preferred] ?? ['eng']) {
+    if (available.has(fallback)) return { language: fallback, degradedFrom: preferred };
+  }
+  return null;
+}
+
+/** Measured on the real book, not guessed. See the note above. */
+const FALLBACK_ORDER: Record<string, string[]> = {
+  hat: ['fra', 'eng'],
+};
+
 export interface OcrPageOptions {
   scanIndex: number;
   physicalPosition: PhysicalPosition;
@@ -241,7 +325,16 @@ export interface OcrPageOptions {
  */
 export async function ocrPage(pngBytes: Buffer, options: OcrPageOptions): Promise<ScannedPageRecord> {
   const analysis: LayoutAnalysis = analyseLayout(pngBytes);
-  const language = options.language ?? 'hat';
+  /*
+   * 🚨 THE LANGUAGE THIS HOST HAS, not the one we would prefer.
+   *
+   * Asking for `hat` on a host without it failed the whole job AFTER all 245
+   * pages had been rendered — the expensive half, already paid for, thrown away
+   * over one missing data file. `fra` is a measured second best for Haitian
+   * Creole and is used when `hat` is absent, with the substitution recorded so
+   * nobody mistakes a French reading of Creole for the real thing.
+   */
+  const wanted = options.language ?? 'hat';
 
   const empty = (reason: string): ScannedPageRecord => ({
     scanIndex: options.scanIndex,
@@ -258,6 +351,10 @@ export async function ocrPage(pngBytes: Buffer, options: OcrPageOptions): Promis
     columnPairs: 0,
     confidence: 0,
   });
+
+  const choice = await chooseOcrLanguage(wanted);
+  if (!choice) return empty('no recognition language is installed on this server');
+  const language = choice.language;
 
   if (analysis.layout === 'blank') return empty('blank half — no OCR attempted');
 
