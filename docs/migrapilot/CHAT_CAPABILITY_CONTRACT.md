@@ -767,3 +767,64 @@ For the OCR slice: `tesseract-ocr-hat` is what this document needs, and the
 product should also degrade gracefully when a requested language pack is absent
 rather than failing the whole job — the second half is a code change, not an
 install.
+
+---
+
+## 24. Contextual reference resolution — COMPLETE
+
+A **turn reference model** rather than a pile of patterns. `turnReference` holds
+what a reference can point *at* — the ordered attachments, the sheet in play —
+and resolution is matching a question against that state. **The candidates always
+come from the files themselves**: real filenames, real sheet names. Nothing in
+the module contains a list of things people might say.
+
+### 🚨 Defect — the sheet was forgotten between turns
+
+> *"Use the Q1 Sales sheet. What is the total revenue?"* → correct.
+> *"On that same sheet, which region had the highest revenue?"* →
+> **"the question doesn't specify which sheet to look at."**
+
+`resolveActiveSheet` now searches recent turns for the **workbook's own sheet
+names**, newest first. What makes a sheet active is having been *named* — not
+having been pointed at with "that". A turn naming two sheets makes neither
+active. A conversation that never named one resolves to nothing and the turn
+asks, because the point of holding state is to answer *"which did they mean"*
+from evidence, and inventing one would be worse than the forgetting it replaces.
+
+Paid for only when there is something to resolve.
+
+### 🚨 Defect — the evidence did not carry its own position
+
+> *"What budget figure does the first document give?"* → the **second**
+> document's figure.
+
+The trace proved the order was resolved correctly
+(`attachment_order: alpha-report-v2.xlsx | alpha-report-v1.xlsx`) and the model,
+asked directly which file was number 1, answered **"alpha-report-v2.xlsx"**. It
+knew which file was first and still read the wrong block: the ordinal lived in a
+preamble and the filename lived on the evidence, so answering needed a join the
+model did not always make.
+
+The block now states its own position — the same identity the preamble gives,
+written where the values are. The order trace was added first, because a
+reference model that cannot be audited is a guess with extra steps.
+
+### All five cases, verified live
+
+| case | result |
+| --- | --- |
+| *"on that same sheet"* across turns | **Q1 Sales** carried; East, **$25,443.75** |
+| *"what I said earlier"* | recalled the question **and** its figure, **$75,713.75** |
+| similarly named files | distinguished `alpha-report-v1` from `-v2` correctly |
+| **upload order ≠ alphabetical** | *"the first document"* → **v2, £512,000** — not the lexically-first v1 |
+| ambiguous reference | *"The first document says there are 9 sites, but the second document says there are 7."* — both, positioned, nothing silently picked |
+
+The fourth is the discriminating one: the pair is `alpha-report-v1` and `-v2`,
+uploaded **v2 first**, so the alphabetically-first file and the actually-first
+file are deliberately different.
+
+### Release-space governance, exercised throughout
+
+Every deploy in this slice passed the free-space gate (payload 0.5 GB × 3 = 1.4
+GB required) and pruned itself to three releases afterwards. Disk has stayed at
+41% with 12 GB free across five deploys.
