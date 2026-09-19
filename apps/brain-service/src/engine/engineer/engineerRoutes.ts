@@ -7,6 +7,7 @@ import {
 import {
   engineerWorkspaceSnapshotFromGit,
 } from './engineerWorkspaceSnapshot.js';
+import { completionCheckpointText } from './engineerCompletionNarrative.js';
 // POST /api/ai/engineer — SSE surface for the model-in-the-loop workspace
 // engineer (Slice 2). Local-only: no pilot-api involvement anywhere on this
 // path, so disabled remote delegation can never block ordinary local work.
@@ -1329,6 +1330,47 @@ export function registerEngineerRoutes(
         restoredSemanticState:
           resumeWorkspaceState === 'unchanged',
       });
+    } else {
+      /*
+       * A FRESH run establishes its own durable repository identity.
+       *
+       * This used to come ONLY from git.status/git.overview OBSERVATIONS — that is,
+       * from tools the model might simply never call. Across five real runs it never
+       * called git.status once, so every fresh checkpoint stored {null,null,null},
+       * and `unchanged` (which requires dirtyFingerprint !== null) could never hold.
+       * Every FIRST interruption was therefore forced to resume as
+       * workspaceState=changed with its accepted work discarded: restart-safe
+       * continuation existed but was unreachable by construction.
+       *
+       * Repository identity is INFRASTRUCTURE, not a model choice, so it is captured
+       * here on the same read-only precondition path resume already uses.
+       *
+       * Deliberately non-fatal. A workspace that cannot be read still runs; it just
+       * stores UNKNOWN and resumes fail-closed, exactly as it did before.
+       * Establishing identity must never be able to refuse a run.
+       */
+      try {
+        const initialStatus = await executeResumePrecondition(
+          'git.status',
+          { rootPath: body.rootPath },
+        );
+
+        const initialOverview = await executeResumePrecondition(
+          'git.overview',
+          { rootPath: body.rootPath },
+        );
+
+        revalidatedWorkspaceSnapshot =
+          engineerWorkspaceSnapshotFromGit(
+            initialStatus,
+            initialOverview,
+          );
+      } catch (err) {
+        stage.log('error', {
+          code: 'ENGINEER_INITIAL_SNAPSHOT_UNAVAILABLE',
+          detail: sanitizeError(err),
+        });
+      }
     }
 
 
@@ -1764,7 +1806,9 @@ export function registerEngineerRoutes(
     }
 
     if (terminal === 'completed') {
-      if (task.stage !== 'awaiting_approval') taskStage('verified', 'Brain completed the inspect/plan phase; workspace mutation remains approval-gated.');
+      if (task.stage !== 'awaiting_approval') {
+        taskStage('verified', completionCheckpointText(task));
+      }
       task.completion = 'complete';
       send('task', { task });
       await auditStore.append({ correlationId, type: 'loop.completed', component: 'engineer' });

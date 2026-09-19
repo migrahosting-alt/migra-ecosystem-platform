@@ -39,6 +39,16 @@ export type {
   CompletionEvidenceSnapshot,
   CompletionObligationId,
 } from './engineerCompletionContract.js';
+
+import {
+  deriveTaskObligations,
+  observeTaskObligations,
+  unresolvedTaskObligations,
+  renderTaskObligationDirective,
+  absenceClaimUnsupported,
+  ABSENCE_OBLIGATION_DIRECTIVE,
+  type TaskObligation,
+} from './engineerTaskObligations.js';
 import { decideTurn, type MissingInformationDeclaration, type TurnDecision, type TurnIntent } from './turnDecision.js';
 import { existsSync } from 'node:fs';
 import { lintChangeset, summarizeDefects } from '../../tools/changesetLint.js';
@@ -1403,6 +1413,25 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   let incompleteEvidenceCorrections = 0;
   const MAX_INCOMPLETE_EVIDENCE_CORRECTIONS = 4;
 
+  /*
+   * Obligations the TASK ITSELF stated, counted independently of the model.
+   *
+   * The repository-map ledger above only arms when `requiresRepositoryMapEvidence`
+   * recognises the prompt, and that is a keyword heuristic: a real owner prompt
+   * asking for six named inspections scored 3 against its threshold of 4, recorded
+   * `enabled: false`, and the run then reported "The inspection is complete" while
+   * naming three files it had never opened. This ledger does not arm on phrasing —
+   * it exists exactly when the task stated requirements that can be checked.
+   */
+  const taskObligations = deriveTaskObligations(
+    input.task ?? '',
+    input.specification ?? '',
+  );
+  let taskObligationCorrections = 0;
+  const MAX_TASK_OBLIGATION_CORRECTIONS = 3;
+  let absenceCorrections = 0;
+  const MAX_ABSENCE_CORRECTIONS = 2;
+
   let checkpointSequence = 0;
 
   const emitCheckpoint = async (): Promise<void> => {
@@ -1480,6 +1509,32 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
   // Ground truth for a final that reports checks which never executed.
   const NO_COMMAND_FOOTER =
     '\n\n---\n**⚠️ No commands were run.** Any install, typecheck, lint, test, build, migration or health-check result stated above did not happen — nothing was executed this turn.';
+
+  const UNSUPPORTED_ABSENCE_FOOTER =
+    '\n\n---\n**⚠️ Not verified by this run.** Repository-wide implementation absence was not established — no content search was run, so any statement above that something does not exist is unverified. Finding no matching *filename* does not show that the behaviour is missing.';
+
+  /* Ground truth for the requirements the TASK stated and the run never evidenced.
+   *
+   * Machine-authored from the controller's ledger, never from the model's account
+   * of itself. Silent when every stated requirement was met, so an honest complete
+   * answer is not decorated with a warning it does not deserve. */
+  const unverifiedObligationFooter = (
+    obligations: readonly TaskObligation[],
+  ): string => {
+    const unverified = obligations.filter(
+      (obligation) => obligation.status !== 'SATISFIED',
+    );
+    if (unverified.length === 0) return '';
+
+    return [
+      '\n\n---',
+      '**⚠️ Not verified by this run.** The request asked for these, and no evidence of an accepted type was observed:',
+      ...unverified.map(
+        (obligation) => `\n- ${obligation.description} (needs ${obligation.requiredEvidenceTypes.join(' or ')})`,
+      ),
+      '\n\nAnything stated above about them is unverified, whatever wording was used.',
+    ].join('');
+  };
 
   /* Ground truth for a final that still describes work when nothing was produced.
    *
@@ -1596,6 +1651,69 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
 
           transcript.push(renderCompletionEvidenceDirective(missingEvidence));
           continue;
+        }
+      }
+
+      /*
+       * TASK-STATED OBLIGATIONS
+       * -----------------------
+       * The requirements the prompt itself named, counted by the controller from
+       * observed tool results. A final that leaves any of them PENDING is a model
+       * REQUEST to finish, not permission.
+       *
+       * Bounded, because a requirement the workspace genuinely cannot supply must
+       * not trap the run forever. When the budget is spent the obligations become
+       * UNPROVABLE and the answer is allowed — but it is published alongside a
+       * controller-authored statement of what was never evidenced, so an honest
+       * incomplete result is possible and a false claim of completion is not
+       * silently possible.
+       */
+      /*
+       * A claim of ABSENCE is checked against what the run actually did.
+       *
+       * Unlike the obligations above, this one is triggered by the answer rather
+       * than by the prompt: the run that provoked it was never asked to prove a
+       * negative, it volunteered one. "I couldn't find any implementation files"
+       * was published after a workspace.find and no content search at all.
+       */
+      if (
+        absenceClaimUnsupported(taskObligations, step.markdown) &&
+        absenceCorrections < MAX_ABSENCE_CORRECTIONS
+      ) {
+        absenceCorrections += 1;
+
+        stage.log('loop-step', {
+          code: 'ABSENCE_CLAIM_UNSUPPORTED',
+          n,
+          observedEvidence: [...taskObligations.observedEvidenceTypes],
+        });
+
+        transcript.push(ABSENCE_OBLIGATION_DIRECTIVE);
+        continue;
+      }
+
+      const unresolvedTask = unresolvedTaskObligations(taskObligations);
+
+      if (unresolvedTask.length > 0) {
+        if (taskObligationCorrections < MAX_TASK_OBLIGATION_CORRECTIONS) {
+          taskObligationCorrections += 1;
+
+          stage.log('loop-step', {
+            code: 'TASK_OBLIGATIONS_UNSATISFIED',
+            n,
+            unresolved: unresolvedTask.map((obligation) => obligation.id),
+          });
+
+          transcript.push(renderTaskObligationDirective(unresolvedTask));
+          continue;
+        }
+
+        for (const obligation of unresolvedTask) {
+          if (obligation.status === 'PENDING') {
+            obligation.status = 'UNPROVABLE';
+            obligation.failureReason =
+              'no evidence of an accepted type was observed before the run ended';
+          }
         }
       }
 
@@ -1898,6 +2016,26 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
       if (!executedTools.has('command.run') && claimsCommandResult(markdown)) {
         markdown += NO_COMMAND_FOOTER;
       }
+      /*
+       * An obligation the run never evidenced is stated by the CONTROLLER, in the
+       * answer, whatever the prose claims.
+       *
+       * The run this exists for wrote "The inspection is complete" and listed three
+       * files it had never opened. A refusal loop alone cannot prevent that, because
+       * the budget can run out; what can is publishing the ledger next to the claim,
+       * so a false completion is contradicted in the same message rather than
+       * discovered later in a checkpoint.
+       */
+      markdown += unverifiedObligationFooter(taskObligations.obligations);
+      /*
+       * A claim of absence that outlived its correction budget is published
+       * QUALIFIED, never unqualified. The controller does not edit the model's
+       * words; it states, in the same message, that the repository was never
+       * searched — so "nothing exists" cannot be read as an established fact.
+       */
+      if (absenceClaimUnsupported(taskObligations, markdown)) {
+        markdown += UNSUPPORTED_ABSENCE_FOOTER;
+      }
       markdown = proposalsEmitted > 0 ? markdown + APPLIED_FOOTER : markdown;
       stage.log('final', { steps: toolStepCount, proposals: proposalsEmitted, replans });
       yield { type: 'final', markdown, steps: toolStepCount };
@@ -1993,6 +2131,16 @@ export async function* runEngineerTask(deps: EngineerDeps, input: EngineerInput)
             const completionProgress = observeCompletionEvidence(
               completionEvidence,
               toolInfoById.get(tool),
+              toolInput,
+              result,
+            );
+
+            // Same rule, same seam: only a tool that actually succeeded may move
+            // a task obligation, and only if its evidence TYPE can prove the thing.
+            observeTaskObligations(
+              taskObligations,
+              tool,
+              toolInfoById.get(tool)?.evidenceSemantics,
               toolInput,
               result,
             );

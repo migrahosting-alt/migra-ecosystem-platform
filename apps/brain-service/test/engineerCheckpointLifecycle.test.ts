@@ -1244,3 +1244,143 @@ test(
     assert.equal(resume?.data.restoredSemanticState, false);
   },
 );
+
+// ── repository identity must not depend on what the model chooses to call ────
+//
+// The test above proves the snapshot persists when the controller is SCRIPTED to
+// call git.status and git.overview. Production never took that path: across five
+// real runs the agent called git.overview and never once called git.status, so
+// every fresh checkpoint stored {null,null,null}. `unchanged` requires
+// dirtyFingerprint !== null, so every FIRST interruption was forced to resume as
+// workspaceState=changed with its accepted work discarded — restart-safe
+// continuation existed but was unreachable.
+//
+// So the invariant is not "the snapshot is captured when the tools run". It is
+// "the snapshot is captured whatever the model does".
+
+test(
+  'R2 route: a fresh run persists repository identity even when the model NEVER calls a git tool',
+  async () => {
+    const calls: string[] = [];
+    const store = new RecordingCheckpointStore();
+
+    const rootPath = mkdtempSync(tmpdir() + '/eng-identity-nogit-');
+
+    execFileSync('git', ['init', '-b', 'main'], {
+      cwd: rootPath,
+      stdio: 'ignore',
+    });
+
+    writeFileSync(`${rootPath}/README.md`, '# identity fixture\n');
+
+    execFileSync('git', ['add', 'README.md'], {
+      cwd: rootPath,
+      stdio: 'ignore',
+    });
+
+    execFileSync(
+      'git',
+      [
+        '-c', 'user.name=MigraPilot Test',
+        '-c', 'user.email=migrapilot-test@example.invalid',
+        'commit', '-m', 'fixture',
+      ],
+      { cwd: rootPath, stdio: 'ignore' },
+    );
+
+    const expectedHead = execFileSync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd: rootPath, encoding: 'utf8' },
+    ).trim();
+
+    // The controller answers immediately and inspects NOTHING. This is the shape
+    // of every real run we observed, and the shape the previous test never had.
+    const app = buildApp(
+      sequencedAdapter([JSON.stringify({ final: 'done' })], calls),
+      store,
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/ai/engineer',
+      headers: {
+        'x-correlation-id': 'r2-identity-no-git-tools',
+        'x-owner-scope': 'owner-identity',
+        'x-workspace-scope': 'workspace-identity',
+      },
+      payload: {
+        rootPath,
+        task: 'Answer without inspecting anything.',
+      },
+    });
+
+    await app.close();
+
+    assert.equal(response.statusCode, 200);
+
+    const terminal = store.saves.at(-1)!.checkpoint;
+
+    assert.deepEqual(
+      terminal.observations.map((observation) => observation.tool),
+      [],
+      'the premise of this test is that the model ran no read-only tool at all',
+    );
+
+    assert.equal(
+      terminal.workspaceSnapshot.gitHead,
+      expectedHead,
+      'identity is infrastructure: HEAD must be captured without the model asking',
+    );
+    assert.equal(terminal.workspaceSnapshot.gitBranch, 'main');
+    assert.ok(
+      terminal.workspaceSnapshot.dirtyFingerprint !== null,
+      'a null fingerprint here makes every first interruption unresumable',
+    );
+  },
+);
+
+test(
+  'R2 route: an unreadable workspace still runs, and stores UNKNOWN rather than failing',
+  async () => {
+    // Establishing identity must never be able to refuse a run. A directory that is
+    // not a repository yields UNKNOWN, which makes a later resume fail CLOSED — the
+    // behaviour that already existed — instead of turning a normal run into an error.
+    const calls: string[] = [];
+    const store = new RecordingCheckpointStore();
+
+    const rootPath = mkdtempSync(tmpdir() + '/eng-identity-nogitrepo-');
+
+    const app = buildApp(
+      sequencedAdapter([JSON.stringify({ final: 'done' })], calls),
+      store,
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/ai/engineer',
+      headers: {
+        'x-correlation-id': 'r2-identity-not-a-repo',
+        'x-owner-scope': 'owner-identity',
+        'x-workspace-scope': 'workspace-identity',
+      },
+      payload: {
+        rootPath,
+        task: 'Answer without inspecting anything.',
+      },
+    });
+
+    await app.close();
+
+    assert.equal(response.statusCode, 200, 'the run must still succeed');
+
+    const terminal = store.saves.at(-1)!.checkpoint;
+
+    assert.equal(terminal.status, 'COMPLETED');
+    assert.equal(
+      terminal.workspaceSnapshot.dirtyFingerprint,
+      null,
+      'unknown identity must be stored as UNKNOWN, never guessed',
+    );
+  },
+);

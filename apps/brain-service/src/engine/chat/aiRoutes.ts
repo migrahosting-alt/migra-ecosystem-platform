@@ -1,3 +1,4 @@
+import { allowRemoteModelsFromEnv } from '../models/eligibilityPolicy.js';
 /**
  * MigraAI Engine — unified public API facade (`/api/ai/*`).
  *
@@ -182,8 +183,7 @@ export function sourcesFromEnv(env: BrainEnv): ProviderSource[] {
  * caller can set.
  */
 function allowRemoteModels(): boolean {
-  const v = (process.env.MIGRAPILOT_ALLOW_REMOTE_MODELS ?? '').trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
+  return allowRemoteModelsFromEnv();
 }
 
 export function buildEngineModelRegistry(env: BrainEnv, qualStore?: QualificationStore): ModelRegistry {

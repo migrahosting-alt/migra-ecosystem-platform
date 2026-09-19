@@ -1,3 +1,4 @@
+import { allowRemoteModelsFromEnv } from '../src/engine/models/eligibilityPolicy.js';
 /**
  * A model that runs on someone else's hardware must not be served as local.
  *
@@ -93,4 +94,25 @@ test('excluding the cloud model does not empty the deep tier', async () => {
   const deep = (await reg.list(true)).filter((m) => m.tier === 'deep');
   assert.equal(deep.length, 1);
   assert.equal(deep[0]!.id, 'deepseek-r1:32b');
+});
+
+
+test('remote-model deployment policy is fail-closed and requires explicit opt-in', () => {
+  assert.equal(allowRemoteModelsFromEnv({} as NodeJS.ProcessEnv), false);
+  assert.equal(
+    allowRemoteModelsFromEnv({ MIGRAPILOT_ALLOW_REMOTE_MODELS: 'false' } as NodeJS.ProcessEnv),
+    false,
+  );
+  assert.equal(
+    allowRemoteModelsFromEnv({ MIGRAPILOT_ALLOW_REMOTE_MODELS: '1' } as NodeJS.ProcessEnv),
+    true,
+  );
+  assert.equal(
+    allowRemoteModelsFromEnv({ MIGRAPILOT_ALLOW_REMOTE_MODELS: 'true' } as NodeJS.ProcessEnv),
+    true,
+  );
+  assert.equal(
+    allowRemoteModelsFromEnv({ MIGRAPILOT_ALLOW_REMOTE_MODELS: 'yes' } as NodeJS.ProcessEnv),
+    true,
+  );
 });

@@ -76,6 +76,89 @@ test('an explicit model overrides tier, and the runner reported follows the MODE
   assert.deepEqual(resolveRunner(localByName.value, OPTS), { model: 'qwen3-coder:30b', runner: 'local', source: 'explicit-model' });
 });
 
+test('HTTP: tier cloud is refused before agent execution when remote models are disabled', async () => {
+  const app = Fastify();
+  registerAnswerRoutes(app, { ...OPTS, allowRemoteModels: false });
+  await app.ready();
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ai/answer',
+      payload: { prompt: 'q', workspaceRoot: '/tmp', tier: 'cloud' },
+    });
+
+    assert.equal(res.statusCode, 403);
+    const body = res.json() as {
+      ok: boolean;
+      code: string;
+      runner: string;
+      model: string;
+    };
+
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'REMOTE_INFERENCE_DISABLED');
+    assert.equal(body.runner, 'cloud');
+    assert.equal(body.model, 'gpt-oss:120b-cloud');
+  } finally {
+    await app.close();
+  }
+});
+
+test('HTTP: explicit cloud model is refused even when tier says local', async () => {
+  const app = Fastify();
+  registerAnswerRoutes(app, { ...OPTS, allowRemoteModels: false });
+  await app.ready();
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ai/answer',
+      payload: {
+        prompt: 'q',
+        workspaceRoot: '/tmp',
+        tier: 'local',
+        model: 'gpt-oss:120b-cloud',
+      },
+    });
+
+    assert.equal(res.statusCode, 403);
+    const body = res.json() as {
+      ok: boolean;
+      code: string;
+      runner: string;
+      model: string;
+    };
+
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'REMOTE_INFERENCE_DISABLED');
+    assert.equal(body.runner, 'cloud');
+    assert.equal(body.model, 'gpt-oss:120b-cloud');
+  } finally {
+    await app.close();
+  }
+});
+
+test('HTTP: local answer requests are not blocked by remote-model policy', async () => {
+  const app = Fastify();
+  registerAnswerRoutes(app, { ...OPTS, allowRemoteModels: false });
+  await app.ready();
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/ai/answer',
+      payload: { prompt: 'q', workspaceRoot: '/tmp', tier: 'local' },
+    });
+
+    const body = res.json() as { code?: string };
+    assert.notEqual(
+      body.code,
+      'REMOTE_INFERENCE_DISABLED',
+      'local execution must not be blocked by the remote-model gate',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
 test('prompt and workspaceRoot keep their existing typed errors', () => {
   const noPrompt = validateAnswerRequest({ workspaceRoot: '/w' });
   assert.ok(!noPrompt.ok && noPrompt.error.code === 'BAD_REQUEST');

@@ -626,7 +626,7 @@ test('the prompt forbids searching for something it is being asked to create', a
   await drain(runEngineerTask(h.deps, { rootPath: '/w', task: 'hi' }));
   const prompt = h.prompts[0]!;
   assert.match(prompt, /DO NOT SEARCH FOR SOMETHING YOU ARE BEING ASKED TO CREATE/);
-  assert.match(prompt, /is never a valid answer/);
+  assert.match(prompt, /is never a valid\s+answer/);
 });
 
 // HISTORICAL REGRESSION (Record #1). This test used to assert the DEFECT: that a

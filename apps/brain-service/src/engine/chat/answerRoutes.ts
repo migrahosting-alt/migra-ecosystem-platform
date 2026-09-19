@@ -68,6 +68,13 @@ export interface AnswerRouteOptions {
   defaultModel: string;
   /** Faster/stronger model for `tier: 'cloud'` (opt-in). */
   cloudModel: string;
+  /**
+   * Deployment authority for remotely hosted inference.
+   *
+   * Default false. A request may select a cloud runner, but it cannot widen
+   * deployment policy. The refusal happens before the agent loop starts.
+   */
+  allowRemoteModels?: boolean;
 }
 
 export interface AnswerValidationError {
@@ -213,6 +220,30 @@ export function registerAnswerRoutes(app: FastifyInstance, opts: AnswerRouteOpti
     }
     const req = parsed.value;
     const resolved = resolveRunner(req, opts);
+
+    /*
+     * REMOTE EXECUTION IS DEPLOYMENT AUTHORITY, NOT REQUEST AUTHORITY.
+     *
+     * `tier: cloud` and an explicit `*-cloud` model both resolve truthfully to a
+     * cloud runner above, but neither is permission to send the prompt off-host.
+     * Refuse before constructing loop options or entering agenticAnswer/
+     * streamAgentic so this path cannot spend money or leak prompt content when
+     * remote models are disabled.
+     */
+    if (resolved.runner === 'cloud' && opts.allowRemoteModels !== true) {
+      reply.code(403);
+      return {
+        ok: false,
+        code: 'REMOTE_INFERENCE_DISABLED',
+        error: 'Remote model execution is disabled by deployment policy.',
+        traceId,
+        tier: req.tier,
+        tierSource: req.tierSource,
+        runner: resolved.runner,
+        model: resolved.model,
+      };
+    }
+
     /*
      * 🚨 ESTABLISHED HERE, AT THE AUTHENTICATED BOUNDARY, and frozen. Nothing
      * downstream may widen it, and the model never sees it — it carries

@@ -22,6 +22,7 @@ export function reviewSourceFiles(cwd = root) {
 
 function excluded(file) {
   return file.endsWith('.tsbuildinfo') ||
+    file.endsWith('.orig') ||
     file.includes('/.vscode-test/') ||
     file.includes('/node_modules/') ||
     file.includes('/dist/') ||

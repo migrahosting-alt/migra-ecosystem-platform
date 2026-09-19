@@ -37,6 +37,20 @@
  */
 
 /** Which of the two questions is being asked. */
+/**
+ * Deployment authority for remotely hosted model execution.
+ *
+ * Fail-closed: remote inference is OFF unless the operator explicitly opts in.
+ * This is deliberately deployment-scoped rather than turn-scoped; a caller may
+ * request cloud, but a request can never widen where prompts are allowed to go.
+ */
+export function allowRemoteModelsFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const v = (env.MIGRAPILOT_ALLOW_REMOTE_MODELS ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 export type EligibilityContext =
   /** A named, user-facing family. A governed approval is required. */
   | 'product-family'
