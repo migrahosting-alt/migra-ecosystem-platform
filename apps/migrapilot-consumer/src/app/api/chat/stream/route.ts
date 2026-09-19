@@ -1148,6 +1148,16 @@ export async function POST(request: Request): Promise<Response> {
        * not name. Every other turn pays nothing.
        */
       const attachments = orderAttachments(turnGrounding.active, reconciled.uploadedAt)
+      /*
+       * The ORDER this turn resolved, in the trace, because "the first document"
+       * answered with the alphabetically-first file once and there was no way to
+       * tell from outside whether the preamble was wrong or the model ignored a
+       * correct one. A reference model that cannot be audited is a guess with
+       * extra steps.
+       */
+      if (attachments.length > 1) {
+        trace.set('attachment_order', attachments.map((a) => a.name).join(' | '))
+      }
       let activeSheet: { file: string; sheet: string } | null = null
       if (!executing && canGround && sheetContent.length > 0 && conversationId) {
         const multi = sheetContent.find((s) => s.sheetNames.length > 1)
