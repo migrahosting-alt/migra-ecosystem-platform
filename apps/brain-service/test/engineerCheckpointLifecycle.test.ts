@@ -1384,3 +1384,54 @@ test(
     );
   },
 );
+
+test(
+  'a completed READ-ONLY run emits no mutation or approval wording on the task frame',
+  async () => {
+    // The unit tests own the wording decision; this owns the WIRING. Observed
+    // live: a read-only TAP inspection finished as `verified` saying "workspace
+    // mutation remains approval-gated", with nothing proposed. That sentence is
+    // what the client renders on its read-only card, so the text the route
+    // actually sends is the thing worth asserting.
+    const calls: string[] = [];
+    const store = new RecordingCheckpointStore();
+
+    const app = buildApp(
+      sequencedAdapter([JSON.stringify({ final: 'Inspected the workspace and reported what is there.' })], calls),
+      store,
+    );
+
+    const rootPath = mkdtempSync(tmpdir() + '/eng-readonly-narrative-');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/ai/engineer',
+      headers: {
+        'x-correlation-id': 'r2-readonly-narrative',
+        'x-owner-scope': 'owner-narrative',
+        'x-workspace-scope': 'workspace-narrative',
+      },
+      payload: { rootPath, task: 'Inspect this workspace read-only and report what is there.' },
+    });
+
+    await app.close();
+
+    assert.equal(response.statusCode, 200);
+
+    const verified = frames(response.body)
+      .filter((frame) => frame.event === 'task')
+      .map((frame) => (frame.data.task as { stage?: string; checkpoint?: string } | undefined))
+      .filter((task) => task?.stage === 'verified');
+
+    assert.ok(verified.length > 0, 'the run must reach a verified task frame');
+
+    for (const task of verified) {
+      assert.doesNotMatch(
+        String(task?.checkpoint ?? ''),
+        /mutation|approval-gated/i,
+        `read-only completion must not mention mutation: ${task?.checkpoint}`,
+      );
+      assert.match(String(task?.checkpoint ?? ''), /read-only inspection/i);
+    }
+  },
+);
