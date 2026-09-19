@@ -1006,3 +1006,48 @@ The staging session expired and `/api/auth/login` now serves the real MigraAuth
 form. Authentication is never worked around, so the live re-verification —
 retry producing a genuinely different answer, and grounded figures still exact
 at the new sampling — waits for a manual sign-in at `http://127.0.0.1:3200`.
+
+---
+
+## 30. The Creole book is readable — as FALLBACK OCR, not corpus
+
+`liv_kreyol_AI-Training.pdf` completed: **`ready_with_unplaced_pages`, 220 of 245
+pages ordered**, no failure. It went from recovering nothing to a usable
+document, without `hat` installed.
+
+The recovered text is genuinely Haitian Creole:
+
+> *CHAPIT 2 / Vokabilè kreyôl / Mo ki soti nan franse … / Mo ki soti nan lang
+> Tayno … Edikasyon sivik / Devlopman kominotè / Ko-edikasyon*
+
+### 🚨 And it is systematically mis-spelled, exactly as measured
+
+The French recogniser renders every Haitian grave `ò` as a French circumflex `ô`:
+
+| recovered | correct |
+| --- | --- |
+| `kreyôl` | **kreyòl** |
+| `enpôtan` | **enpòtan** |
+| `Pôtoprens` | **Pòtoprens** |
+| `fômasyon` | **fòmasyon** |
+| `ddinatè` | **òdinatè** |
+| `JWEËT` | **JWÈT** |
+
+This is the 35-versus-22 diacritic gap this codebase measured, now visible in
+running output rather than in a note.
+
+**So the owner's rule stands on evidence, not caution: this is FALLBACK OCR and
+must not be treated as canonical corpus text.** A Creole *training* book whose
+every `ò` is an `ô` would teach the wrong orthography — the failure would be
+silent, systematic, and baked into whatever was trained on it.
+
+`tesseract-ocr-hat` is what closes the gap. Until then the document is
+legitimately readable and legitimately unsuitable as training material, and
+those two facts are not in tension.
+
+### What this proves about the fix
+
+The fallback did its job precisely as designed: rendering had already been paid
+for, one missing data file no longer throws it away, the substitution is recorded
+rather than silent, and the degradation is exactly the measured kind rather than
+an unknown one.
