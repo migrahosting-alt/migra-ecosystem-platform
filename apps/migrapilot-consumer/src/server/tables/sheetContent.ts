@@ -67,6 +67,8 @@ export interface SheetContentEvidence {
   /** False when the cap cut the workbook short. */
   complete: boolean
   text: string
+  /** The workbook's own sheet names — the candidate set a reference resolves against. */
+  sheetNames: string[]
 }
 
 /** Files whose only reader is the table layer — a workbook, not a CSV. */
@@ -106,6 +108,7 @@ export async function sheetContentEvidenceFor(
       out.push({
         file: fileName,
         complete: rendered.complete,
+        sheetNames: workbook.sheets.map((sheet) => sheet.name).filter((n) => n.trim() !== ''),
         text: composeEvidence({
           fact: [
             `[Read directly from ${fileName} by MigraPilot. These are the stored cell values,`,

@@ -41,6 +41,7 @@ import {
   chatTurnStream,
   createConversation,
   getConversation,
+  listMessages,
   setConversationGrounding,
   setConversationImages,
 } from '@/server/brain/seams'
@@ -70,7 +71,7 @@ import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attach
 import { workbookDisclosureFor } from '@/features/attachments/spreadsheetDisclosure'
 import { tableEvidenceFor } from '@/server/tables/tableEvidence'
 import { sheetContentEvidenceFor } from '@/server/tables/sheetContent'
-import { attachmentOrderEvidence } from '@/server/files/attachmentOrder'
+import { orderAttachments, resolveActiveSheet, referenceEvidence } from '@/server/files/turnReference'
 import { projectEvidenceFor } from '@/server/projects/projectEvidence'
 import { assessDocumentIntent } from '@/server/files/documentIntent'
 import { planRegeneration, wantsRegeneration } from '@/server/files/regenerate'
@@ -1109,10 +1110,6 @@ export async function POST(request: Request): Promise<Response> {
        */
       const executing = regeneration?.kind === 'execute' ? regeneration : null
 
-      const tableEvidence = executing || !canGround || turnGrounding.active.length === 0
-        ? null
-        : await tableEvidenceFor(prompt, turnGrounding.active, await userDirectory()).catch(() => null)
-
       /*
        * 🚨 AN ATTACHED WORKBOOK IS SHOWN TO THE MODEL, NOT KEPT BEHIND A VERB.
        *
@@ -1131,11 +1128,52 @@ export async function POST(request: Request): Promise<Response> {
         : await sheetContentEvidenceFor(
             turnGrounding.active,
             await userDirectory(),
-            tableEvidence?.file ?? null,
+            null,
           ).catch(() => [])
       if (sheetContent.length > 0) {
         trace.set('sheet_content', sheetContent.map((s) => s.file).join(','))
       }
+
+      /*
+       * WHAT THIS TURN CAN BE TALKING ABOUT — built before the evidence it steers.
+       *
+       * 🚨 THE DEFECT. "Use the Q1 Sales sheet. What is the total revenue?"
+       * answered correctly and the next question, "on that same sheet, which
+       * region had the highest revenue?", came back "the question doesn't specify
+       * which sheet to look at". The sheet had been named one turn earlier and
+       * nothing carried it, so a conversation could never say "that sheet".
+       *
+       * The recent turns are fetched ONLY when there is something to resolve — a
+       * workbook with more than one sheet, in play, whose sheet this question did
+       * not name. Every other turn pays nothing.
+       */
+      const attachments = orderAttachments(turnGrounding.active, reconciled.uploadedAt)
+      let activeSheet: { file: string; sheet: string } | null = null
+      if (!executing && canGround && sheetContent.length > 0 && conversationId) {
+        const multi = sheetContent.find((s) => s.sheetNames.length > 1)
+        if (multi && !multi.sheetNames.some((n) => prompt.toLowerCase().includes(n.toLowerCase()))) {
+          const history = await listMessages(conversationId, { principal }).catch(() => null)
+          const turns =
+            history?.kind === 'ok'
+              ? [...((history.value as { messages?: { content?: string }[] })?.messages ?? [])]
+                  .reverse()
+                  .slice(0, 8)
+                  .map((m) => String(m?.content ?? ''))
+              : []
+          activeSheet = resolveActiveSheet(multi.file, multi.sheetNames, turns)
+          if (activeSheet) trace.set('active_sheet', `${activeSheet.file}:${activeSheet.sheet}`)
+        }
+      }
+
+      const tableEvidence = executing || !canGround || turnGrounding.active.length === 0
+        ? null
+        : await tableEvidenceFor(
+            prompt,
+            turnGrounding.active,
+            await userDirectory(),
+            activeSheet?.sheet,
+          ).catch(() => null)
+
 
       /*
        * 🚨 ATTACHED, BUT NOT SEARCHABLE — a different fact from "not attached",
@@ -1323,13 +1361,16 @@ export async function POST(request: Request): Promise<Response> {
        */
       const orderEvidence = executing
         ? null
-        : attachmentOrderEvidence(turnGrounding.active, reconciled.uploadedAt)
+        : referenceEvidence({ attachments, activeSheet, basis: [] })
 
       const prefix = [
         orderEvidence,
         projectEvidence?.text,
         tableEvidence?.text,
-        ...sheetContent.map((s) => s.text),
+        // The file the computed path spoke for is excluded here, so a turn never
+        // carries MigraPilot's arithmetic and the raw cells behind it as two
+        // separate claims about the same numbers.
+        ...sheetContent.filter((s) => s.file !== tableEvidence?.file).map((s) => s.text),
       ]
         .filter(Boolean)
         .join('\n')
@@ -1801,7 +1842,7 @@ export async function POST(request: Request): Promise<Response> {
        * whose cells were shown must appear alongside the PDF whose pages were
        * retrieved, or the citation quietly credits one file for both.
        */
-      const shown = sheetContent.map((s) => s.file)
+      const shown = sheetContent.filter((s) => s.file !== tableEvidence?.file).map((s) => s.file)
       const attributable =
         completed
           ? [...new Set([...groundedFiles, ...(tableEvidence ? [tableEvidence.file] : []), ...shown])]

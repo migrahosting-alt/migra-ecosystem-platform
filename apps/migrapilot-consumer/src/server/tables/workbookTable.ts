@@ -119,7 +119,25 @@ export type SheetChoice =
   | { kind: 'ambiguous'; names: string[] }
   | { kind: 'none' }
 
-export function chooseSheet(prompt: string, sheets: readonly WorkbookSheet[]): SheetChoice {
+export function chooseSheet(
+  prompt: string,
+  sheets: readonly WorkbookSheet[],
+  /**
+   * The sheet this conversation is already working in, if any.
+   *
+   * 🚨 THE DEFECT THIS CLOSES. "Use the Q1 Sales sheet. What is the total
+   * revenue?" answered correctly, and the very next question — "on that same
+   * sheet, which region had the highest revenue?" — came back "the question
+   * doesn't specify which sheet to look at". The sheet had been named one turn
+   * earlier and nothing carried it forward, so a conversation could never say
+   * "that sheet" the way every person does.
+   *
+   * Resolved by `resolveActiveSheet` from the workbook's OWN sheet names against
+   * recent turns, never from phrasings like "that sheet" — what makes a sheet
+   * active is having been NAMED.
+   */
+  activeSheet?: string,
+): SheetChoice {
   if (sheets.length === 0) return { kind: 'none' }
   const p = prompt.toLowerCase()
 
@@ -130,5 +148,16 @@ export function chooseSheet(prompt: string, sheets: readonly WorkbookSheet[]): S
   if (named.length > 1) return { kind: 'ambiguous', names: named.map((s) => s.name) }
 
   if (sheets.length === 1) return { kind: 'sheet', sheet: sheets[0]! }
+
+  /*
+   * This question named no sheet, and the conversation has one in play. THE
+   * PROMPT STILL WINS WHEREVER IT SPOKE — this is reached only when it did not.
+   * A sheet that is no longer in the workbook is ignored rather than trusted.
+   */
+  if (activeSheet) {
+    const carried = sheets.find((s) => s.name === activeSheet)
+    if (carried) return { kind: 'sheet', sheet: carried }
+  }
+
   return { kind: 'ambiguous', names: sheets.map((s) => s.name) }
 }

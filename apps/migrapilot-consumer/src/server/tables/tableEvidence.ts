@@ -344,6 +344,7 @@ async function loadTable(
   prompt: string,
   fileName: string,
   uploadRoot: string,
+  activeSheet: string | undefined,
   // 'list' is accepted but only compared against 'describe' below: an
   // ambiguous workbook cannot be enumerated either, so it takes the same
   // "which sheet did you mean" refusal rather than picking one.
@@ -378,7 +379,7 @@ async function loadTable(
     return { kind: 'none' }
   }
 
-  const choice = chooseSheet(prompt, workbook.sheets)
+  const choice = chooseSheet(prompt, workbook.sheets, activeSheet)
   if (choice.kind === 'none') return { kind: 'none' }
   /*
    * 🚨 AMBIGUITY MATTERS FOR A TOTAL, NOT FOR A SUMMARY.
@@ -609,6 +610,11 @@ export async function tableEvidenceFor(
   prompt: string,
   activeFiles: readonly string[],
   uploadRoot: string,
+  /**
+   * The sheet this conversation is already working in, from the turn reference
+   * model. Used ONLY when the question names no sheet of its own.
+   */
+  activeSheet?: string,
 ): Promise<TableEvidence | null> {
   const tables = activeFiles.filter((f) => TABLE_EXTENSIONS.test(f))
   // Exactly one, deliberately: "the total" across two files is a different
@@ -619,7 +625,7 @@ export async function tableEvidenceFor(
   if (!operation) return null
 
   const fileName = tables[0]!
-  const loaded = await loadTable(prompt, fileName, uploadRoot, operation)
+  const loaded = await loadTable(prompt, fileName, uploadRoot, activeSheet, operation)
   if (loaded.kind === 'none') return null
   if (loaded.kind === 'refused') {
     /*

@@ -232,7 +232,10 @@ test('computed evidence reaches the model, and only the model', async () => {
   const { join } = await import('node:path')
   const route = readFileSync(join(process.cwd(), 'src/app/api/chat/stream/route.ts'), 'utf8')
 
-  assert.match(route, /await tableEvidenceFor\(prompt, turnGrounding\.active/,
+  // Whitespace-tolerant: the invariant is WHICH files are computed over, not how
+  // the call happens to be wrapped. Pinning the formatting failed a correct
+  // refactor once already.
+  assert.match(route, /tableEvidenceFor\(\s*prompt,\s*turnGrounding\.active/,
     'computed over the ACTIVE grounding, not the whole thread')
   assert.match(route, /chatTurnStream\(\s*\n?\s*modelPrompt/,
     'the model receives the prompt carrying computed evidence')
