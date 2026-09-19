@@ -3542,10 +3542,10 @@
   "chipHonesty": "'Ready for table analysis — sheets, columns, labels and numeric values. Document-style text search inside spreadsheets is not available yet.'"
  },
  "scannedPdfOcr_STILL_OPEN": {
-  "status": "PARTIALLY UNBLOCKED — stack installed, one language pack missing",
+  "status": "RUNTIME GAP CLOSED, QUALITY GAP OPEN — the stack now reads a real scanned book end to end, and reads it with the wrong orthography.",
   "why": "the §12 fix stops a READABLE pdf being blamed on a renderer it never needed. A PDF that genuinely needs rasterising and OCR is unaffected.",
   "stagingState": "pdftoppm, pdfinfo, tesseract all ABSENT; pdf_page_rendering and pdf_ocr both report unavailable",
-  "required": "deploy poppler + an OCR runtime, then test as its own acceptance slice",
+  "required": "tesseract-ocr-hat on the OCR host — a host change, and therefore the owner's call. It is what closes the quality gap before the book becomes trusted training material.",
   "measured_2026_09_15": {
    "file": "liv_kreyol_AI-Training.pdf, 37,172,099 bytes",
    "producer": "EPSON Scan",
@@ -3561,7 +3561,16 @@
   "twoPartsToTheSlice": [
    "install tesseract-ocr-hat (host change, owner)",
    "degrade gracefully when a requested language pack is absent rather than failing the whole job (code)"
-  ]
+  ],
+  "stagingState_measured_2026_09_19": "pdftoppm, pdfinfo, pdftotext and tesseract ALL PRESENT on migrapilot-staging-core. `tesseract --list-langs` = eng fra osd. `hat` is still NOT installed, so the fallback is what ran.",
+  "liveOutcome_2026_09_19": {
+   "file": "liv_kreyol_AI-Training.pdf — 245 pages, no text layer, the same EPSON scan measured on 09-15",
+   "finalState": "ready_with_unplaced_pages — 220 pages ordered, 20 unplaced, failureReason none",
+   "sidecar": "276,590 bytes of genuine Haitian Creole: 'CHAPIT 2 / Vokabilè kreyôl / Mo ki soti nan franse', a CV section, civic-education and community-development headings",
+   "movement": "from recovering NOTHING to a usable document, with no `hat` pack installed — the graceful-degradation half of twoPartsToTheSlice is done and proven on the real file"
+  },
+  "🚨 qualityGap_measured": "The fra recogniser renders every Haitian grave `ò` as a French circumflex `ô`. Observed: kreyôl for kreyòl, enpôtan for enpòtan, Pôtoprens for Pòtoprens, fômasyon for fòmasyon, ddinatè for òdinatè, JWEËT for JWÈT. This is the 35-vs-22 diacritic gap this codebase already measured, now visible in running output rather than in a note.",
+  "classification": "FALLBACK OCR — NOT canonical corpus text. The owner's rule, and it is now evidence-backed rather than cautionary: training a Creole model on text whose every ò is an ô would teach wrong orthography silently and systematically. The book is legitimately readable AND legitimately unsuitable as training material; those two facts are not in tension."
  },
  "backlogOrder_2026_09_14": [
   "contextual/deictic references",
