@@ -828,3 +828,110 @@ file are deliberately different.
 Every deploy in this slice passed the free-space gate (payload 0.5 GB × 3 = 1.4
 GB required) and pruned itself to three releases afterwards. Disk has stayed at
 41% with 12 GB free across five deploys.
+
+---
+
+## 25. Haitian Creole — measured, and it is the MODEL
+
+Asked in Creole in the real product:
+
+> *"Eksplike m an kreyòl ayisyen kisa yon kontra livrezon ye…"*
+
+it answered with fluent-looking nonsense — `lakouchè` (childbirth) for a delivery
+term, `li **no** fè` (English negation; Creole negates with **pa**), invented
+vocabulary, and a definition that means nothing. **Confident nonsense in a user's
+own language is worse than a refusal**, and it is the same class of failure as
+the fabricated £54,212.
+
+### Measured across installed models
+
+Probes with verifiable answers — negation must be `pa`, figures must survive,
+a comprehension question with one right answer — plus an open generation case,
+which is what actually failed in the product.
+
+| model | short translation | open generation |
+| --- | --- | --- |
+| `llama3.1:8b` **(what the product runs)** | passes | **degenerate loop**, meaningless |
+| `qwen3:8b` | passes | **degenerate loop** |
+| `qwen3:14b` | passes, cleanly — *"Kliyan an genyen 30 jou pou l peye."* | **best available, still unreliable** |
+
+`qwen3:14b` produced one genuinely good explanation — *"Yon kontra livrezon se
+yon akò kote… Li defini kondisyon, kantite, pwen livrezon ak pye"* — with two
+wrong words (`twonp`→founisè, `pye`→pri). But two further probes were wrong: it
+answered a customer-service question **in the first person** (*"**Mwen** ap genyen
+45 jou"* — "**I** have 45 days") and misread an instruction entirely.
+
+**So: no installed model does Creole the way it does English.** A model swap
+alone will not deliver parity, though `llama3.1:8b` is clearly the worst of the
+three and is what users get today.
+
+### 🚨 Three harness faults, all found by disagreeing with reality
+
+1. `num_predict: 160` truncated qwen3's reasoning block, so stripping it removed
+   the **whole** output — a capable model scored 0/3 for a harness bug.
+2. qwen3 returns an empty `response` with the answer in a separate `thinking`
+   field. `done_reason: length`, `eval_count: 700`, **zero characters**. With
+   reasoning disabled it answers *"M pa gen dokimèn la."* — correct Creole.
+3. **Temperature 0 caused the repetition loops.** At 0.7 `qwen3:14b` stopped
+   looping entirely. A conclusion drawn at temperature 0 would have condemned
+   every model for a setting I chose.
+
+The harness was wrong three times before the models were judged once.
+
+### The corpus is already here, and OCR is what unlocks it
+
+`liv_kreyol_AI-Training.pdf` — 245 pages, EPSON Scan, image-only — is Haitian
+Creole training material the owner already holds. It is blocked on OCR, not on
+anything conceptual.
+
+§26 makes it readable today with `fra`; `tesseract-ocr-hat` makes it *good*.
+
+### Honest scope
+
+Reading, rendering and routing Creole is Chat's. **Making a model speak Creole is
+training, and that is MigraAI Engineer's** — the boundary the owner set. What
+this section provides is the evidence that decision needs, measured rather than
+assumed.
+
+---
+
+## 26. OCR reads with the language the host has
+
+`hat` was requested unconditionally, so on a host carrying only `eng`/`fra`/`osd`
+the job died on one missing data file — **after rendering all 245 pages**, which
+is the expensive half.
+
+The language is now chosen from what is installed, preferring what was asked
+for, in a **measured** order: this codebase measured `hat` preserving more
+Haitian diacritics than `fra` (35 v 22, 14 v 10), making `fra` a real second best
+and `eng` the last resort. A substitution is **reported, never silent** — a
+reader told the text is Creole deserves to know a French recogniser read it.
+
+🚨 The tests inject the language set. The first version asked the *host*, so on a
+machine without tesseract every case hit an early return and asserted nothing —
+four green tests covering nothing.
+
+**Committed, not deployed** — see §27.
+
+---
+
+## 27. 🚨 BLOCKER: `HEAD` does not build
+
+Commit `5f61fb75` ("brain: persist restart-safe engineer continuation")
+committed `src/server.ts` referencing `allowRemoteModelsFromEnv` and
+`allowRemoteModels`, while the files that **define** them —
+`engine/models/eligibilityPolicy.ts` and `engine/chat/answerRoutes.ts` — were
+left uncommitted.
+
+```
+HEAD tsc rc=1
+  src/server.ts(1,10):   Module 'eligibilityPolicy.js' has no exported member 'allowRemoteModelsFromEnv'
+  src/server.ts(466,5):  'allowRemoteModels' does not exist in type 'AnswerRouteOptions'
+```
+
+A clean clone does not compile, and **every Brain deploy is blocked** — the
+deploy gate builds from the committed tree, which is the gate working correctly.
+The OCR fix in §26 is waiting on this.
+
+Not mine to fix: the remedy is the Engineer lane committing its working copy.
+Committing it on their behalf would bundle unfinished work into a release.
