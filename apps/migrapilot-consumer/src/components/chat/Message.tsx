@@ -503,8 +503,19 @@ function AssistantTurn({
             * An answer the reader ended themselves.
             *
             * Neutral, not amber: nothing failed, so a warning colour would read
-            * as an error the user caused. What it does say is the one fact that
-            * is not obvious — the text on screen is all there is of it.
+            * as an error the user caused.
+            *
+            * 🚨 THIS SENTENCE WENT STALE THE MOMENT STOPPED ANSWERS PERSISTED.
+            * It used to read "it was not saved — it will not be here after you
+            * reload", which was true while the text lived only in client state.
+            * Once the stopped turn was persisted with `status: 'stopped'`, the
+            * product was telling the user the opposite of what it had just
+            * done — and the user could disprove it by pressing reload. A
+            * capability sentence has to be re-read every time the capability
+            * changes; this is the second time that rule has been paid for here.
+            *
+            * What it says now is the fact that IS still true and not obvious:
+            * the answer is incomplete, and it was kept anyway.
             */}
           {message.stopped && (
             <div
@@ -514,7 +525,7 @@ function AssistantTurn({
               <span aria-hidden="true">■</span>
               <span>
                 <strong className="font-semibold text-slate-700">You stopped this answer.</strong>{' '}
-                It was not finished, so it was not saved — it will not be here after you reload.
+                It is incomplete, and it has been kept in this conversation.
               </span>
             </div>
           )}

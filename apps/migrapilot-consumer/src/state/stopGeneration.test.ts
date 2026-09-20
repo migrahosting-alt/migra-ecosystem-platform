@@ -312,11 +312,25 @@ test('Stop is armed for the whole turn; the indicator is armed for less', () => 
   )
 })
 
-test('a stopped answer is labelled as kept-but-not-saved', () => {
+test('a stopped answer is labelled as kept, because it now IS kept', () => {
+  /*
+   * 🚨 THIS ASSERTION WAS INVERTED, AND THE RULE BEHIND IT DID NOT CHANGE.
+   *
+   * It used to require the words "not saved", for the right reason at the time:
+   * the label must not imply a persistence that did not happen. Stopped answers
+   * then lived only in client state.
+   *
+   * They are now persisted with `status: 'stopped'`, so the SAME rule demands
+   * the opposite words — the label must not deny a persistence that did happen.
+   * Leaving this test green would have meant a test actively holding a false
+   * sentence in place, which is worse than no test. The wording contract lives
+   * in `components/chat/stoppedNotice.test.ts`.
+   */
   assert.match(message, /message\.stopped && \(/, 'the marker renders')
-  const marker = message.slice(message.indexOf('message.stopped && ('))
-  assert.match(marker.slice(0, 900), /You stopped this answer/)
-  assert.match(marker.slice(0, 900), /not saved/, 'it must not imply a persistence that did not happen')
+  const marker = message.slice(message.indexOf('message.stopped && (')).slice(0, 900)
+  assert.match(marker, /You stopped this answer/)
+  assert.ok(!/not saved/.test(marker), 'the label denies a persistence that now happens')
+  assert.match(marker, /kept/i, 'it must say the answer was kept')
 })
 
 test('the stopped marker is not the storage-failure marker', () => {
