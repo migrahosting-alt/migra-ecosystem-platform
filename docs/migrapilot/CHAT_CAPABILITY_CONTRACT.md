@@ -1121,3 +1121,56 @@ No `Bondja -> Bonswa` mapping, no spelling heuristic, no Chat UI change. A patch
 that would make one screenshot pass while leaving Creole broken, and would put
 product-owned language behaviour in the wrong layer. Routed to Engineer as
 model/language qualification.
+
+### 31b. The correction failure is a PRODUCT defect, not the model
+
+Owner, on the turn-2 answer: *"this is bad creole and translating it doesn't make
+sense at all."* Both halves are right, and they are two different defects.
+
+**Correction to §31:** I wrote there that "nothing instructs the model to answer in
+the language it was addressed in." That is FALSE. `openAiCompatProvider.ts` carries a
+LANGUAGE directive ("reply in the SAME language the user wrote in … Never switch
+languages on your own") plus a conditional `CREOLE_DISAMBIGUATION` hint, injected
+only when the prompt contains one of `CREOLE_GREETINGS` — which includes `bonjou`
+and `bonswa`.
+
+#### 🚨 DEFECT 1 — a Creole token inside an English sentence flips the whole reply
+
+The detector is `new RegExp('\\b' + greeting + '\\b', 'i').test(request.userPrompt)`.
+It asks whether the greeting APPEARS IN the message, not whether it IS the message.
+The owner's correction — "it suppose to be Bonswa" — is an English sentence that
+happens to contain a Creole word, so the hint fires.
+
+Measured on staging, with a control that separates cleanly:
+
+| probe | result |
+| --- | --- |
+| `it suppose to be Bonswa` | **3/3 answered in Creole**, treating it as a greeting to answer |
+| `it suppose to be good evening` (control) | **3/3 answered in English**, read as conversational |
+
+So the correction was never ignored. It was STEERED: the model answered the word
+`Bonswa` as a greeting instead of obeying the sentence about it. This fully explains
+the owner's loop — every correction naming the right word re-triggered the same flip.
+
+The code's own comment records that the UNCONDITIONAL hint "flipped English answers
+into malformed Creole on 5 of 12 identical runs". Gating it was the fix. **The gate
+reproduces the same failure in a narrower form**, because appearing-in is not is.
+
+Shape of a correct fix (NOT implemented — owner routed this lane to Engineer): the
+greeting must BE the message, not merely occur inside it. A sentence with English
+syntax around a Creole token is English. No spelling map, and no new heuristic.
+
+#### DEFECT 2 — Creole generation quality, model layer
+
+Independent of defect 1 and unchanged: `bonjou` drifts to French 2 of 4 runs, and
+the turn-2 output was ungrammatical — `Pou sa fe yon tout bagay yon konfizyon` has
+two stray `yon`, `Si wè` is not meaningful, `Bondyè` is misspelled, and `Mèsi` is a
+non-sequitur to a correction.
+
+#### DEFECT 3 — the unasked-for translation MASKS defect 2
+
+Nothing in the prompt path asks for a translation; the model volunteers it. It
+rendered `Mèsi` ("thanks") as "No worries" and silently dropped the ungrammatical
+middle clause entirely. A reviewer who does not read Creole sees fluent English and
+concludes the turn worked. **That makes bad Creole invisible to exactly the people
+most likely to sign it off** — a truthfulness problem, not a style one.
