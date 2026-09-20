@@ -1742,3 +1742,19 @@ while deleting a CONVERSATION is described as "delete it for good". Recorded as 
 UX risk for the owner rather than changed inside a context slice.
 
 Consumer 1329/1329, tsc 0. Awaiting the batched staging deploy.
+
+### 38a. PRODUCT UX GAP: file deletion has no confirmation
+
+Recorded at the owner's instruction, not changed inside a context slice.
+
+Deleting a file from the Files page is **one click, irreversible, and unconfirmed**,
+while deleting a CONVERSATION is framed as "delete it for good". The asymmetry is
+backwards: the file deletion is the one that also breaks future grounding for every
+conversation that used it, as §38 demonstrates.
+
+The distinction that matters, and which §38 now enforces:
+
+> The historical transcript may truthfully show that a file USED to exist. The
+> current turn must truthfully acknowledge that the file is no longer available for
+> grounding — and must never answer from a different document merely because
+> something else is still attached.
