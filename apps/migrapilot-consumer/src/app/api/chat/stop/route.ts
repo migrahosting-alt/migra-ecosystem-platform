@@ -11,7 +11,7 @@
  * on a turn that was already aborted with text.
  */
 
-import { resolveRequestPrincipal } from '@/server/tenancy/principal'
+import { resolveRequestPrincipal } from '@/server/tenancy/requestPrincipal'
 import { declareStop } from '@/server/chat/stopIntent'
 
 export async function POST(request: Request): Promise<Response> {
