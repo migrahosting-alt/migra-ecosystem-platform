@@ -1051,3 +1051,73 @@ The fallback did its job precisely as designed: rendering had already been paid
 for, one missing data file no longer throws it away, the substitution is recorded
 rather than silent, and the degradation is exactly the measured kind rather than
 an unknown one.
+
+---
+
+## 31. USER-OBSERVED: Haitian Creole answer quality (owner test, 2026-09-19)
+
+The owner typed ordinary Creole in the real composer and corrected the assistant
+repeatedly. Reproduced live on the candidate build `docpos-0918` / `ecc2107d`:
+
+| turn | input | output |
+| --- | --- | --- |
+| 1 | `bonjou` *(good morning)* | **"Bonswa!** Kom ye nan tout bonè." — *good evening*, plus non-Creole filler |
+| 2 | `it suppose to be Bonswa` | "Mèsi, Mèsi! Pou sa fe yon tout bagay yon konfizyon. Si wè, **Bondyè** proteje nou." |
+
+Both answers also carried English "translations" that did not match their own text.
+This reproduces the owner's `Bondja` / `Bondje` observation.
+
+### What was ELIMINATED before blaming the model
+
+The rule from the document slices applies: prove the input arrived before judging
+the answer.
+
+- **Text transform — NONE.** Every `toLowerCase`/normalize call in the chat path
+  builds a local for classification. The outbound text is `opts.prompt` and
+  `request.userPrompt`, passed through unmodified.
+- **Context — WORKS.** Proven live in the same build, same session: "my favourite
+  number is 47" → recalled; "actually it is 51, not 47" → **answered 51**.
+  Correction-following in English is intact.
+
+### 🚨 My first root-cause claim was WRONG, and the live test caught it
+
+I concluded from code plus a Brain-level experiment that conversation history never
+reached the model, because the consumer sends `memoryPolicy.store:false` and the
+browser sends no `conversationSummary`. My experiment reproduced that flag but never
+performed the message writes the consumer does by a different path, so it measured
+an empty store and I read the emptiness as the product's behaviour. The real
+composer answered "47" correctly and disproved it. **A faithful-looking harness that
+omits one step of the real system produces a confident false root cause.**
+
+### The measured defect
+
+Four samples of `bonjou`, same model, same settings:
+
+| # | output | verdict |
+| --- | --- | --- |
+| 1 | `Bonjou! Kijan ou ye?` | correct |
+| 2 | `Bonjou! Comment ca va? Quoi de neuf?` | drifts to French |
+| 3 | `Bonjour ! Comment ça va ?` | entirely French |
+| 4 | `Bonjou! Kijan ou ye?` | correct |
+
+**2 of 4 drift into French.** The served model is `llama3.1:8b` (tier `balanced`,
+`selected llama3.1:8b [tier=balanced (wanted balanced)]`); alternatives present are
+`qwen3:8b`, `qwen2.5-coder:14b`, `qwen3:14b`.
+
+So Creole is **unreliable, not uniformly broken**, and it fails toward French — the
+same nearest-high-resource-neighbour failure as the `fra` OCR fallback in §30.
+
+### Classification
+
+- Chat transport/context — **PASS** (live)
+- Instruction/correction following — **PASS** in English (live)
+- Haitian Creole lexical/orthographic quality — **FAIL**, measured
+- Root cause — **model language quality + no language pinning**. Nothing in the turn
+  instructs the model to answer in the language it was addressed in.
+
+### Explicitly NOT done
+
+No `Bondja -> Bonswa` mapping, no spelling heuristic, no Chat UI change. A patch like
+that would make one screenshot pass while leaving Creole broken, and would put
+product-owned language behaviour in the wrong layer. Routed to Engineer as
+model/language qualification.
