@@ -197,7 +197,17 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
         return { ok: false, code: 'UNKNOWN_CONVERSATION', error: 'Conversation not found.' };
       }
       const clean = redactSecrets(content).text;
-      const status = request.body?.status === 'partial' || request.body?.status === 'failed' ? request.body.status : 'complete';
+      /*
+       * `stopped` is accepted as a first-class status, distinct from `failed`:
+       * the consumer must be able to record that a user CHOSE to end an answer,
+       * which is not the same fact as a stream that died. Anything unrecognised
+       * still falls back to `complete` rather than being invented.
+       */
+      const ACCEPTED_STATUSES = ['partial', 'failed', 'stopped'] as const;
+      const claimed = request.body?.status;
+      const status = (ACCEPTED_STATUSES as readonly string[]).includes(String(claimed))
+        ? (claimed as 'partial' | 'failed' | 'stopped')
+        : 'complete';
       try {
         /*
          * THE IMAGES THIS TURN CARRIED, recorded on the message itself.

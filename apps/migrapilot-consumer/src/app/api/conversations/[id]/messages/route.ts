@@ -146,6 +146,17 @@ export async function GET(
         ...(fileRefs(message).filter((f) => !library.has(f)).length
           ? { missingFileRefs: fileRefs(message).filter((f) => !library.has(f)) }
           : {}),
+        /*
+         * WHETHER THE USER STOPPED THIS ANSWER.
+         *
+         * The warning above applies here too — this allowlist drops anything it
+         * does not name, so without this line a stopped answer would come back
+         * with its text intact and its status gone, and render as a finished
+         * reply that simply stops mid-sentence. Only `stopped` is relayed: the
+         * absence of a status IS "finished", and restating that would put a
+         * second definition of the normal case on the wire.
+         */
+        ...((message as { status?: unknown }).status === 'stopped' ? { status: 'stopped' } : {}),
       })),
   })
 }

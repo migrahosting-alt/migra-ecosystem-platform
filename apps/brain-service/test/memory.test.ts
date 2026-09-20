@@ -259,3 +259,51 @@ test('completed stream commits assistant once; cancelled stream commits nothing'
   assert.equal(store.getMessages(cid2, A).filter((m) => m.role === 'user').length, 1, 'user message present, not corrupted');
   await app.close();
 });
+
+// ── a stopped answer is part of the conversation, and says so ───────────────
+
+test('a STOPPED answer reaches context, carrying its limitation', async () => {
+  /*
+   * Two failures are possible here and each is worse than the other in a
+   * different way.
+   *
+   * Excluding it — which is what filtering to `complete` alone did — makes text
+   * still on the user's screen invisible to the next turn, so "carry on from
+   * where you stopped" is unanswerable about the very thing they are looking at.
+   *
+   * Including it unmarked is the worse one: the model reads a truncated answer
+   * as a finished one and builds on a conclusion that was never reached. So the
+   * assertion is not "it is present" — it is "it is present AND it is marked".
+   */
+  const s = new ConversationStore();
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'explain containerisation', status: 'complete' });
+  await s.appendMessage(c.id, A, { role: 'assistant', content: 'Malcom McLean began', status: 'stopped' });
+
+  const built = buildContext({ store: s, scope: A, conversationId: c.id, currentPrompt: 'carry on', retrieve: true });
+  const transcript = built.messages.map((m) => m.content).join('\n');
+
+  assert.ok(transcript.includes('Malcom McLean began'), 'the stopped text never reached the model');
+  assert.ok(
+    transcript.includes('stopped by the user before it finished'),
+    'the stopped text reached the model dressed as a finished answer',
+  );
+});
+
+test('FAILED and PARTIAL messages still stay out of context', async () => {
+  /*
+   * The counterpart. A stopped answer is text the reader chose to keep; a failed
+   * one is a fault whose half-answer nobody asked for. Widening the filter to
+   * admit `stopped` must not quietly admit these too.
+   */
+  const s = new ConversationStore();
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, { role: 'assistant', content: 'DROPPED-MID-STREAM', status: 'failed' });
+  await s.appendMessage(c.id, A, { role: 'assistant', content: 'HALF-WRITTEN', status: 'partial' });
+
+  const built = buildContext({ store: s, scope: A, conversationId: c.id, currentPrompt: 'hello', retrieve: true });
+  const transcript = built.messages.map((m) => m.content).join('\n');
+
+  assert.ok(!transcript.includes('DROPPED-MID-STREAM'), 'a failed turn reached the model');
+  assert.ok(!transcript.includes('HALF-WRITTEN'), 'a partial turn reached the model');
+});

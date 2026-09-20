@@ -115,8 +115,23 @@ export function buildContext(opts: BuildContextOptions): BuiltContext {
       if (push({ role: 'system', content: summaryText })) diagnostics.summaryUsed = true;
     }
 
-    // Bounded recent COMPLETE messages, newest-first for budgeting then re-ordered.
-    const recent = opts.store.getMessages(opts.conversationId, opts.scope, { status: 'complete', limit: 20 });
+    /*
+     * Bounded recent messages, newest-first for budgeting then re-ordered.
+     *
+     * 🚨 STOPPED ANSWERS ARE INCLUDED, AND MARKED. They used to be excluded with
+     * everything that was not `complete`, which meant text still on the user's
+     * screen was invisible to the next turn — so "carry on from where you
+     * stopped" was unanswerable about the very thing they were looking at.
+     *
+     * Including them unmarked would be the opposite error and a worse one: the
+     * model would read a truncated answer as a finished one and build on a
+     * conclusion that was never reached. So they travel WITH their limitation
+     * attached, below.
+     */
+    const recent = opts.store.getMessages(opts.conversationId, opts.scope, {
+      status: ['complete', 'stopped'],
+      limit: 20,
+    });
     const selected: BuiltContextMessage[] = [];
     for (let i = recent.length - 1; i >= 0; i -= 1) {
       const m = recent[i];
@@ -127,7 +142,14 @@ export function buildContext(opts: BuildContextOptions): BuiltContext {
         continue;
       }
       diagnostics.estimatedTokens += cost;
-      selected.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content });
+      selected.push({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        // The mark is what makes including it safe. Stated in the transcript
+        // itself rather than out of band, because the model only ever sees this.
+        content: m.status === 'stopped'
+          ? `${m.content}\n\n[This answer was stopped by the user before it finished.]`
+          : m.content,
+      });
     }
     selected.reverse();
     for (const m of selected) messages.push(m);

@@ -1971,7 +1971,44 @@ export async function POST(request: Request): Promise<Response> {
         emit('token', { text: disclosure })
       }
 
+      /*
+       * 🚨 A STOPPED ANSWER IS KEPT. A FAILED ONE IS NOT.
+       *
+       * Both arrive here with `completed` false, and treating them alike is what
+       * made text the user deliberately kept vanish on reload — it lived in
+       * client state and nowhere else, so the transcript was less truthful than
+       * the screen had been.
+       *
+       * The discriminator is the REQUEST, not the shape of the answer: a user
+       * stop drops the connection, so `request.signal.aborted` is true, while a
+       * stream that died on its own leaves it false. Nothing infers intent from
+       * how short or how complete the text happens to look — that would label a
+       * dropped connection as a decision the person never made, which is the
+       * specific dishonesty this distinction exists to prevent.
+       */
+      const stoppedByUser = !completed && request.signal.aborted && answer.trim().length > 0
+
       const producedOutput = completed && (answer.trim().length > 0 || generatedImages.length > 0)
+
+      if (stoppedByUser) {
+        /*
+         * Persisted with the SAME sources and refs a completed turn records, so
+         * a stopped answer is a first-class part of the transcript rather than a
+         * degraded copy of one. `status: 'stopped'` is what keeps it visibly
+         * distinct — and what stops the next turn reading it as a finished
+         * conclusion, because the Brain attaches its limitation before the model
+         * ever sees it.
+         *
+         * Guarded on non-empty text above: an abort before any token would
+         * otherwise write an EMPTY assistant turn, which is a message that says
+         * nothing claiming to be an answer.
+         */
+        const storedStopped = await appendMessage(
+          durableId, 'assistant', answer, { principal }, generatedImages, sources, 'stopped',
+        )
+        if (storedStopped.kind === 'ok') trace.mark('stopped_answer_stored')
+        await settle(true)
+      }
 
       if (producedOutput) {
         // The refs persist ON THE MESSAGE, so reopening the conversation shows

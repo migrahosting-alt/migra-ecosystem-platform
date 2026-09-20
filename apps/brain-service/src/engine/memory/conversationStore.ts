@@ -58,7 +58,17 @@ export interface Conversation {
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system';
-export type MessageStatus = 'complete' | 'partial' | 'failed';
+/**
+ * What happened to this message.
+ *
+ * 🚨 `stopped` IS NOT `failed`, AND THE DIFFERENCE IS THE USER'S INTENT. A
+ * stopped answer is text the reader had already decided was enough and chose to
+ * keep; a failed one is a fault whose half-answer nobody asked for. Collapsing
+ * them would either discard something deliberately kept, or present a dropped
+ * connection as a decision the user never made. `partial` predates both and
+ * means neither.
+ */
+export type MessageStatus = 'complete' | 'partial' | 'failed' | 'stopped';
 
 export interface Message {
   id: string;
@@ -553,10 +563,25 @@ export class ConversationStore {
     return record;
   }
 
-  getMessages(id: string, scope: Scope, opts: { limit?: number; status?: MessageStatus } = {}): Message[] {
+  /**
+   * `status` takes one value or several. Several exists because the context
+   * builder needs COMPLETE AND STOPPED together: a stopped answer is part of
+   * the conversation the user can see and refer to, so excluding it would make
+   * "carry on from where you stopped" unanswerable about text still on screen.
+   */
+  getMessages(
+    id: string,
+    scope: Scope,
+    opts: { limit?: number; status?: MessageStatus | readonly MessageStatus[] } = {},
+  ): Message[] {
     if (!this.getConversation(id, scope)) return [];
     let list = this.messages.get(id) ?? [];
-    if (opts.status) list = list.filter((m) => m.status === opts.status);
+    if (opts.status) {
+      const wanted = new Set<MessageStatus>(
+        Array.isArray(opts.status) ? opts.status : [opts.status as MessageStatus],
+      );
+      list = list.filter((m) => wanted.has(m.status));
+    }
     return opts.limit ? list.slice(-opts.limit) : [...list];
   }
 

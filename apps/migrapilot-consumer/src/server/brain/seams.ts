@@ -71,11 +71,21 @@ export function appendMessage(
    * which changes when a user detaches a file.
    */
   fileRefs?: readonly string[],
+  /**
+   * Set only when the user pressed Stop.
+   *
+   * 🚨 NOT DERIVED FROM "the answer looks short". A stopped answer is a fact
+   * about what the PERSON did, and the only thing that knows it is the request
+   * whose connection they dropped. A transport failure is a different fact and
+   * must never arrive here wearing this one's name.
+   */
+  status?: 'stopped',
 ): Promise<BrainResult<ConversationMessage>> {
   return callBrain(
     { kind: 'appendMessage', conversationId, role, content,
       ...(imageRefs && imageRefs.length > 0 ? { imageRefs: [...imageRefs] } : {}),
-      ...(fileRefs && fileRefs.length > 0 ? { fileRefs: [...fileRefs] } : {}) },
+      ...(fileRefs && fileRefs.length > 0 ? { fileRefs: [...fileRefs] } : {}),
+      ...(status ? { status } : {}) },
     deps,
   )
 }

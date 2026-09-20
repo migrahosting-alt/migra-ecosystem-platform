@@ -32,6 +32,16 @@ export interface WireMessage {
    * fact about now rather than about the turn. The record itself never changes.
    */
   missingFileRefs?: string[]
+  /**
+   * What happened to this message, when it was not simply finished.
+   *
+   * 🚨 THE MARK HAS TO MAKE THE ROUND TRIP. Persisting a stopped answer without
+   * carrying its status back would restore the text and silently promote it to
+   * a completed answer — the reader would see a finished reply that stops
+   * mid-sentence, with nothing saying why. Same omission as `imageRefs` and
+   * `fileRefs` above, one field over.
+   */
+  status?: string
 }
 
 import { hasDeliverableContent } from '@/lib/turnContent'
@@ -59,6 +69,9 @@ export function toMessage(message: WireMessage, index: number): Message {
         id: message.id ?? `a-${index}`,
         role: 'assistant',
         time,
+        // A stopped answer stays visibly stopped across a reload, a conversation
+        // switch and an export — the transcript is meant to be what the user saw.
+        ...(message.status === 'stopped' ? { stopped: true } : {}),
         /*
          * A PICTURE IS AN ANSWER — on reload too.
          *

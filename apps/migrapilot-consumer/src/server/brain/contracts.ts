@@ -118,4 +118,9 @@ export interface ConversationMessage {
    * to match today's context is not a transcript.
    */
   fileRefs?: string[]
+  /**
+   * `stopped` when the user ended the answer themselves. Absent means finished.
+   * Distinct from a failure, which is not persisted at all.
+   */
+  status?: string
 }

@@ -99,6 +99,8 @@ function brainStub(
      * would prove nothing about whether the browser can end a live turn.
      */
     holdChatOpen?: boolean
+    /** Hold the chat stream open having emitted NO assistant text at all. */
+    holdChatSilent?: boolean
   } = {},
 ) {
   const calls: { url: string; init: RequestInit }[] = []
@@ -135,8 +137,10 @@ function brainStub(
     }
 
     if (href.endsWith('/api/ai/chat')) {
-      if (options.holdChatOpen) {
-        const opening = new TextEncoder().encode(sse([['token', { text: 'The first half' }]]))
+      if (options.holdChatOpen || options.holdChatSilent) {
+        const opening = new TextEncoder().encode(
+          options.holdChatSilent ? '' : sse([['token', { text: 'The first half' }]]),
+        )
         /*
          * Honours `init.signal`, because real `fetch` does and the difference is
          * the whole point of the test: a body that ignored the abort would leave
@@ -466,7 +470,27 @@ test('STOP: a browser that hangs up mid-answer cuts the Brain off', async () => 
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
   assert.equal(brain.chatCancelled(), true, 'the upstream Brain request was cut off')
-  assert.deepEqual(brain.storedAssistant(), [], 'and a stopped turn persists nothing')
+
+  /*
+   * 🚨 THIS ASSERTION WAS INVERTED, DELIBERATELY.
+   *
+   * It used to require that a stopped turn persist NOTHING, which matched the
+   * implementation and not the product: the text lived in client state and
+   * nowhere else, so an answer the reader had decided was enough vanished on
+   * reload. The transcript was less truthful than the screen had been.
+   *
+   * What is kept from the old test is the half that was always right — the
+   * browser hanging up still has to cut the Brain off, so a stopped turn stops
+   * costing model time. Keeping the text must not mean keeping the generation.
+   */
+  for (let attempt = 0; attempt < 200 && brain.storedAssistant().length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.deepEqual(
+    brain.storedAssistant(),
+    [{ role: 'assistant', content: 'The first half', status: 'stopped' }],
+    'the text the user chose to keep was persisted, and marked as stopped',
+  )
 
   brain.restore()
   resetAuthPort()
@@ -1871,4 +1895,63 @@ test('a busy turn does not disturb the conversation\'s active image', async () =
   const { setImagesTo } = await turnWith({ storedRefs: [ref], modelFrames: GPU_BUSY })
 
   assert.notDeepEqual(setImagesTo, [], 'the active image survives a busy card')
+})
+
+// ── the awkward edges of Stop ───────────────────────────────────────────────
+
+test('STOP before any assistant text writes NO assistant turn', async () => {
+  /*
+   * An empty assistant message is worse than none: it renders as a reply that
+   * says nothing and, once persisted, becomes a turn the next request carries
+   * into context as though the assistant had answered. Pressing Stop instantly
+   * is an ordinary thing to do — the user changed their mind — and it must
+   * leave the conversation exactly as it was.
+   */
+  const brain = brainStub({ holdChatSilent: true })
+  setAuthPort(portWith(session))
+
+  const stop = new AbortController()
+  const response = await POST(
+    new Request('https://chat.example.test/api/chat/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'never mind' }),
+      signal: stop.signal,
+    }),
+  )
+  assert.equal(response.status, 200)
+  const reader = response.body!.getReader()
+  await reader.read() // the meta frame, which goes out before any token
+
+  stop.abort()
+  await reader.cancel().catch(() => undefined)
+  for (let attempt = 0; attempt < 200 && !brain.chatCancelled(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+
+  assert.deepEqual(brain.storedAssistant(), [], 'an empty assistant turn was persisted')
+
+  brain.restore()
+  resetAuthPort()
+})
+
+test('an answer that FINISHES is stored once, complete, and never marked stopped', async () => {
+  /*
+   * The other boundary: stopping a hair after the model finished must not add a
+   * second message, and must not relabel a finished answer as stopped. The two
+   * states are decided by one flag on one turn, so the guarantee to prove is
+   * that exactly one record exists and it carries no stopped mark.
+   */
+  const brain = brainStub({ chatBody: sse([['token', { text: 'All of it' }], ['done', {}]]) })
+  setAuthPort(portWith(session))
+
+  await collect(await post({ prompt: 'short question' }))
+
+  const stored = brain.storedAssistant()
+  assert.equal(stored.length, 1, 'a finished answer produced more than one message')
+  assert.equal(stored[0].content, 'All of it')
+  assert.equal(stored[0].status, undefined, 'a finished answer must carry no stopped mark')
+
+  brain.restore()
+  resetAuthPort()
 })

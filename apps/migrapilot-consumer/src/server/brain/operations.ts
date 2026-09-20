@@ -103,7 +103,7 @@ export type BrainOperation =
   | { kind: 'setConversationGrounding'; conversationId: string; files: string[] }
   /** The images a thread is about. Refs only; bytes never persist. */
   | { kind: 'setConversationImages'; conversationId: string; images: string[] }
-  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[]; fileRefs?: string[] }
+  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[]; fileRefs?: string[]; status?: 'stopped' }
   // ── turns ────────────────────────────────────────────────────────────────
   | {
       kind: 'chatTurn'
@@ -688,6 +688,12 @@ export function resolveOperation(op: BrainOperation): ResolvedRequest {
           // And the documents, for the same reason: without this the file that
           // grounded the answer is recorded nowhere on the turn that attached it.
           ...(op.fileRefs && op.fileRefs.length > 0 ? { fileRefs: op.fileRefs } : {}),
+          /*
+           * Sent ONLY for a stopped answer. Omitted otherwise so the Brain's own
+           * default — `complete` — stays the single definition of the normal
+           * case, rather than this module restating it and being free to drift.
+           */
+          ...(op.status ? { status: op.status } : {}),
         },
       }
 
