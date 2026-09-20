@@ -1174,3 +1174,49 @@ rendered `Mèsi` ("thanks") as "No worries" and silently dropped the ungrammatic
 middle clause entirely. A reviewer who does not read Creole sees fluent English and
 concludes the turn worked. **That makes bad Creole invisible to exactly the people
 most likely to sign it off** — a truthfulness problem, not a style one.
+
+### 31c. Defect 1 fixed and deployed — the owner's loop is NOT resolved
+
+Staging brain `creole-intent-0920`, commit `368eea36`, boot-tested, identity
+asserted on the running process.
+
+**Defect 1 — FIXED.** Proven deterministically at the transport boundary, which is
+where a claim about the model's input belongs: five regression cases, and BOTH
+directions negative-checked rather than assumed.
+
+| control installed | which cases fail |
+| --- | --- |
+| the old substring gate | English correction, metalinguistic, quoted — the must-NOT-fire set |
+| gate forced to always-false | standalone greeting, greeting + Creole continuation — the must-fire set |
+
+Neither set is vacuous. Live confirmation, `it suppose to be Bonswa` as the FIRST
+message of a fresh conversation — isolated from language inheritance:
+
+> before: 3/3 full Creole greeting monologues (`Bonswa! Sak pase nan?` …)
+> after:  **`Bonswa!`** — the correction accepted, not answered as a greeting
+
+**A regression the suite caught, not me.** An image-only turn carries no
+`userPrompt`. The substring gate survived that only because `RegExp.test(undefined)`
+coerces to a string; `.replace` throws and would have killed the generation. Four
+longRunningInference tests failed on it. No text is no greeting. 3421/3421, tsc 0.
+
+#### 🚨 The owner's exact conversation STILL FAILS
+
+Re-run through the real composer on the fixed build:
+
+| turn | input | output |
+| --- | --- | --- |
+| 1 | `bonjou` *(good morning)* | **"Bonswa, kijan ou ye? Sak pase?"** — still the evening greeting |
+| 2 | `it suppose to be Bonswa` | "Mèsi. Jou reyis se yon jounen mwens konsa. Chak bagay se bonmen." — malformed |
+
+Defect 1 was a real cause and it is gone. It was not the only cause. Turn 1 never
+depended on the gate at all: `bonjou` IS a greeting, the hint correctly ships, and
+the model still answers a morning greeting with an evening one. Once turn 1 is
+Creole, turn 2 inherits the conversation's language — correctly — and the reply is
+malformed Creole.
+
+**So the fix is necessary and not sufficient, and the lane must not be called
+closed.** What remains is DEFECT 2 (Creole generation quality) and DEFECT 3
+(unsolicited translations), both already routed to Engineer and both untouched here.
+Fixing Defect 1 removed the reason the user could not correct their way out; it did
+not make the assistant speak Creole.
