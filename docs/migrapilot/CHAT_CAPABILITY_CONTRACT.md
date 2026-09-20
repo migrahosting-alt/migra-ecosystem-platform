@@ -1840,3 +1840,53 @@ A third thing the failure prevented, worth recording because it was luck rather
 than design: another lane committed DURING the batch, so the consumer step read a
 different HEAD than the brain step had. Had the consumer succeeded, the two
 services would have shipped different commits under one batch name.
+
+---
+
+## 40. Live regression pass — the conversation-state batch
+
+Deployed pair: brain `convstate-0920` / `feb6ea6c`, consumer `convstate-0920b` /
+`84d9c289`. All six verified against the running staging product.
+
+| # | change | evidence |
+| --- | --- | --- |
+| 1 | context-gap marker | `omittedForBudget: 1` under real pressure, and the model said "I can see all your messages, but the last one seems to be missing **the long message that preceded it**" — it knows a turn was left out |
+| 2a | page provenance, NEGATIVE | `vendor_terms.md` renders with **no page suffix**. Was "· page 2026", scraped from its own heading |
+| 2b | page provenance, POSITIVE | `meridian-agreement.pdf · pages 1-5` on a genuinely 5-page PDF, answer correct — the fix did not silence real citations |
+| 3 | delete completeness | confirmation dialog, then `GET …/messages` → **404**; the PDF used by that conversation is still in the library |
+| 4a | explicit Stop | `status=stopped` |
+| 4b | reload mid-generation | `status=interrupted` — was `stopped` before the fix |
+| 4c | natural completion | no status |
+| 5 | missing-file disclosure | "I do not have that document attached to this conversation, so I cannot answer from it yet." Before the fix the same question answered from a DIFFERENT file, with a citation |
+| 6 | summarization | turn 3 fires the trigger; turn 4 reports **`summaryUsed: true`** with `recentMessagesIncluded: 12`; answer returns the corrected 5582 |
+
+### Two limits of this evidence, stated rather than blurred
+
+**#6 does not isolate "the correction survived VIA the summary."** Turn 4's raw
+window still contained the correction (`recentMessagesIncluded: 12`), so the right
+answer is consistent with either source. The isolated property — order preserved,
+correction last, neither value discarded — is proven by unit tests with two negative
+controls. The LIVE run proves the trigger fires and the summary is used, which is
+the gap §34 found. Conflating the two would be the kind of claim this programme
+exists to refuse.
+
+**#3's orphan-row clearing is not live-verifiable here.** `message_feedback` and
+`conversation_project` have no read surface and the DB is not accessible from this
+lane without credentials. The SQL is asserted by tests on the statements issued,
+including ordering and that no delete is unfiltered. Live, what is proven is that
+the conversation is gone and its files are not.
+
+### Also observed
+
+`meridian-agreement.pdf · pages 1-5` is broad for a 5-page document — every page was
+retrieved. It is in-bounds rather than fabricated: the property the fix guarantees is
+that a cited page EXISTS and came from a pager-authored label, not that retrieval is
+narrow.
+
+Conversation delete HAS a confirmation dialog. File delete still does not — §38a.
+
+### Status
+
+**Conversation-state batch: staging-proven / READY FOR USER TEST.** Not user-proven.
+NOT production-ready: the Brain lineage gate (§IV §1, `release/engineer-three-track`)
+is separate, unresolved, and unaffected by any of this.
