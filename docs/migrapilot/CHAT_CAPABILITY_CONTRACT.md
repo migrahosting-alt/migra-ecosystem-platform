@@ -1220,3 +1220,68 @@ closed.** What remains is DEFECT 2 (Creole generation quality) and DEFECT 3
 (unsolicited translations), both already routed to Engineer and both untouched here.
 Fixing Defect 1 removed the reason the user could not correct their way out; it did
 not make the assistant speak Creole.
+
+---
+
+## 32. PPTX — a deck is readable, slide by slide
+
+`.pptx` was refused with NO_EXTRACTOR: truthful, and by the standing rule still a
+missing capability. It now has a reader. No new dependency — JSZip was already
+carried for `.docx` and `.xlsx`.
+
+### Proven through the real composer
+
+Staging `pptx-0920` / `648866f8` (both services). A genuine 12-slide PowerPoint deck
+uploaded, chipped **"Ready — MigraPilot can read this · 2.0 MB"**, and answered:
+
+> According to the context retrieved from `team_kickoff_2026.pptx`, the agenda is
+> listed on **Slide 2** (team_kickoff_2026.pptx:6-13). The agenda includes: …
+> [all six items, recovered from the slide's TABLE]
+
+Slide-level provenance, which is a deck's equivalent of a page citation.
+
+### Three traps, all of which produce confident wrong answers
+
+- **Slide order is not filename order.** Real order is `sldIdLst` resolved through
+  the rels. Filename order agreed 3/3 on real decks — but reordering slides in
+  PowerPoint rewrites the manifest and LEAVES FILENAMES ALONE, so a reordered deck
+  would answer "the third slide says…" confidently and wrongly.
+- **A table is not a list of cells.** The §DOCX lesson; rows stay `cell | cell`.
+- **`notesSlideN` does NOT correspond to `slideN`.** Pairing by number staples one
+  slide's notes to another — worse than no notes, because it reads as evidence.
+  Resolved through each slide's own relationships.
+
+### What real files caught that a fixture never would
+
+Validated against three genuine PowerPoint decks BEFORE writing a fixture. Every
+real notes part carries the notes master's slide-number placeholder, so the first
+run emitted `Speaker notes: 1` for decks with no notes at all, and set `hasNotes`
+true on all three. Master furniture (`sldNum`, `dt`, `ftr`) is now dropped.
+
+### 🚨 Two defects the tests caught in my own work
+
+1. **A vacuous test.** The notes-pairing test asserted the right slide HAS the
+   notes and never that the wrong slide does not — so a negative control that
+   paired by number still passed. Strengthened until the control bit.
+2. **A claim that reached nobody.** `hasUnreadCharts` was computed and then dropped
+   by the dispatcher, so "charts are reported" was true of the extractor and false
+   of the product. It now sets `complete: false`, which the evidence layer already
+   renders as "This is based on part of the file, not the whole file" — exactly
+   true of a deck whose figures live inside a chart.
+
+### A second source of truth, removed
+
+`contentMismatch` decided which indexed types must be plain text with a hardcoded
+`ext !== 'pdf' && ext !== 'docx'`. Making `.pptx` indexed silently enrolled it, so a
+real deck was refused at upload as *"a zip archive, not a .pptx file"*. Binary-ness
+is now DECLARED on the type, so the next binary format is caught at review rather
+than at a user's upload.
+
+### Status
+
+Brain 3430/3430, consumer 1311/1311, tsc 0. Implemented → staging-deployed →
+automated end-to-end verified → **READY FOR LOCAL USER TEST**. Not user-proven.
+
+Known limits, stated rather than discovered: chart series values and embedded
+workbooks are not read (declared per deck), and `.ppt`/`.odp` remain refused —
+different formats, no reader.

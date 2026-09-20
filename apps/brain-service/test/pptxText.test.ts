@@ -162,3 +162,33 @@ test('a file that is not a PowerPoint package is refused, not guessed at', async
     (e: unknown) => e instanceof PptxExtractionError,
   );
 });
+
+// ── the claim must reach the user, not just the caller ──────────────────────
+
+test('a deck with charts is reported as NOT completely read', async () => {
+  /*
+   * `hasUnreadCharts` was computed and then dropped by the dispatcher, so the
+   * extractor "reported" charts to nobody. `complete: false` is the existing
+   * mechanism — it becomes "This is based on part of the file, not the whole
+   * file" at the evidence layer, which is exactly true of a deck whose figures
+   * live in a chart. Without this, a presentation indexes as if read whole.
+   */
+  const { extractFileText } = await import('../src/engine/files/fileText.js');
+  const zip = await JSZip.loadAsync(await buildDeck());
+
+  const clean = await extractFileText({
+    filename: 'deck.pptx',
+    bytes: new Uint8Array(await zip.generateAsync({ type: 'nodebuffer' })),
+  });
+  assert.equal(clean.ok, true);
+  assert.equal(clean.ok && clean.extraction.complete, true, 'a chartless deck IS read whole');
+
+  zip.file('ppt/charts/chart1.xml', '<c:chart/>');
+  const charted = await extractFileText({
+    filename: 'deck.pptx',
+    bytes: new Uint8Array(await zip.generateAsync({ type: 'nodebuffer' })),
+  });
+  assert.equal(charted.ok, true);
+  assert.equal(charted.ok && charted.extraction.complete, false,
+    'a deck with an unread chart claimed to be read whole');
+});

@@ -126,7 +126,18 @@ export async function extractFileText(input: {
   if (ext === 'pptx') {
     try {
       const extracted = await extractPptx(input.bytes);
-      return { ok: true, extraction: { text: extracted.text, complete: true } };
+      /*
+       * 🚨 A DECK WITH CHARTS HAS NOT BEEN READ WHOLE, and `complete` is already
+       * the mechanism that says so — it becomes "This is based on part of the
+       * file, not the whole file" at the evidence layer, which is precisely the
+       * truth about a presentation whose figures live inside a chart this
+       * extractor does not open. Reported through the flag that exists rather
+       * than a second channel, so a deck cannot quietly read as fully indexed.
+       */
+      return {
+        ok: true,
+        extraction: { text: extracted.text, complete: !extracted.hasUnreadCharts },
+      };
     } catch (error) {
       if (error instanceof PptxExtractionError) {
         return { ok: false, reason: 'unreadable', detail: error.message };
