@@ -138,7 +138,28 @@ export function buildContext(opts: BuildContextOptions): BuiltContext {
       if (!m || m.role === 'system') continue;
       const cost = estimateTokens(m.content);
       if (diagnostics.estimatedTokens + cost > budget) {
+        /*
+         * 🚨 MARK THE GAP. DO NOT LEAVE ONE, AND DO NOT THROW THE REST AWAY.
+         *
+         * This used to `continue` silently, which handed the model a transcript
+         * with a HOLE in it as though it were continuous: a long turn 3
+         * vanished and "turn 2: noted" sat directly before "turn 4:
+         * acknowledged", so the assistant appeared to have acknowledged
+         * something that was not there. Measured exactly that way.
+         *
+         * Stopping outright would fix the false adjacency and cost more than it
+         * needs to — an account number in turn 1 that fits easily would be
+         * dropped because turn 3 was long. So the oversized turn is replaced by
+         * a marker IN ITS PLACE and the walk continues. Nothing is adjacent to
+         * anything it was not adjacent to, and everything that fits is kept.
+         */
         diagnostics.omittedForBudget += 1;
+        const marker = '[A long message here was left out because it did not fit. Ask the user about it if it matters.]';
+        const markerCost = estimateTokens(marker);
+        if (diagnostics.estimatedTokens + markerCost <= budget) {
+          diagnostics.estimatedTokens += markerCost;
+          selected.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: marker });
+        }
         continue;
       }
       diagnostics.estimatedTokens += cost;
@@ -152,6 +173,14 @@ export function buildContext(opts: BuildContextOptions): BuiltContext {
       });
     }
     selected.reverse();
+    /*
+     * AND SAY SO. A contiguous window is still a PARTIAL one, and a model that
+     * is not told it is missing earlier turns will answer "you never mentioned
+     * that" with total confidence about a conversation it was only shown the
+     * end of. The count is deliberately not given: it is an estimate over a
+     * capped read, and a precise-sounding number nobody can verify is worse
+     * than the plain fact.
+     */
     for (const m of selected) messages.push(m);
     diagnostics.recentMessagesIncluded = selected.length;
   }

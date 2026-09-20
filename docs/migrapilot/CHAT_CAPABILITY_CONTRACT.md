@@ -1380,3 +1380,59 @@ First-token latency is shorter than a browser round trip, so racing it through t
 composer would be luck rather than method. It stays covered by a deterministic test
 that holds the stream open emitting nothing. It must not be written up, counted, or
 summarised as live-verified until something can actually reproduce it live.
+
+---
+
+## 34. Conversation-state: context compression altered meaning
+
+Owner priority 1 — long-conversation context continuity. Two defects found by
+measuring `buildContext` directly rather than by reading it.
+
+### 🚨 DEFECT — FIXED: the context had silent holes in it
+
+The budget loop walked newest to oldest and `continue`d past anything that did not
+fit, so an oversized turn vanished and the turns around it were handed to the model
+as neighbours. Measured on a five-turn conversation with one long turn 3:
+
+```
+TURN1 my account number is 4471
+TURN2 noted
+TURN4 acknowledged          <-- TURN3 gone, nothing said
+TURN5 what is my account number?
+```
+
+The assistant appears to have acknowledged something that is not there. **False
+adjacency invents a relationship between turns that were never neighbours**, which
+is worse than showing less — the model cannot even know to be careful.
+`omittedForBudget` counted it, and the model never sees diagnostics.
+
+**Fixed by replacing the omitted turn with a marker IN ITS PLACE**, carrying the
+omitted message's own role, and continuing the walk.
+
+Two other designs were tried and rejected, and both are kept as negative controls
+because each fails a different assertion:
+
+| design | what it gets wrong |
+| --- | --- |
+| silent skip (the original) | false adjacency, no disclosure |
+| stop at the first oversized turn | no false adjacency, but drops a turn-1 account number that fits easily, to pay for a long turn 3 |
+| **marker in place** (shipped) | keeps everything that fits, and nothing is adjacent to what it was not |
+
+### 🚨 DEFECT — OPEN, NOT FIXED: summarization never runs
+
+`summarizeConversation` exists, works, and is reachable **only** through
+`POST /api/ai/conversations/:id/summarize`, which **the consumer never calls**.
+Nothing triggers it automatically. So `getLatestSummary` finds nothing in
+production and `summaryUsed` is always false: the compression half of context
+management is, in practice, dead code.
+
+The consequence is now visible rather than hidden: once a conversation outgrows the
+3000-token budget, its beginning is marked as omitted and is **gone**, with no
+compressed form carrying its facts forward. The marker keeps that honest; it does
+not make it good.
+
+**Not fixed here deliberately.** Automatic summarization means a model call on a
+cadence, which is cost, latency and failure-mode policy — an owner decision, not a
+detail to slip into a defect fix. Recorded for the owner with the evidence.
+
+Brain 3435/3435, tsc 0.

@@ -307,3 +307,69 @@ test('FAILED and PARTIAL messages still stay out of context', async () => {
   assert.ok(!transcript.includes('DROPPED-MID-STREAM'), 'a failed turn reached the model');
   assert.ok(!transcript.includes('HALF-WRITTEN'), 'a partial turn reached the model');
 });
+
+// ── context compression must not alter meaning ──────────────────────────────
+
+/** A conversation whose middle turn is far too big for the budget. */
+async function conversationWithAnOversizedMiddle(s: ConversationStore): Promise<string> {
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  for (const [role, content] of [
+    ['user', 'TURN1 my account number is 4471'],
+    ['assistant', 'TURN2 noted'],
+    ['user', `TURN3 ${'x'.repeat(20000)}`],
+    ['assistant', 'TURN4 acknowledged'],
+    ['user', 'TURN5 what is my account number?'],
+  ] as const) {
+    await s.appendMessage(c.id, A, { role, content, status: 'complete' });
+  }
+  return c.id;
+}
+
+test('🚨 an over-budget message leaves a MARKER, never a silent hole', async () => {
+  /*
+   * THE DEFECT THIS REPLACES. The budget loop skipped anything that did not fit
+   * and carried on to older turns, so the model was handed a transcript with a
+   * gap in it and no way to know: "TURN2 noted" arrived directly before "TURN4
+   * acknowledged", and the assistant appeared to have acknowledged something
+   * that was not there. False adjacency invents a relationship between turns
+   * that were never neighbours, which is a worse failure than showing less.
+   */
+  const s = new ConversationStore();
+  const id = await conversationWithAnOversizedMiddle(s);
+  const built = buildContext({ store: s, scope: A, conversationId: id, currentPrompt: 'what is my account number?', retrieve: true });
+
+  const transcript = built.messages.map((m) => m.content).join('\n');
+  assert.ok(!transcript.includes('TURN3 xxx'), 'the oversized message was sent anyway');
+  assert.ok(/left out/i.test(transcript), 'the omission was not disclosed to the model');
+
+  // The load-bearing assertion: the two surviving neighbours must NOT touch.
+  const order = built.messages.map((m) => m.content);
+  const two = order.findIndex((c) => c.startsWith('TURN2'));
+  const four = order.findIndex((c) => c.startsWith('TURN4'));
+  assert.ok(two >= 0 && four >= 0, 'the surrounding turns were dropped');
+  assert.equal(four - two, 2, 'TURN2 and TURN4 were left adjacent across a removed turn');
+});
+
+test('an over-budget message does not cost the turns that DO fit', async () => {
+  /*
+   * The other half. Stopping at the first oversized turn would also have fixed
+   * the adjacency, and would have thrown away an account number in turn 1 that
+   * fits easily — paying for a long turn 3 with unrelated history.
+   */
+  const s = new ConversationStore();
+  const id = await conversationWithAnOversizedMiddle(s);
+  const built = buildContext({ store: s, scope: A, conversationId: id, currentPrompt: 'what is my account number?', retrieve: true });
+  const transcript = built.messages.map((m) => m.content).join('\n');
+  assert.ok(transcript.includes('4471'), 'a turn that fits was dropped because a later one did not');
+});
+
+test('the gap marker takes the role of the message it replaces', async () => {
+  // A user turn replaced by an assistant-role marker would read as the
+  // assistant having said something it never said.
+  const s = new ConversationStore();
+  const id = await conversationWithAnOversizedMiddle(s);
+  const built = buildContext({ store: s, scope: A, conversationId: id, currentPrompt: 'x', retrieve: true });
+  const marker = built.messages.find((m) => /left out/i.test(m.content));
+  assert.ok(marker, 'no marker was emitted');
+  assert.equal(marker.role, 'user', 'the omitted turn was the user’s');
+});
