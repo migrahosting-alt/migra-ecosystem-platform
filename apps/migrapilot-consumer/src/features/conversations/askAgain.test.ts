@@ -166,3 +166,35 @@ test('loading a question REPLACES the composer rather than appending to it', () 
   assert.match(effect.slice(0, 200), /setValue\(draft\.text\)/)
   assert.doesNotMatch(effect.slice(0, 200), /setValue\(\(current\)/)
 })
+
+// ── a stopped answer is still an answer ─────────────────────────────────────
+
+test('Try again is offered on a STOPPED answer', () => {
+  /*
+   * A stopped response is an assistant turn that happens to be incomplete, and
+   * wanting another attempt at it is the most ordinary reason to press the
+   * control at all. Withholding it would leave the reader with an unfinished
+   * answer and no way forward except retyping their own question.
+   *
+   * 🚨 AND THE APPEND-ONLY STORE IS WHAT MAKES THIS SAFE. Retry here sends the
+   * same question again and APPENDS the result; it cannot mutate, overwrite or
+   * hide the stopped turn, because no operation to do so exists. The stopped
+   * record keeps its text and its status, and the new answer is its own turn.
+   */
+  const messages: Message[] = [
+    { id: 'u1', role: 'user', text: 'explain containerisation', time: '', delivered: true },
+    { id: 'a1', role: 'assistant', text: 'Malcom McLean began', time: '', stopped: true },
+  ]
+  assert.equal(canAskAgain({ messages, pending: false }), true)
+  assert.equal(lastQuestionOf(messages)?.text, 'explain containerisation',
+    'the retry must repeat the question above the stopped answer')
+})
+
+test('Try again is NOT offered while the stopped turn is still streaming', () => {
+  // `pending` is the guard that stops a second turn entering a running one.
+  const messages: Message[] = [
+    { id: 'u1', role: 'user', text: 'explain containerisation', time: '', delivered: true },
+    { id: 'a1', role: 'assistant', text: 'Malcom McLean began', time: '', stopped: true },
+  ]
+  assert.equal(canAskAgain({ messages, pending: true }), false)
+})
