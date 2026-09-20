@@ -141,6 +141,8 @@ export interface Message {
    * label is what stops the transcript implying otherwise.
    */
   stopped?: boolean
+  /** Cut off by a reload, a closed tab or a dropped connection — not a choice. */
+  interrupted?: boolean
 }
 
 export interface Conversation {

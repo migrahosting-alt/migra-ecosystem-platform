@@ -31,6 +31,15 @@ export interface InFlightTurn {
    * reporting. Nothing else can tell them apart after the fact.
    */
   stopped: boolean
+  /**
+   * The turn's own request id, once minted.
+   *
+   * Carried here so a Stop can DECLARE itself to the server before aborting.
+   * Without it the server sees an abort identical to a reload or a closed tab
+   * and has to guess, which is how a reloaded page came to be recorded as a
+   * deliberate stop.
+   */
+  requestId?: string
 }
 
 /**
@@ -67,10 +76,21 @@ export class TurnRegistry {
    * enough that the handler can observe `stopped` in the same tick, and a turn
    * that read `false` there would be reported to the user as an outage.
    */
-  stop(conversationId: string): boolean {
+  stop(conversationId: string, beforeAbort?: (turn: InFlightTurn) => void): boolean {
     const running = this.turns.filter((turn) => turn.conversationId === conversationId)
     for (const turn of running) {
       turn.stopped = true
+      /*
+       * DECLARED BEFORE THE ABORT, for the same reason `stopped` is marked
+       * before it: once the request is aborted this turn is indistinguishable
+       * from a browser that simply went away. The callback does the talking —
+       * this class stays a state machine and makes no network calls.
+       */
+      try {
+        beforeAbort?.(turn)
+      } catch {
+        /* A declaration that cannot be sent must not prevent the stop. */
+      }
       turn.controller.abort()
     }
     return running.length > 0

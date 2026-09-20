@@ -103,7 +103,7 @@ export type BrainOperation =
   | { kind: 'setConversationGrounding'; conversationId: string; files: string[] }
   /** The images a thread is about. Refs only; bytes never persist. */
   | { kind: 'setConversationImages'; conversationId: string; images: string[] }
-  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[]; fileRefs?: string[]; status?: 'stopped' }
+  | { kind: 'appendMessage'; conversationId: string; role: MessageRole; content: string; imageRefs?: string[]; fileRefs?: string[]; status?: 'stopped' | 'interrupted' }
   // ── turns ────────────────────────────────────────────────────────────────
   | {
       kind: 'chatTurn'

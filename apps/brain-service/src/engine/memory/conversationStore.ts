@@ -68,7 +68,16 @@ export type MessageRole = 'user' | 'assistant' | 'system';
  * connection as a decision the user never made. `partial` predates both and
  * means neither.
  */
-export type MessageStatus = 'complete' | 'partial' | 'failed' | 'stopped';
+export type MessageStatus = 'complete' | 'partial' | 'failed' | 'stopped' | 'interrupted';
+
+/**
+ * Statuses whose text the user actually SAW and can refer to.
+ *
+ * `stopped` and `interrupted` both leave real partial text on screen, so both
+ * belong in context — marked as unfinished. `failed` and `partial` do not: they
+ * are faults whose half-answers nobody asked for.
+ */
+export const VISIBLE_PARTIAL_STATUSES: readonly MessageStatus[] = ['stopped', 'interrupted'];
 
 export interface Message {
   id: string;

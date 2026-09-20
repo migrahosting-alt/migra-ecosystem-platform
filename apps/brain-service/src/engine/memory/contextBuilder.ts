@@ -11,6 +11,7 @@
  * tokens) so retrieval is explainable — never the hidden prompt or any reasoning.
  */
 
+import { VISIBLE_PARTIAL_STATUSES } from './conversationStore.js';
 import type { ConversationStore, Scope, Summary } from './conversationStore.js';
 
 export interface BuiltContextMessage {
@@ -129,7 +130,7 @@ export function buildContext(opts: BuildContextOptions): BuiltContext {
      * attached, below.
      */
     const recent = opts.store.getMessages(opts.conversationId, opts.scope, {
-      status: ['complete', 'stopped'],
+      status: ['complete', ...VISIBLE_PARTIAL_STATUSES],
       limit: 20,
     });
     const selected: BuiltContextMessage[] = [];
@@ -167,9 +168,17 @@ export function buildContext(opts: BuildContextOptions): BuiltContext {
         role: m.role === 'assistant' ? 'assistant' : 'user',
         // The mark is what makes including it safe. Stated in the transcript
         // itself rather than out of band, because the model only ever sees this.
+        /*
+         * The mark names WHICH kind of unfinished, because the two are different
+         * facts about the user. A stop is a decision; an interruption happened
+         * TO them, and telling the model they chose it would be a small lie
+         * about a person who is right there to be contradicted.
+         */
         content: m.status === 'stopped'
           ? `${m.content}\n\n[This answer was stopped by the user before it finished.]`
-          : m.content,
+          : m.status === 'interrupted'
+            ? `${m.content}\n\n[This answer was cut off before it finished and is incomplete.]`
+            : m.content,
       });
     }
     selected.reverse();

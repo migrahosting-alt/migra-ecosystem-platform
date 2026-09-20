@@ -74,12 +74,13 @@ export function appendMessage(
   /**
    * Set only when the user pressed Stop.
    *
-   * 🚨 NOT DERIVED FROM "the answer looks short". A stopped answer is a fact
-   * about what the PERSON did, and the only thing that knows it is the request
-   * whose connection they dropped. A transport failure is a different fact and
-   * must never arrive here wearing this one's name.
+   * 🚨 NOT DERIVED FROM "the answer looks short". `stopped` is a fact about a
+   * DECISION and only the browser saw it, so it is declared explicitly before
+   * the abort. `interrupted` is the honest default for an abort nobody claimed:
+   * a reload, a closed tab, a dropped network. A transport failure persists
+   * nothing at all and must never arrive here wearing either name.
    */
-  status?: 'stopped',
+  status?: 'stopped' | 'interrupted',
 ): Promise<BrainResult<ConversationMessage>> {
   return callBrain(
     { kind: 'appendMessage', conversationId, role, content,

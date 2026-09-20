@@ -531,6 +531,28 @@ function AssistantTurn({
           )}
 
           {/*
+            AN INTERRUPTION IS NOT A DECISION.
+            🚨 The server cannot tell a Stop from a reload — both abort the
+            request — so it used to call every abort a user stop. A reloaded
+            page was recorded as "You stopped this answer", telling the reader
+            they had chosen something they never chose. The browser now declares
+            a real Stop; anything else lands here, claiming nothing about why.
+            Same neutral treatment: nothing failed, and nobody is at fault.
+          */}
+          {!message.stopped && message.interrupted && (
+            <div
+              role="status"
+              className="mt-5 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-600"
+            >
+              <span aria-hidden="true">■</span>
+              <span>
+                <strong className="font-semibold text-slate-700">This answer was cut off.</strong>{' '}
+                It is incomplete, and it has been kept in this conversation.
+              </span>
+            </div>
+          )}
+
+          {/*
             * A real answer that storage refused. Stated in the user's terms —
             * what will happen to it — not in ours.
             */}

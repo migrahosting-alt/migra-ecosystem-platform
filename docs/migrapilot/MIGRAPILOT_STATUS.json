@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
- "updated": "2026-09-15",
- "updatedBy": "Claude (Opus 5) — release-space governance LIVE (gate + post-cutover retention + pinning; 11->3 releases, 60%->41% disk). Raw internal error text reaching the user FIXED and verified both halves. OCR stack IS installed — only the `hat` language pack is missing, and that gap came from my own incomplete install recommendation.",
+ "updated": "2026-09-18",
+ "updatedBy": "Claude — RC39 recorded. Normal execution, R2 restart continuation NOT exercised (Brain reached a terminal result before the kill). TWO new regressions found and recorded: workspace.find promoted into absence proof (false completion), and read-only INSPECT rendered through mutation/approval semantics. CA2 repository evidence explicitly NOT healthy.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -13,9 +13,9 @@
   "🚨 releaseIdentityInEvidence": "NO LIVE-PRODUCT EVIDENCE IS VALID UNLESS THE EXACT RUNNING RELEASE IDENTITY IS CAPTURED WITH IT. \"Tested live\" means \"tested live against release X, commit Y\" — never merely \"I opened the product\". Owner standard, added 2026-09-04 after a fix that was committed, tested, mutation-proven and pushed was invisible to the person testing the product because production had been serving a build from three days earlier. A truthful harness still produced a false sense of readiness, because nothing in the loop ever asked what was running. Deployment provenance is part of acceptance evidence, not an operational afterthought."
  },
  "activeLane": {
-  "name": "MigraPilot VS Code Extension on the governed Brain",
-  "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
-  "currentStep": "EngineeringTask loop implemented 2026-09-10: Brain-owned EngineeringTask SSE envelope, native shell card with rationale/diff/verification/actions, exact existing approval/apply handshake, reject/no-write and double-apply guards, prompt guardrails for existing-product inspection and operational requests. Local proof: extension build, Brain typecheck, 915/915 extension unit tests, 3/3 Brain prompt tests. Governed-coding VSIX harness fixed with explicit MIGRAPILOT_PERSISTENCE=sqlite test adapter; this directly removed the no-persistence startup blocker. Current gates: VSIX 100 passing/5 remaining; integration 89 passing/7 remaining. Classified remaining failures: Quick Actions is an obsolete test expectation because the sidebar intentionally removed the duplicate section; explainSelection/fixDiagnostics/interaction-document failures are unrelated command-adapter or VS Code harness defects reproduced on the clean baseline; regular governed-coding expects 5 fixture failures but the current fixture produces 0, so that test has fixture/test drift. Fresh VSIX rebuilt and installed from current tree: git base c9ae2a85bda24a4b8114c2de5e9c3698a3232f64, extension 0.1.0, VSIX SHA256 c9210cc10b5b0b24257b9fddf19541c89ed7dc067eb9db8a8e3c72c2bd8a5874, Brain server SHA256 b9bb31d56b47af656cb770ce7d49f795347c1f6c7d0f19323664a9e65eee97a0. Real Brain acceptance proved existing-product inspection and operational refusal, plus a separate justified edit/apply-once run; deterministic test verification remains owner UI acceptance work. Do not mark PROVEN_LIVE or CLAUDE WORKLOAD OFFLOAD qualified yet.",
+  "name": "MigraPilot VS Code Extension — restart-safe task continuation",
+  "objective": "Restore semantic Engineer task state through the same governed Brain and PostgreSQL authority; revalidate workspace, capabilities and mutation authority before continuing.",
+  "currentStep": "Targeted integration audit complete; decision in docs/migrapilot/ENGINEER_CHECKPOINT_INTEGRATION_AUDIT.md. EngineerCheckpointStore adapter on existing PostgreSQL layer; no AgentRunJournal approval-lifecycle workaround. Implementation not started; all restart scenarios NOT RUN. First slice is Brain-only read-only inspection (R2).",
   "beforeTopology": {
    "extension": "http://127.0.0.1:3988 — set in BOTH Machine and workspace settings",
    "thatBrain": "LOCAL dev instance on the workstation. persistence=sqlite, reason 'default local/dev/test adapter'. MIGRAPILOT_BRAIN_DATABASE_URL and DATABASE_URL both UNSET. Governance NOT available.",
@@ -3573,133 +3573,204 @@
   "classification": "FALLBACK OCR — NOT canonical corpus text. The owner's rule, and it is now evidence-backed rather than cautionary: training a Creole model on text whose every ò is an ô would teach wrong orthography silently and systematically. The book is legitimately readable AND legitimately unsuitable as training material; those two facts are not in tension."
  },
  "backlogOrder_2026_09_14": [
-  "contextual/deictic references",
+  "multiple attachments",
+  "contextual references across files",
+  "image + document combinations",
+  "conversation persistence edge cases",
+  "remaining message controls",
+  "audio attachment pipeline",
   "scanned PDF/OCR",
-  "PPTX",
-  "audio attachments",
-  "similarly-named files + true cross-file calculation (unfinished from the multi-attachment slice)",
-  "empty list-item rendering",
   "production promotion",
   "production user validation"
  ],
- "rowLookup_2026_09_15": {
-  "status": "SHIPPED to staging, live-verified — READY FOR LOCAL USER TEST",
-  "release": "rowlookup-0915 / commit 7ec050c1",
-  "closes": "the row-lookup gap recorded in the XLSX slice",
-  "liveProof": {
-   "what revenue is listed for East": "$25,443.75 (was the $54,212 fabrication, then a refusal)",
-   "How many units for West on the Q1 Sales sheet?": "640 (previously resolved to a row COUNT)"
-  },
-  "design": "the row is identified FROM THE FILE — the prompt names a value that appears in a label column — so phrasing varies freely and a prompt naming no row yields nothing. The gate reaching this path is deliberately weak (any 'what…', or a trailing '?') because the gate decides nothing; the file does.",
-  "guards": [
-   "a totals row is never a lookup target",
-   "labels under 3 characters are skipped so 'NY' cannot match half of all prompts",
-   "a label on more than one row is AMBIGUITY and is reported, never resolved by picking the first"
-  ],
-  "oneDefinition": "isTotalsLabel deduped — owned by the arithmetic layer, not a second private copy in the evidence layer",
-  "collisionsFoundByRunning": [
-   "'How many units for West?' resolved to count; naming one row contradicts a row count",
-   "'What is the capital of France?' injected a note about the spreadsheet into an unrelated turn"
-  ]
- },
- "multipleAttachments_2026_09_15": {
-  "status": "READY FOR LOCAL USER TEST — passed after three fixes",
-  "release": "disclosure-0915 / da897fc2 (via crossfile-0915 9154f634, coattached-0915 2af4682b)",
-  "artifacts": "meridian-agreement.pdf + purpose-built meridian-rate-review-2026.xlsx, designed to DISAGREE on three values (payment terms 45/30, Leeds-Glasgow 4580/4880, aggregate 15388.75/15688.75) with one fact present only in the workbook",
-  "defect1_workbook_contributed_nothing": {
-   "symptom": "'Compare the payment terms in these two files' -> quoted the PDF's 45 days, then 'No payment terms are mentioned in the provided excerpts from the other file'. The workbook's Terms sheet reads `Payment terms | 30`.",
-   "evidence": "grounding_active: 2, NO table evidence at all — both files active, one contributing nothing",
-   "cause": "a workbook only ever reached the model through the COMPUTED path, gated on a recognised aggregate. 'Compare' is not one; nor is 'differences', 'contradict', 'which is higher' — the whole cross-file class was invisible",
-   "fix": "showing a document is not calculating with it. Computed evidence stays gated on an operation; CONTENT evidence is supplied for any workbook the computed path did not speak for. Bounded at 20,000 cells with the truncation caveat in the evidence.",
-   "alsoCarried": [
-    "provenance — a file put in front of the model joins the attributable set",
-    "the structured_only refusal must not fire on a turn whose prompt carries the sheet"
+ "engineerFoundations_2026_09_16": {
+  "status": "LOCAL_CANDIDATE_NOT_PROVEN_LIVE",
+  "scope": "Owner V1 brief adopted. Three bounded local fixes: repository evidence validation, completion recovery authority, and authoritative final delivery. Full V1 and durable restart recovery remain incomplete.",
+  "evidence": "docs/migrapilot/evidence/accepted-final-2026-09-16/README.md",
+  "authoritativeFinal": {
+   "change": "Brain keeps provider text private until controller final; extension ignores legacy provisional tokens and renders final exactly once. Tool/plan progress remains visible.",
+   "brainTests": "npm test: 3331 passed, 0 failed, 0 skipped; includes tsc -b",
+   "extensionSmoke": "npm test passed; includes tsc -b",
+   "extensionUnit": "npm run test:unit: 928 passed, 0 failed, 0 skipped on final rerun; intermittent probe-file ENOENT race remains documented.",
+   "browser": "PASS: actual compiled Engineer adapter and shell, scripted Brain frames, stubbed VS Code host; unique client run ID verified; rejected text absent, progress visible, accepted report rendered once.",
+   "notProven": [
+    "installed VSIX with governed Brain",
+    "live model workflow",
+    "production acceptance"
    ]
   },
-  "defect2_pair_split_on_next_turn": {
-   "symptom": "turn 1 attached_this_turn active 2 withheld 0; turn 2 conversation_default active 1 WITHHELD 1. The dropped file was then reported as not mentioning a figure printed on its page 3.",
-   "cause": "the rule kept the last name in a FLAT list. Correct for a thread that ACCUMULATED unrelated documents; never correct for a set attached in one action, and a flat list cannot tell them apart.",
-   "fix": "the boundary is the attachment EVENT. Measured: two files in one picker action land 137 ms apart; window 120 s so a slow multi-file upload still counts as one action.",
-   "provenBothWays": "the pair survives the follow-up AND a scan from an hour earlier still stays out"
+  "remainingFoundations": {
+   "repositoryGrounding": "Core content/coverage defects fixed locally; unconventional layouts, absent categories and semantic claim validation remain acceptance work.",
+   "controllerExecution": "Plan, transcript, evidence and retries are per invocation. Saved extension task cards do not provide restart-safe controller continuation. Prose/proposal recovery bypasses are fixed locally."
   },
-  "defect3_stale_limit": {
-   "symptom": "an answer quoted a payment term out of the workbook's cells and then closed with 'general document-style text search inside spreadsheets is not available yet' — contradicted by the sentence above it",
-   "note": "exactly what spreadsheetDisclosure exists to prevent, from the other direction: not the model overclaiming a limit but US asserting one that stopped being true",
-   "fix": "the disclosure states what the turn actually did; the surviving true limit is that a workbook is read in one pass rather than retrieved from"
-  },
-  "provenanceProven": {
-   "compare payment terms": "45 (pdf) vs 30 (xlsx), each named, both cited",
-   "citations distinguish": "meridian-agreement.pdf · pages 2-5 carries pages; the workbook does not, because a workbook has no pages",
-   "ambiguous 'what is the total?'": "ASKED which sheet — did not silently pick",
-   "workbook-only fact": "invoice dispute window 14 days, read from the Terms sheet by name",
-   "after switch + reload": "'Going back to those two files, which one had the 45-day term?' -> the PDF, with the xlsx's 30 days contrasted; active 2 withheld 0"
-  },
-  "modelLayerMiss": "the comparison turn said the PDF 'does not directly state a specific monthly charge'; asked to quote it, the model produced 'Aggregate monthly charge across all lanes: 15388.75 GBP.' verbatim — the text was in context all along. Goes to MigraAI Engineer.",
-  "notCoveredStatedPlainly": [
-   "two similarly named files — not run",
-   "a genuine cross-file CALCULATION — the artifacts do not force one; the workbook carries both pallets and rates so it is self-sufficient. A gap in the TEST, not a finding about the product"
+  "nextAcceptance": [
+   "Repository layouts without conventional entrypoints/manifests/tests need explicit evidence and absence handling.",
+   "Add durable controller checkpoints/resume with restart, workspace-conflict, identity, cancellation and approval tests.",
+   "Verify the candidate in the installed extension and governed Brain before promotion."
   ],
-  "withdrawnFinding": {
-   "claim": "'empty list items' reported as a rendering defect",
-   "verdict": "WITHDRAWN — my own measurement error, not a product defect",
-   "why": "the evidence grep filtered snapshots to paragraph/listitem/link nodes and hid their strong/text children. The bullets carried a correct attributed comparison of both figures.",
-   "lesson": "a reading taken through my own instrument is a claim about the instrument until checked against raw evidence — the same shape as the pre-hydration snapshot error and the exit-0 report"
+  "deployment": "None. Existing unrelated working-tree edits preserved.",
+  "repositoryGrounding": {
+   "status": "LOCAL_CANDIDATE_NOT_PROVEN_LIVE",
+   "change": "Require matching nonempty read results, complete manifest/config coverage, parseable package.json and actual scripts for runtime evidence; entrypoints require source reads; find evidence uses returned matches, not echoed query text.",
+   "verification": "npm test: 3334/3334, no skips; tsc -b passed. Browser: real controller + real workspace tools + real shell, scripted provider, incomplete manifest completion rejected before complete source reads.",
+   "browserRunId": "6a743e47-5d4d-4d16-b029-a39d32416dd6",
+   "limits": "Coverage still recognizes conventional source/entrypoint paths. Does not establish every claim in generated prose or general absence evidence for repositories without tests/manifests."
+  },
+  "completionRecovery": {
+   "status": "LOCAL_CANDIDATE_NOT_PROVEN_LIVE",
+   "change": "Malformed prose and machine-authored proposal summaries now enter the common final path, including evidence, unfinished-plan and truth checks. There is one final emission site.",
+   "verification": "119 focused controller/unified/hardening tests passed; final Brain npm test: 3336 passed, 0 failed, 0 skipped. Browser verified source read -> premature prose rejected -> test read -> plan 2/2 -> accepted final."
+  },
+  "finalBatchVerification": {
+   "brain": "npm test: 3336/3336 passed; tsc -b included",
+   "extension": "npm test passed; npm run test:unit 928/928 passed; tsc -b included",
+   "browser": "Three scenarios passed with real compiled controller/adapter/shell, scripted provider and real filesystem tools for map/recovery. VS Code host stubbed.",
+   "browserRunId": "c75a9d49-ba0e-4205-abc3-a9906672bde3",
+   "diffCheck": "passed"
+  },
+  "milestone": "Claude-parity foundations locally verified",
+  "acceptanceBoundary": {
+   "repositoryGrounding": "PASS_LOCALLY",
+   "completionAuthority": "PASS_LOCALLY",
+   "finalAnswerAuthority": "PASS_LOCALLY",
+   "brainSuitePassed": 3336,
+   "extensionUnitSuitePassed": 928,
+   "brainBuild": "PASS",
+   "extensionBuild": "PASS",
+   "extensionSmoke": "PASS",
+   "scriptedBrowserScenariosPassed": 3,
+   "deployed": false,
+   "provenLive": false,
+   "ownerAcceptance": false,
+   "v1Accepted": false,
+   "evidenceScope": "Recorded prior local verification; not rerun for this documentation-only contract batch."
+  },
+  "tapInterpretation": {
+   "authority": "Owner interpretation, 2026-09-16; not a new replay of historical TAP traces.",
+   "finding": "Visible rejected model answers partly reflected presentation-authority leakage, not proof that CA2 accepted the answer. The owner cites the later exact unsupported-entrypoint mechanical sequence as correctly refused. Keep controller acceptance evidence separate from visible provisional text."
   }
  },
- "contextualReferences_2026_09_15": {
-  "status": "ordinals CLOSED and live-verified; other reference kinds still open",
-  "release": "ordinals-0915 / b96b8ce3",
-  "defect": {
-   "symptom": "'What does the first document say about cancellation?' -> 'The first document doesn\\'t say anything about cancellation.' The PDF's page 4 is headed 'Page 4 - Cancellation' and the citation on that answer read pages 2-5.",
-   "discrimination": "asking again with the FILE NAMED answered correctly — so the evidence was complete and the ORDINAL had nothing to resolve against",
-   "cause": "chunks are labelled with a filename and content evidence names its workbook, but nothing stated the ORDER the files were provided in",
-   "fix": "state the order as a fact (upload time, from the same listing that decides availability) and let the model resolve the reference. Not inferred — resolving 'first' ourselves would put a guess where a boundary belongs.",
-   "bounds": [
-    "nothing emitted for a single attachment",
-    "a file with no timestamp keeps its given position"
-   ]
+ "restartSafeContinuation_2026_09_16": {
+  "status": "INTEGRATION_AUDIT_COMPLETE_IMPLEMENTATION_NOT_STARTED",
+  "priority": "NEXT_ENGINEERING_LANE",
+  "contract": "docs/migrapilot/RESTART_SAFE_CONTINUATION_ACCEPTANCE.md",
+  "governingRule": "Persist semantic task state, not merely conversation text. Revalidate stale state; historical approvals do not authorize resumed execution.",
+  "persistenceAuthority": "PostgreSQL; isolated PostgreSQL required for restart acceptance. No production change authorized.",
+  "priorActiveLaneSummary": {
+   "name": "MigraPilot VS Code Extension on the governed Brain",
+   "objective": "The extension is the product surface under test. It must use the single production Brain (db-core persistence, governed), never a local dev instance.",
+   "currentStep": "EngineeringTask loop implemented 2026-09-10: Brain-owned EngineeringTask SSE envelope, native shell card with rationale/diff/verification/actions, exact existing approval/apply handshake, reject/no-write and double-apply guards, prompt guardrails for existing-product inspection and operational requests. Local proof: extension build, Brain typecheck, 915/915 extension unit tests, 3/3 Brain prompt tests. Governed-coding VSIX harness fixed with explicit MIGRAPILOT_PERSISTENCE=sqlite test adapter; this directly removed the no-persistence startup blocker. Current gates: VSIX 100 passing/5 remaining; integration 89 passing/7 remaining. Classified remaining failures: Quick Actions is an obsolete test expectation because the sidebar intentionally removed the duplicate section; explainSelection/fixDiagnostics/interaction-document failures are unrelated command-adapter or VS Code harness defects reproduced on the clean baseline; regular governed-coding expects 5 fixture failures but the current fixture produces 0, so that test has fixture/test drift. Fresh VSIX rebuilt and installed from current tree: git base c9ae2a85bda24a4b8114c2de5e9c3698a3232f64, extension 0.1.0, VSIX SHA256 c9210cc10b5b0b24257b9fddf19541c89ed7dc067eb9db8a8e3c72c2bd8a5874, Brain server SHA256 b9bb31d56b47af656cb770ce7d49f795347c1f6c7d0f19323664a9e65eee97a0. Real Brain acceptance proved existing-product inspection and operational refusal, plus a separate justified edit/apply-once run; deterministic test verification remains owner UI acceptance work. Do not mark PROVEN_LIVE or CLAUDE WORKLOAD OFFLOAD qualified yet."
   },
-  "liveProof": {
-   "the first document": "the PDF — 90 days notice + the three-consecutive-months clause",
-   "Now compare that with the second file": "named both correctly and found they AGREE at 90 days; 'that' carried the topic across turns"
+  "restartMatrix": {
+   "R1": {
+    "restart": "extension",
+    "phase": "inspection",
+    "status": "NOT_RUN"
+   },
+   "R2": {
+    "restart": "brain",
+    "phase": "inspection",
+    "status": "NOT_RUN",
+    "note": "Attempted repeatedly through 2026-09-18; never exercised — terminal result preceded the kill."
+   },
+   "R3": {
+    "restart": "both",
+    "phase": "inspection",
+    "status": "NOT_RUN"
+   },
+   "R4": {
+    "restart": "extension",
+    "phase": "proposal_or_awaiting_approval",
+    "status": "NOT_RUN"
+   },
+   "R5": {
+    "restart": "brain",
+    "phase": "proposal_or_awaiting_approval",
+    "status": "NOT_RUN"
+   },
+   "R6": {
+    "restart": "both",
+    "phase": "proposal_or_awaiting_approval",
+    "status": "NOT_RUN"
+   },
+   "R7": {
+    "restart": "extension",
+    "phase": "validation_or_repair",
+    "status": "NOT_RUN"
+   },
+   "R8": {
+    "restart": "brain",
+    "phase": "validation_or_repair",
+    "status": "NOT_RUN"
+   },
+   "R9": {
+    "restart": "both",
+    "phase": "validation_or_repair",
+    "status": "NOT_RUN"
+   }
   },
-  "stillOpen": [
-   "deictic sheet reference ('on that sheet') — sheet selection reads the current prompt only",
-   "'what I said earlier' about prose — conversation-history reference, untested",
-   "two similarly named files — untested"
-  ]
+  "implementationStarted": false,
+  "localAcceptance": false,
+  "provenLive": false,
+  "ownerAcceptance": false,
+  "v1Accepted": false,
+  "next": "Implement the Brain-only scoped/versioned checkpoint and resume substrate, then prove R2 read-only inspection against isolated PostgreSQL. Extension restart remains later.",
+  "afterLocalAcceptance": "Integrated fresh-repository, real-system owner workflow including controlled failure/repair, restart, candidate validation, governed apply, read-back and product verification.",
+  "integrationAudit": {
+   "report": "docs/migrapilot/ENGINEER_CHECKPOINT_INTEGRATION_AUDIT.md",
+   "decision": "AgentRunJournal is unsuitable unchanged: unconditional approval lifecycle/history, required command/proposal fields, and non-atomic create-then-correct workaround. Add a small scoped EngineerCheckpointStore on the existing Brain PostgreSQL persistence layer; keep runEngineerTask as sole controller.",
+   "reusable": "Existing connection/transaction/scope/RLS/migration framework; CAS and fencing patterns. Do not create a second task engine or extension semantic authority.",
+   "firstSlice": "Brain-only read-only inspection restart (R2 in existing matrix), same correlationId, restored plan/evidence, revalidation, no duplicate credited work.",
+   "verification": "Read-only source audit. No runtime tests, DB access, restarts, migrations or deployment.",
+   "extensionRestartInScope": false
+  },
+  "r2AttemptLog_2026_09_18": "R2 STILL NOT_RUN. Repeated attempts failed to exercise restart continuation because the Brain reaches a normal terminal result BEFORE the kill lands — the model answers faster than the kill window. Corrective method for the next attempt: use a SHORT prompt with enumerated mandatory inspections, and fire the SIGKILL at the FIRST visible operations (Listing files / git.overview / Reading package.json) — do NOT wait for 'Looking for' or for five or six operations. After the kill, capture what the client shows immediately; do NOT send 'continue' until that is recorded."
  },
- "stagingDiskFull_2026_09_15": {
-  "event": "ordinals-0915 deploy failed mid-extract: No space left on device",
-  "impact": "NONE to the running service — staging kept serving disclosure-0915 and answering 200. The release is built and boot-tested before cutover, so a disk-full build never reached production.",
-  "cause": "11 consumer releases on a 12G volume, five of them from this day's rapid fix-deploy-verify cycles",
-  "sizeNuance": "per-directory du reads 1.3G each but the tree totals 5.0G — releases share hard-linked files, so each extra costs ~506MB of new blocks",
-  "ownerDecision": "grow the volume, delete nothing",
-  "action": "pct resize 101 rootfs +8G on pve (infra-data had ~73G free); 12G -> 20G, 7.6G free, 60% used, resized ONLINE with no interruption",
-  "provenByTheFailure": [
-   "the deploy's build-then-cutover order held",
-   "release-retention.sh refused to run rather than prune on a wedged disk — a pruning tool failing closed means deleting nothing"
+ "rc39_normalExecution_2026_09_18": {
+  "status": "RECORDED — normal execution; R2 NOT exercised",
+  "authority": "Owner observation, 2026-09-18.",
+  "results": {
+   "realWorkspaceTools": "PASS",
+   "doneAttributionReachedClient": "PASS",
+   "r2RestartContinuationExercised": "NO — Brain reached a normal terminal result before the kill",
+   "workspaceFindUsedAsAbsenceEvidence": "FAIL",
+   "unsupportedImplementationNotFound": "FAIL",
+   "promptCompletionRequirementsEnforced": "FAIL",
+   "readOnlyInspectShownAsMutationGated": "FAIL"
+  },
+  "observedTrace": [
+   "workspace.list",
+   "git.overview",
+   "file.read",
+   "workspace.find"
   ],
-  "residual": "the incomplete ordinals-0915 directory from the failed run; the completeness predicate certifies it CANNOT SERVE, it is neither current nor previous, and the successful redeploy of the same name replaced it"
+  "visibleSteps": [
+   "Listing files",
+   "git.overview",
+   "Reading package.json",
+   "Listing src",
+   "Looking for"
+  ],
+  "whyItIsAFalseCompletion": "The answer \"I couldn't find any implementation files\" is not supported by the trace. The established Engineer evidence rule is: workspace.find = PATH DISCOVERY, workspace.search = CONTENT SEARCH. Path discovery alone CANNOT establish that an implementation does not exist. The run got no filename/path match and promoted that into a claim of absence.",
+  "promptRequirementIgnored": "The prompt explicitly required inspecting the implementation and forbade inferring behavior from filenames. The completion contract did not enforce that task-specific obligation."
  },
- "releaseSpaceGovernance_2026_09_15": {
-  "status": "LIVE, exercised by a real deploy",
-  "gate": "before anything is created on the host: 3x the MEASURED payload (payload + extraction workspace + rollback margin). 'Free > one release' is explicitly NOT the threshold.",
-  "payloadIsMeasured": "node_modules is hardlinked from the live release, so a release costs ~0.47GB (the tar), not the 1.3GB a release dir appears to occupy alone. A gate on apparent size would demand 3.9GB for a release consuming half of one.",
-  "retention": "--keep=1 (active + rollback + one more), run ONLY after the running process reports the new release. Failure is reported and does not fail the deploy.",
-  "pinning": "a .pinned marker inside a release keeps it regardless of age — automatic retention answers 'what is needed to serve and roll back'; a pin answers 'a human wants this kept'",
-  "result": "consumer 11->3, brain ->3, disk 60%->41% used (12GB free), both rollback pointers intact and complete",
-  "note": "the 20GB expansion is now headroom rather than the fix"
+ "engineerAbsenceEvidenceRegression_2026_09_18": {
+  "status": "OPEN — NOT FIXED",
+  "severity": "HIGH — produces confident false completions",
+  "defect": "workspace.find (path discovery) returning no match is promoted into 'no implementation exists'.",
+  "rule": "workspace.find = path discovery. workspace.search = content search. Absence of a PATH match is not absence of an IMPLEMENTATION. A negative existence claim requires content search plus stated scope.",
+  "🚨 recurrenceOf": "openDefects/build-from-mockup-defers-to-user (2026-09-03, release admission-09040433) — same input shape: ONE workspace.find, no match, terminal answer. That fix stopped the agent HANDING WORK BACK. It did not stop the agent ASSERTING A NEGATIVE. The failure mode moved from honest deferral to false completion, which is worse: a deferral invites correction, an absence claim closes the question.",
+  "🚨 predictedByAnExistingLimit": "engineerFoundations_2026_09_16.repositoryGrounding.limits already said: 'Does not establish every claim in generated prose or general absence evidence for repositories without tests/manifests.' RC39 is that documented limit being hit by a real request — it is now an OBSERVED DEFECT, not a theoretical limit.",
+  "contractGap": "Generic repository-map obligations ARE enforced; TASK-SPECIFIC evidence obligations are NOT. Nothing forces the prompt's own required inspections (entrypoint, API file, server file, test file) to be satisfied before a final answer is emitted.",
+  "fixDirection": "A negative existence claim must be gated on content-search evidence AND on the prompt's enumerated inspection requirements being satisfied. Absent that, the only permitted ending is an explicit 'not established' with the search scope stated."
  },
- "rawErrorLeak_2026_09_15": {
-  "severity": "user-visible leak of server internals",
-  "symptom": "Files showed 'Command failed: tesseract /tmp/migrapilot-ocr-.../page.png ... Error opening data file /usr/share/tesseract-ocr/5/tessdata/hat.traineddata' as the description of the user's document",
-  "cause": "describeFailure ended with `return message.slice(0, 200)` — the raw error promoted to user-facing prose for every case the two named branches did not catch",
-  "fix": "describeFailure cannot return a raw message at all; the failure path logs the raw error for operators",
-  "verifiedLive": {
-   "user": "'the text recogniser does not have the language pack this document needs'",
-   "operatorLog": "full command, missing file, TESSDATA_PREFIX hint"
-  },
-  "newCase": "a missing language pack is distinct from 'no recogniser' — the stack is installed and one data file is absent, and the remedy is a language pack not a program"
- }
+ "engineeringTaskCardInspectSemantics_2026_09_18": {
+  "status": "OPEN — NOT FIXED",
+  "severity": "MEDIUM — UX/state correctness",
+  "defect": "A read-only INSPECT task renders through mutation/approval semantics.",
+  "observed": "Engineering task — verified / 'Brain completed the inspect/plan phase; workspace mutation remains approval-gated.' on a request that was purely read-only with NO mutation proposal to gate.",
+  "why": "INSPECT and MUTATE are being rendered by one card contract. An inspection has no pending write, so an approval gate is not merely noise — it misrepresents task state.",
+  "relatedTo": "Same task-card defect class identified immediately before RC39."
+ },
+ "ca2RepositoryEvidenceHealth_2026_09_18": "🚨 DO NOT mark CA2 repository evidence behavior as fully healthy. The simple repository-map regression passed, but RC39 found a hole in the COMPLETION CONTRACT: generic repository-map obligations are enforced while task-specific evidence obligations are not strong enough to stop a model concluding ABSENCE from PATH DISCOVERY. See engineerAbsenceEvidenceRegression_2026_09_18."
 }

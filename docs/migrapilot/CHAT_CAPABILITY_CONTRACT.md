@@ -1602,3 +1602,69 @@ ordering, and that no delete is ever unfiltered — an unscoped DELETE here woul
 empty a table for every user at once.
 
 Brain 3445/3445, tsc 0. Awaiting the batched staging deploy.
+
+---
+
+## 37. Interrupted streaming — the product was claiming an intent nobody had
+
+Owner priority 4. The defect was in my own stopped-answer slice, found by running
+the case the owner named.
+
+### 🚨 DEFECT — FIXED: a reload was recorded as a deliberate user stop
+
+Measured live on staging `stopnotice-0920`: a long answer was started and the page
+was **RELOADED** mid-stream. The persisted record:
+
+```
+assistant  status=stopped  **The Suez Canal: A Waterway of Strategic...
+```
+
+So the transcript told the user they had deliberately stopped an answer they never
+stopped, and the UI rendered "You stopped this answer" over it. **A false claim
+about a person's intent, on a record they keep.**
+
+**Cause.** Stop, reload, tab close and a dropped network all abort the request
+identically, so `request.signal.aborted` cannot mean "decision". The stopped slice
+read it as one.
+
+**Fix: the browser declares.** Only it saw the click. An explicit Stop POSTs
+`/api/chat/stop` naming its own request id and THEN aborts; anything else is
+`interrupted`, which claims nothing about why. The stream route waits briefly for a
+declaration — only on a turn already aborted with text — because the declaration
+and the abort race across the network.
+
+The declaration has no authority: it can only downgrade `interrupted` to `stopped`
+on a turn that was already aborted with text, it is scoped to the principal who
+owns the turn, and it is consumed on read so a later interruption cannot inherit
+an intent never expressed for it. In-memory with a seconds-long window, which is a
+real limit recorded in the module rather than hidden: a restart mid-turn loses the
+declaration and the turn records as interrupted — truthful, just less specific.
+
+### The four states, now distinct
+
+| what happened | stored | what the reader is told |
+| --- | --- | --- |
+| natural completion | no status | nothing — it finished |
+| user pressed Stop | `stopped` | "You stopped this answer." |
+| reload / tab close / dropped network | `interrupted` | "This answer was cut off." |
+| transport failure | nothing persisted | the turn reports the failure |
+
+Context marks the two partials differently for the same reason — a stop is a
+decision, an interruption happened TO them, and telling the model they chose it
+would be a small lie about a person who is right there to contradict it.
+
+### The owner's remaining criteria
+
+| criterion | result |
+| --- | --- |
+| reload must not show the turn as complete | PASS — it is `interrupted`, never absent-status |
+| no junk empty assistant message | PASS — persistence is guarded on non-empty text |
+| reload must not duplicate turns | PASS — measured, 2 records for one turn |
+| server truth wins the disconnect race | PASS — `completed` is checked FIRST, so an answer that finished before the abort landed stores as complete |
+| retry after interruption appends cleanly | PASS — append-only, and the interrupted record is untouched |
+
+An existing test was corrected rather than deleted: "a browser that hangs up
+mid-answer" now expects `interrupted`, because its own name says nobody pressed
+Stop. Negative-checked — treating any abort as a stop fails exactly that test.
+
+Consumer 1325/1325, Brain 3445/3445, tsc 0. Awaiting the batched staging deploy.

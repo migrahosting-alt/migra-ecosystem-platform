@@ -486,10 +486,22 @@ test('STOP: a browser that hangs up mid-answer cuts the Brain off', async () => 
   for (let attempt = 0; attempt < 200 && brain.storedAssistant().length === 0; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
+  /*
+   * 🚨 INTERRUPTED, NOT STOPPED — and this test's own name is why.
+   *
+   * It models a browser that HANGS UP. Nobody clicked Stop, so nothing declared
+   * an intent, and calling it a user decision would tell the reader they chose
+   * something they never chose. Measured on staging before the fix: a
+   * mid-stream reload persisted `stopped` and the transcript said "You stopped
+   * this answer" about a page that had simply been reloaded.
+   *
+   * The text is still kept, because the reader saw it. Only the claim about WHY
+   * changes.
+   */
   assert.deepEqual(
     brain.storedAssistant(),
-    [{ role: 'assistant', content: 'The first half', status: 'stopped' }],
-    'the text the user chose to keep was persisted, and marked as stopped',
+    [{ role: 'assistant', content: 'The first half', status: 'interrupted' }],
+    'a browser hanging up was recorded as a deliberate user stop',
   )
 
   brain.restore()

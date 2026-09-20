@@ -203,10 +203,10 @@ export function registerMemoryRoutes(app: FastifyInstance, store: ConversationSt
        * which is not the same fact as a stream that died. Anything unrecognised
        * still falls back to `complete` rather than being invented.
        */
-      const ACCEPTED_STATUSES = ['partial', 'failed', 'stopped'] as const;
+      const ACCEPTED_STATUSES = ['partial', 'failed', 'stopped', 'interrupted'] as const;
       const claimed = request.body?.status;
       const status = (ACCEPTED_STATUSES as readonly string[]).includes(String(claimed))
-        ? (claimed as 'partial' | 'failed' | 'stopped')
+        ? (claimed as 'partial' | 'failed' | 'stopped' | 'interrupted')
         : 'complete';
       try {
         /*

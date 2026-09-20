@@ -564,6 +564,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
      * inside the measurement. The server adopts it when it is well-formed.
      */
     const turn = startTurnTrace()
+    // So a Stop can name this exact turn to the server before aborting it.
+    inFlight.requestId = turn.id
 
     try {
       const response = await fetch('/api/chat/stream', {
@@ -1083,9 +1085,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
    * name lands, and a Stop pressed in that window is about the same turn.
    */
   const stopTurn = useCallback((conversationId: string): boolean => {
-    if (turns.current.stop(conversationId)) return true
+    /*
+     * Tell the server this was a DECISION, before the abort makes it look like
+     * a disconnect. Fire-and-forget on purpose: the stop must not wait on the
+     * network, and a declaration that never lands simply records the turn as
+     * interrupted — truthful, just less specific.
+     */
+    const declare = (turn: { requestId?: string }): void => {
+      if (!turn.requestId) return
+      void fetch('/api/chat/stop', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requestId: turn.requestId }),
+        keepalive: true,
+      }).catch(() => undefined)
+    }
+    if (turns.current.stop(conversationId, declare)) return true
     const aliased = aliases.current.get(conversationId)
-    return aliased ? turns.current.stop(aliased) : false
+    return aliased ? turns.current.stop(aliased, declare) : false
   }, [])
 
   const value = useMemo<ChatContextValue>(

@@ -36,6 +36,7 @@
  * claims the model said something it never finished saying.
  */
 
+import { awaitStopDeclaration } from '@/server/chat/stopIntent'
 import {
   appendMessage,
   chatTurnStream,
@@ -1986,11 +1987,31 @@ export async function POST(request: Request): Promise<Response> {
        * dropped connection as a decision the person never made, which is the
        * specific dishonesty this distinction exists to prevent.
        */
-      const stoppedByUser = !completed && request.signal.aborted && answer.trim().length > 0
+      const abortedWithText = !completed && request.signal.aborted && answer.trim().length > 0
+
+      /*
+       * 🚨 AN ABORT IS NOT A DECISION UNTIL SOMEONE SAYS IT WAS.
+       *
+       * Stop, reload, tab close and a dropped network all abort the request
+       * identically, so reading `aborted` as intent labelled every one of them
+       * "You stopped this answer". Measured on staging: a mid-stream RELOAD
+       * persisted `stopped`, and the transcript then told the user they had
+       * deliberately stopped an answer they never stopped.
+       *
+       * Only the browser saw the click, so only the browser can say. An
+       * explicit Stop declares itself first; anything else is an interruption,
+       * which claims nothing about why. The short wait exists because the
+       * declaration and the abort race each other across the network, and it
+       * runs ONLY on a turn that was already aborted with text.
+       */
+      const stoppedByUser =
+        abortedWithText
+        && (await awaitStopDeclaration(trace.id, principal.scope.owner).catch(() => false))
+      const interrupted = abortedWithText && !stoppedByUser
 
       const producedOutput = completed && (answer.trim().length > 0 || generatedImages.length > 0)
 
-      if (stoppedByUser) {
+      if (stoppedByUser || interrupted) {
         /*
          * Persisted with the SAME sources and refs a completed turn records, so
          * a stopped answer is a first-class part of the transcript rather than a
@@ -2003,10 +2024,11 @@ export async function POST(request: Request): Promise<Response> {
          * otherwise write an EMPTY assistant turn, which is a message that says
          * nothing claiming to be an answer.
          */
+        const partialStatus = stoppedByUser ? 'stopped' : 'interrupted'
         const storedStopped = await appendMessage(
-          durableId, 'assistant', answer, { principal }, generatedImages, sources, 'stopped',
+          durableId, 'assistant', answer, { principal }, generatedImages, sources, partialStatus,
         )
-        if (storedStopped.kind === 'ok') trace.mark('stopped_answer_stored')
+        if (storedStopped.kind === 'ok') trace.mark(`${partialStatus}_answer_stored`)
         await settle(true)
       }
 

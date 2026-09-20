@@ -156,7 +156,13 @@ export async function GET(
          * absence of a status IS "finished", and restating that would put a
          * second definition of the normal case on the wire.
          */
-        ...((message as { status?: unknown }).status === 'stopped' ? { status: 'stopped' } : {}),
+        ...((): { status?: string } => {
+          const status = (message as { status?: unknown }).status
+          // Only the two the reader can see partial text for. Absence IS
+          // "finished", and restating that would put a second definition of
+          // the normal case on the wire.
+          return status === 'stopped' || status === 'interrupted' ? { status } : {}
+        })(),
       })),
   })
 }

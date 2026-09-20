@@ -7,11 +7,74 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-12_
+_Last updated: 2026-09-16_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
 > instruction file rather than relying on a root-level one to travel.
+
+---
+
+## Next engineering lane — restart-safe task continuation
+
+Owner-directed acceptance contract recorded **before implementation**:
+[RESTART_SAFE_CONTINUATION_ACCEPTANCE.md](./RESTART_SAFE_CONTINUATION_ACCEPTANCE.md).
+Persist semantic task state; revalidate workspace/files, capabilities/models and
+mutation preconditions. Historical approval is not fresh execution authority.
+
+Targeted integration audit **complete**: [ENGINEER_CHECKPOINT_INTEGRATION_AUDIT.md](./ENGINEER_CHECKPOINT_INTEGRATION_AUDIT.md).
+AgentRunJournal cannot be reused unchanged without false approval lifecycle events.
+Use a small EngineerCheckpointStore adapter on the existing Brain PostgreSQL layer;
+runEngineerTask remains the sole semantic controller. First implementation proof:
+**Brain restart during read-only inspection (R2)**. Extension restart comes later.
+No runtime implementation or restart testing was performed in the audit.
+
+Nine required restart cells cover extension, Brain and both restarts during
+inspection, proposal/approval, and validation/repair. All are **NOT RUN**;
+implementation is **NOT STARTED**. PostgreSQL is the durable authority.
+After local continuation acceptance, run the integrated real-system V1 owner
+workflow; only that evidence and explicit owner acceptance can close V1.
+
+The existing foundation results remain **3,336 Brain / 928 extension / 3 scripted
+browser scenarios passed**, both builds and extension smoke passed. **Deployed NO;
+PROVEN_LIVE NO; owner acceptance NO; V1 accepted NO.** These are prior results, not
+new tests run for this documentation batch.
+
+TAP interpretation (owner direction): visible rejected answers partly exposed a
+presentation-authority defect; they do not by themselves establish CA2 acceptance.
+The owner cites the later exact unsupported-entrypoint regression as correctly
+refused. This records that interpretation, not a new historical trace replay.
+
+Canonical JSON: `restartSafeContinuation_2026_09_16` and
+`engineerFoundations_2026_09_16.acceptanceBoundary`.
+
+---
+
+## 2026-09-16 — Claude-parity foundations locally verified
+
+- Repository-map evidence now requires matching nonempty file contents, complete
+  manifest/config reads, parseable package.json, and actual scripts for runtime
+  evidence. Entrypoints require source reads. Empty find results cannot satisfy
+  test discovery merely because the echoed query contains `.test.`.
+- Prose/proposal-summary recovery passes the same evidence, unfinished-plan and
+  truth checks as an ordinary final. One final emission site remains.
+- The Brain keeps provisional model text private; the extension ignores legacy
+  provisional tokens and displays the accepted final once. Tool progress remains.
+
+Brain: **3336/3336** tests. Extension: **928/928** unit tests and app smoke passed.
+Both `tsc -b` builds passed. Three real-browser scenarios using compiled product
+components passed; the provider and VS Code host were scripted/stubbed, and the
+repository scenarios used real filesystem tools. **Not installed/live-model
+acceptance; not PROVEN_LIVE.** An intermittent existing extension test race over a
+temporary probe file is documented in the evidence.
+
+Restart-safe Engineer execution remains unfinished: task cards persist, but the
+controller's plan, transcript, evidence and retry state are per invocation.
+Nonconventional repository layouts and absent evidence categories still need
+acceptance work. The twelve V1 requirements remain release gates. No deployment.
+
+Evidence: [accepted-final-2026-09-16/README.md](./evidence/accepted-final-2026-09-16/README.md).
+Canonical JSON: `engineerFoundations_2026_09_16`.
 
 ---
 

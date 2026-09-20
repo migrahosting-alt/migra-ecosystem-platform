@@ -72,6 +72,9 @@ export function toMessage(message: WireMessage, index: number): Message {
         // A stopped answer stays visibly stopped across a reload, a conversation
         // switch and an export — the transcript is meant to be what the user saw.
         ...(message.status === 'stopped' ? { stopped: true } : {}),
+        // An interruption is NOT a decision, and the transcript must not imply
+        // the reader made one. Distinct flag, distinct notice.
+        ...(message.status === 'interrupted' ? { interrupted: true } : {}),
         /*
          * A PICTURE IS AN ANSWER — on reload too.
          *
