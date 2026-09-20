@@ -1436,3 +1436,41 @@ cadence, which is cost, latency and failure-mode policy — an owner decision, n
 detail to slip into a defect fix. Recorded for the owner with the evidence.
 
 Brain 3435/3435, tsc 0.
+
+### 34a. APPROVED, SCHEDULED LAST: context-pressure summarization
+
+Owner decision: enable automatic conversation summarization as a **governed
+context-management subsystem**, not "summarize every N turns".
+
+**Target behaviour**
+- keep the most recent raw turns verbatim
+- preserve older important information through a conversation summary
+- refresh the summary only when context actually crosses a threshold
+- never summarize every turn
+- keep the summary SEPARATE from raw history, so provenance stays clear
+- if summarization fails, fall back to the honest omission marker rather than
+  pretending memory exists
+- never let a summary silently overwrite or mutate the transcript
+
+**Trigger is CONTEXT PRESSURE, not message count.** At a high-water mark near the
+usable token ceiling, summarize the oldest eligible segment, store it, and keep the
+newer raw turns intact.
+
+**The summary carries structured state, not only prose**: durable user facts stated
+in the conversation, active task/topic, decisions, unresolved questions, referenced
+files/artifacts, names/numbers/details needed later, and prior constraints or
+corrections. The account-number case must survive after its turn leaves the raw
+window.
+
+**Two safeguards the owner insisted on**
+1. Summaries are REPLACEABLE AND VERSIONED. Summaries can be wrong; when the user
+   corrects something or the model contradicts it, the next refresh updates the
+   summary rather than freezing stale facts forever.
+2. Attachments are NOT summarized away into prose. The summary may say which files
+   are active and what was learned, but the underlying file references and
+   provenance stay addressable.
+
+**Sequenced LAST on purpose.** Edit, delete and interruption semantics define what
+the canonical conversation state even IS. Summaries depend on that state, so those
+are settled first: edit-and-ask-again -> delete/archive -> interrupted streaming ->
+attachment context across long chats -> this.
