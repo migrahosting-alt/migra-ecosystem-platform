@@ -1817,3 +1817,26 @@ what that endpoint does to every existing caller. The pressure trigger — the t
 that exists to keep recent turns raw — passes its own value.
 
 Brain 3453/3453, consumer 1329/1329, tsc 0. Completes the batch.
+
+### 39a. TWO DEPLOYMENT RULES, learned by breaking them
+
+Both were procedural failures on the `convstate-0920` batch. Neither was a product
+regression, and staging never cut over to a broken consumer — the gates held.
+
+**1. The consumer pre-deploy gate is `npm run verify` IN THE APP.**
+Not root `tsc -b`. The root build does not typecheck the Next application, so it
+stayed green while `app/api/chat/stop/route.ts` imported `resolveRequestPrincipal`
+from the wrong module. A green root build had been treated as coverage it never
+provided. The app's own gate — typecheck, tests, build, bundle check — refused the
+deploy, which is the gate working.
+
+**2. No arbitrary wall-clock timeout around a deploy script.**
+A 110-second `timeout` was wrapped around a deploy that takes 10–20 minutes, and it
+SIGTERM'd mid-build. That turns a slow success into a spurious failure and leaves a
+partial release directory to reason about. The governed deploy owns its own
+lifecycle; if it must run asynchronously, background it and inspect its real result.
+
+A third thing the failure prevented, worth recording because it was luck rather
+than design: another lane committed DURING the batch, so the consumer step read a
+different HEAD than the brain step had. Had the consumer succeeded, the two
+services would have shipped different commits under one batch name.
