@@ -1532,3 +1532,22 @@ Seven tests, negative-checked: restoring the digit scrape fails exactly the thre
 discriminate this defect rather than detecting change.
 
 Brain 3442/3442, tsc 0.
+
+### 35a. Conversation-state batch — running state
+
+| item | state |
+| --- | --- |
+| Edit-and-ask-again semantics | **PASSED** (live, staging) |
+| Attachment scope visibility in composer | UX understatement, not a correctness failure — **BACKLOG** |
+| Context-gap omission marker | implemented + tested, **awaiting batched staging deploy** |
+| Citation page-fabrication fix | implemented + tested, **awaiting batched staging deploy** |
+| Automatic conversation summarization | approved design direction, **not yet integrated** |
+
+Owner's rule for the batch: nothing deploys until the batch is complete, and when it
+reaches staging the two already-fixed defects are re-run LIVE as part of the pass —
+the omission marker must appear exactly where continuity is broken, and a Markdown
+heading containing a number must never render as a page citation. Batching without
+losing runtime proof.
+
+Remaining order: delete/archive -> interrupted streaming -> attachment context across
+long chats -> summarization integration -> batched deploy -> live regression pass.
