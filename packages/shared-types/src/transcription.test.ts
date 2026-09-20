@@ -14,7 +14,9 @@ import {
   hasRepetition,
   mayAutoSubmit,
   micMayBeEnabled,
+  rawTranscript,
   supportsHaitianCreole,
+  wasNormalized,
   type RawTranscription,
   type TranscriptionCapability,
 } from './transcription'
@@ -151,4 +153,81 @@ test('requested, forced and detected stay three separate facts', () => {
   const asked = assessTranscription(raw({ requestedLanguage: 'ht', detectedLanguage: 'ht' }))
   assert.equal(asked.requestedLanguage, 'ht')
   assert.equal(asked.forcedLanguage, 'ht')
+})
+
+/**
+ * KREYÒL ORTHOGRAPHIC POST-PROCESSING.
+ *
+ * `text` is no longer purely what the ASR produced once the normalizer has run, so the
+ * contract has to keep the original reachable. These cases pin the distinctions that are
+ * easy to collapse and expensive to get wrong.
+ */
+
+test('a pipeline that does not normalize reports null, not an empty normalization', () => {
+  // Distinguishable from "normalization ran and changed nothing" — only the first is a
+  // reason to suspect the Kreyòl cleanup is misconfigured.
+  const result = assessTranscription(raw())
+  assert.equal(result.normalization, null)
+  assert.equal(wasNormalized(result), false)
+})
+
+test('the raw ASR string survives normalization and is always reachable', () => {
+  // A REAL repair from the qualification vectors, not an invented one: l'espri -> lespri is
+  // the single apostrophe-clitic change the normalizer makes across all 94 clips.
+  const result = assessTranscription(raw({
+    text: 'Se lespri a ki mennen l.',
+    detectedLanguage: 'ht',
+    normalization: {
+      applied: true,
+      rawText: "Se l'espri a ki mennen l.",
+      engine: 'kreyol-asr-orthographic-normalizer',
+      version: 'v1',
+      language: 'ht',
+      changes: [{
+        source: "l'espri",
+        replacement: 'lespri',
+        reason: 'APOSTROPHE_CLITIC_NORMALIZATION',
+        evidence: 'apostrophe removed; result attested in lexicon',
+      }],
+    },
+  }))
+  assert.equal(result.text, 'Se lespri a ki mennen l.')
+  assert.equal(rawTranscript(result), "Se l'espri a ki mennen l.")
+  assert.equal(wasNormalized(result), true)
+  assert.equal(result.normalization?.changes.length, 1)
+})
+
+test('normalization does NOT make a doubtful transcript ok', () => {
+  // Tidier spelling is not evidence the ASR heard the right language. An English-only model
+  // that silently gained an "ok" because its output looked clean is the original fabrication
+  // hole in a new coat.
+  const result = assessTranscription(raw({
+    text: 'I hope you enjoyed this video and like and subscribe.',
+    detectedLanguage: null,
+    englishOnly: true,
+    normalization: { applied: false, rawText: 'I hope you enjoyed this video and like and subscribe.', changes: [], skippedReason: 'language is en, not ht' },
+  }))
+  assert.equal(result.status, 'needs_confirmation')
+  assert.equal(mayAutoSubmit(result), false)
+})
+
+test('a skipped normalization says WHY, so unavailable is not read as nothing-to-do', () => {
+  const result = assessTranscription(raw({
+    detectedLanguage: 'ht',
+    normalization: { applied: false, rawText: 'Bonjou tout moun.', changes: [], skippedReason: 'normalizer unavailable: No module named asr_normalizer' },
+  }))
+  assert.equal(result.normalization?.applied, false)
+  assert.match(result.normalization?.skippedReason ?? '', /unavailable/)
+  assert.equal(wasNormalized(result), false)
+})
+
+test('normalization that ran but changed nothing is not reported as normalized', () => {
+  const result = assessTranscription(raw({
+    text: 'Bonjou tout moun.',
+    detectedLanguage: 'ht',
+    normalization: { applied: true, rawText: 'Bonjou tout moun.', changes: [] },
+  }))
+  assert.equal(result.normalization?.applied, true)
+  assert.equal(wasNormalized(result), false)
+  assert.equal(rawTranscript(result), 'Bonjou tout moun.')
 })

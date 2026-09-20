@@ -1,0 +1,42 @@
+{
+  "artifact": "kreyol-asr-normalizer-vendored",
+  "version": "v1",
+  "vendored_on": "2026-09-20",
+  "VERDICT": "QUALIFIED FOR STT POST-PROCESSING - high precision, low harm, limited recall.",
+  "qualification_record": "MigraAI-Engineer/evaluations/kreyol/NORMALIZER-QUALIFICATION-v1-FROZEN.json",
+  "sealed_holdout": {
+    "n": 33,
+    "never_inspected_during_rule_design": true,
+    "wer": {
+      "raw": 0.524,
+      "normalized": 0.481
+    },
+    "cer": {
+      "raw": 0.13,
+      "normalized": 0.106
+    },
+    "precision": 1.0,
+    "harm_rate_on_correct_tokens": 0.0,
+    "recall_on_orthographic_subset": 0.217
+  },
+  "approved_use": "post-processing of Kreyòl STT transcripts, with the raw ASR string retained and reachable (TranscriptionResult.normalization.rawText).",
+  "NOT_approved_use": [
+    "speech-first authoring of GOLD corpus records - at 0.48 WER a native author still corrects about one word in two, which is slower than typing",
+    "any path where normalized text becomes training data without a native speaker reading it",
+    "semantic repair - choosing between attested candidates is a different instrument"
+  ],
+  "why_self_contained": "the evaluation copy imports its lexicon from two files that are gitignored in the dev tree. A runtime doing the same would behave differently on a machine without them and would change behaviour whenever they were edited.",
+  "enforcement": "npm run pilot:kreyol:verify (registered in pilot:verify) replays all 94 qualified vectors against THIS directory - the same bytes both callers load - and fails closed on any divergence in text OR reason code.",
+  "checksums": {
+    "asr_normalizer.py": "cdfdc597a17f23eb313e709b43aab6946b4f20755d1283203bedbf7eef867cc8",
+    "ht_lexicon.json": "328df0111ef70daa28f2b642eb7b20b8d14ae81fe0423213bc9e3fe069b72b8b",
+    "normalizer-frozen-vectors.jsonl": "0a7d09a5a8e0f3709d6d739cb1d3adc233fe4139e195af9720a562f4767156f0",
+    "verify_normalizer.py": "94301f69f74391b2cad3d08b012ef51e071172e1b7084b80dc1f9bca55338674"
+  },
+  "licence_acknowledgment": "The lexicon is CMU-derived. Evaluation audio and reference transcripts come from the CMU Haitian Creole speech corpus, CMU Language Technologies Institute (c) 2010, MIT licence, condition 5 provenance acknowledgment.",
+  "governing_rule": "The Kreyòl model's linguistic and cultural gold standard must originate with native Haitian speakers. This tool repairs spelling; it certifies nothing.",
+  "shared_by": [
+    "apps/pilot-web/scripts/transcribe.py",
+    "services/speech-runtime/server.py (the runtime behind the Brain, and therefore behind the consumer MigraPilot app)"
+  ]
+}

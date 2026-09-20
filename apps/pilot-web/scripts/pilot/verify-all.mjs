@@ -16,6 +16,10 @@ const STEPS = [
   // silently pre-approved". Flipping one to satisfied would have compiled clean and shipped
   // green. A cold-perimeter guard that nothing runs is not a guard.
   { name: "executor-precheck", script: "pilot:precheck:verify" },
+  // The Kreyòl normalizer rewrites the user's own transcribed words. Its approval rests on a
+  // sealed-holdout measurement of one exact version, so the gate replays the qualified
+  // vectors rather than testing remembered rules.
+  { name: "kreyol-normalizer", script: "pilot:kreyol:verify" },
 ];
 
 const results = [];

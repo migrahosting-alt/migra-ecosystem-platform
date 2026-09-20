@@ -46,6 +46,50 @@ export interface TranscriptionWarning {
 }
 
 /**
+ * One orthographic repair the Kreyòl normalizer made, and why.
+ *
+ * Every change is itemised rather than summarised. A native speaker reviewing a transcript
+ * must be able to see WHICH words the machine respelled and on what evidence — "we cleaned
+ * it up" is not something a speaker can check, and Kreyòl orthography is exactly the ground
+ * where a confident tool is most likely to be confidently wrong.
+ */
+export interface TranscriptionNormalizationChange {
+  /** The token as the ASR produced it. */
+  source: string
+  /** The token as presented. */
+  replacement: string
+  /** Which rule family fired (ACCENT_NORMALIZATION, NASAL_OR_GLIDE_RESTORATION, ...). */
+  reason: string
+  /** Why that replacement was allowed — attestation and uniqueness. */
+  evidence: string
+}
+
+/**
+ * Orthographic post-processing applied to a transcript AFTER the ASR.
+ *
+ * WHY THIS IS IN THE CONTRACT AND NOT HIDDEN IN THE WORKER. `text` is no longer purely what
+ * the ASR produced — a second machine step has edited it. That is a fact a caller needs, for
+ * the same reason `detectedLanguage` is: a surface that cannot see it would present
+ * doubly-machine-derived text as a plain transcription. `rawText` is therefore carried
+ * unconditionally, so the original is never merely discarded.
+ *
+ * `applied: false` is the normal case — this only runs for Haitian Creole. `skippedReason`
+ * distinguishes "nothing to do" from "the normalizer was not available", which otherwise
+ * look identical from outside.
+ */
+export interface TranscriptionNormalization {
+  applied: boolean
+  /** The transcript exactly as the ASR produced it, before any repair. */
+  rawText: string
+  engine?: string
+  version?: string
+  language?: string
+  changes: TranscriptionNormalizationChange[]
+  /** Set when `applied` is false: why not. */
+  skippedReason?: string
+}
+
+/**
  * Provenance is kept separate from content ON PURPOSE. A transcript is machine-derived text
  * about audio, never the audio itself, and a turn built from one must remain distinguishable
  * from something the user typed.
@@ -80,6 +124,11 @@ export interface TranscriptionResult {
   status: TranscriptionStatus
   warnings: TranscriptionWarning[]
   provenance: TranscriptionProvenance
+  /**
+   * Orthographic post-processing, when any ran. `null` on a pipeline that does not do it at
+   * all — distinct from a normalization record saying it ran and changed nothing.
+   */
+  normalization: TranscriptionNormalization | null
 }
 
 /** What a surface must consult before enabling a microphone. */
@@ -142,6 +191,7 @@ export interface RawTranscription {
   englishOnly: boolean
   durationMs: number
   provenance: TranscriptionProvenance
+  normalization?: TranscriptionNormalization | null
 }
 
 /**
@@ -212,6 +262,7 @@ export function assessTranscription(
     status,
     warnings,
     provenance: raw.provenance,
+    normalization: raw.normalization ?? null,
   }
 }
 
@@ -234,4 +285,20 @@ export function micMayBeEnabled(capability: TranscriptionCapability): boolean {
 export function supportsHaitianCreole(capability: TranscriptionCapability): boolean {
   return capability.state === 'ready' && capability.multilingual &&
     capability.supportedLanguages.includes(HAITIAN_CREOLE)
+}
+
+/**
+ * The transcript as the ASR actually produced it.
+ *
+ * A surface showing the user "what you said" for confirmation should show THIS when it
+ * differs from `text`, or at least be able to. Normalization is high-precision but it is
+ * still a machine editing a person's words, and the person is the authority on them.
+ */
+export function rawTranscript(result: TranscriptionResult): string {
+  return result.normalization?.rawText ?? result.text
+}
+
+/** True when orthographic post-processing actually changed the presented text. */
+export function wasNormalized(result: TranscriptionResult): boolean {
+  return result.normalization?.applied === true && result.normalization.changes.length > 0
 }

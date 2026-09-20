@@ -14,6 +14,8 @@ THREE LANGUAGE FIELDS, NEVER COLLAPSED:
   requestedLanguage  what the CALLER explicitly asked for; absent unless they did
   forcedLanguage     what the decoder was actually told to assume; null means free to detect
   language           what the model DETECTED; null when it cannot detect at all
+  rawText            the transcript before Kreyòl orthographic post-processing
+  normalization      what that post-processing did, itemised, or why it did not run
 Collapsing requested and forced once already disabled the fabrication guard — French audio
 came back as fluent invented English marked safe to send.
 """
@@ -249,6 +251,51 @@ def to_wav16k(data: bytes) -> str:
     return out_path
 
 
+_KREYOL = "ht"
+_NORMALIZER_DIR = os.path.abspath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "packages", "kreyol-normalizer"))
+
+
+def _normalize_kreyol(text: str) -> tuple[str, dict]:
+    """Kreyòl orthographic post-processing. Returns (text_to_present, record).
+
+    Whisper renders Kreyòl in a mix of French and IPN 1979 spellings because that is what its
+    training data looks like. Measured: missing accents dominate (fet -> fèt, korek -> korèk),
+    then lost nasals and glides (ansam -> ansanm, zami -> zanmi), then French graphemes
+    (bas -> baz, leglis -> legliz). Those are SPELLING errors on words it heard correctly.
+    packages/kreyol-normalizer repairs them only when the candidate is attested, unique, and
+    not a proper name. Measured on a sealed holdout it has never damaged a token that was
+    already correct.
+
+    It is NOT semantic repair. If the model heard the wrong WORD this leaves it alone — a
+    nicer-reading sentence the speaker never said is the exact failure this file's language
+    handling exists to prevent.
+
+    FAILS OPEN. An orthographic nicety must never be able to take voice input down, so any
+    failure returns the raw text and SAYS SO, rather than looking like "nothing to fix".
+    """
+    if os.environ.get("MIGRAPILOT_KREYOL_NORMALIZE", "1") == "0":
+        return text, {"applied": False, "skippedReason": "disabled by MIGRAPILOT_KREYOL_NORMALIZE=0"}
+    if not text.strip():
+        return text, {"applied": False, "skippedReason": "empty transcript"}
+    try:
+        if _NORMALIZER_DIR not in sys.path:
+            sys.path.insert(0, _NORMALIZER_DIR)
+        import asr_normalizer
+
+        out = asr_normalizer.normalize(text)
+        return out["normalized_text"], {
+            "applied": True,
+            "engine": "kreyol-asr-orthographic-normalizer",
+            "version": "v1",
+            "language": _KREYOL,
+            "rawText": text,
+            "changes": out["changes"],
+        }
+    except Exception as exc:  # noqa: BLE001 — post-processing never breaks transcription
+        return text, {"applied": False, "skippedReason": "normalizer unavailable: %s" % exc}
+
+
 def transcribe(data: bytes, requested: str | None) -> dict:
     if _model is None:
         return {"error": _model_error or "model not loaded"}
@@ -263,11 +310,27 @@ def transcribe(data: bytes, requested: str | None) -> dict:
                 wav, language=forced, beam_size=1, vad_filter=True, condition_on_previous_text=False,
             )
             text = "".join(seg.text for seg in segments).strip()
+
+        detected = None if _english_only else getattr(info, "language", None)
+        # Kreyòl only, and only when the model could actually have produced Kreyòl. An .en
+        # build reporting "en" is reporting its own pin, not a detection, so it never routes
+        # here.
+        effective = forced or detected
+        if (not _english_only) and effective == _KREYOL:
+            text, normalization = _normalize_kreyol(text)
+        else:
+            normalization = {"applied": False,
+                             "skippedReason": "language is %s, not %s"
+                                              % (effective or "undetected", _KREYOL)}
         return {
             "text": text,
+            # What the ASR produced, before any orthographic repair. Returned always: a
+            # caller must be able to see what was actually heard, not only what is presented.
+            "rawText": normalization.get("rawText", text),
+            "normalization": normalization,
             # A pinned language is not a detection. Saying otherwise is the same lie in a
             # different field.
-            "language": None if _english_only else getattr(info, "language", None),
+            "language": detected,
             "languageProbability": None if _english_only else float(getattr(info, "language_probability", 0.0) or 0.0),
             "model": MODEL_NAME,
             "englishOnly": _english_only,

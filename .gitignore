@@ -273,6 +273,22 @@
 !/packages/shared-types/src/workbook/__fixtures__/
 !/packages/shared-types/src/workbook/__fixtures__/*.xlsx
 
+# The Kreyòl ASR orthographic normalizer. It lives in packages/ because TWO runtimes load the
+# same bytes — apps/pilot-web/scripts/transcribe.py and services/speech-runtime/server.py, the
+# latter being what the consumer MigraPilot app reaches speech through. A copy per app is how
+# two surfaces start disagreeing about what a speaker said.
+#
+# The lexicon snapshot and the regression vectors are tracked ON PURPOSE and are not generated
+# artifacts: they ARE the qualified instrument. The .jsonl holds the 94 transcripts the
+# precision and harm-rate figures were computed from, and pilot:verify replays them to prove
+# the shipped code still matches the code that was measured. Without them the gate would pass
+# vacuously on any checkout.
+!/packages/kreyol-normalizer/
+!/packages/kreyol-normalizer/*.py
+!/packages/kreyol-normalizer/*.json
+!/packages/kreyol-normalizer/*.jsonl
+!/packages/kreyol-normalizer/*.md
+
 # @migraai/compute-client is the typed client for the Shared Compute Authority — the ONE package
 # Studio, Brain, Engineer, MigraPilot and the CLI all talk to the authority through. It is a
 # contract, not an implementation: no provider, scheduling, evidence or lifecycle logic, enforced

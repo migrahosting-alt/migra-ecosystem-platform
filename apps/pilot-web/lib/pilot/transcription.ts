@@ -8,6 +8,8 @@ import {
   assessTranscription,
   HAITIAN_CREOLE,
   type TranscriptionCapability,
+  type TranscriptionNormalization,
+  type TranscriptionNormalizationChange,
   type TranscriptionProvenance,
   type TranscriptionResult,
 } from "../../../../packages/shared-types/src/transcription";
@@ -23,7 +25,46 @@ export interface WorkerOutput {
   /** ONLY set when the caller explicitly chose a language. */
   requested_language?: string | null;
   low_confidence?: boolean;
+  /** The transcript before Kreyòl orthographic post-processing. */
+  raw_text?: string;
+  normalization?: WorkerNormalization;
   error?: string;
+}
+
+/** snake_case as the python worker prints it; mapped once, here. */
+interface WorkerNormalization {
+  applied?: boolean;
+  raw_text?: string;
+  engine?: string;
+  version?: string;
+  language?: string;
+  changes?: TranscriptionNormalizationChange[];
+  skipped_reason?: string;
+}
+
+/**
+ * Map the worker's normalization block onto the contract.
+ *
+ * Returns `null` only when the worker said nothing at all — an OLD worker, or a different
+ * backend. That is deliberately distinct from `{ applied: false }`, which means a worker that
+ * does normalize looked at this transcript and decided not to. Collapsing the two would make
+ * "this pipeline has no Kreyòl cleanup" indistinguishable from "cleanup ran and found
+ * nothing", and only the first is a reason to go looking for a misconfiguration.
+ */
+function toNormalization(output: WorkerOutput): TranscriptionNormalization | null {
+  const n = output.normalization;
+  if (!n) return null;
+  return {
+    applied: n.applied === true,
+    // The worker echoes the pre-normalization string; if it did not, the presented text IS
+    // the raw text, because nothing edited it.
+    rawText: n.raw_text ?? output.raw_text ?? output.text ?? "",
+    ...(n.engine ? { engine: n.engine } : {}),
+    ...(n.version ? { version: n.version } : {}),
+    ...(n.language ? { language: n.language } : {}),
+    changes: n.changes ?? [],
+    ...(n.skipped_reason ? { skippedReason: n.skipped_reason } : {}),
+  };
 }
 
 /**
@@ -89,5 +130,6 @@ export function toTranscriptionResult(
     englishOnly,
     durationMs,
     provenance,
+    normalization: toNormalization(output),
   });
 }
