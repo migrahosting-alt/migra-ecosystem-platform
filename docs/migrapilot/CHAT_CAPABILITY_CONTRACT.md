@@ -1474,3 +1474,61 @@ window.
 the canonical conversation state even IS. Summaries depend on that state, so those
 are settled first: edit-and-ask-again -> delete/archive -> interrupted streaming ->
 attachment context across long chats -> this.
+
+---
+
+## 35. Edit-and-ask-again is sound. Page provenance was not.
+
+Owner priority 2 — edit-and-ask-again semantics. Tested live on staging
+`stopnotice-0920`, and the concern it was raised for does not reproduce.
+
+### Edit-and-ask-again: PASS
+
+A document was attached, asked about, then re-asked through "Edit this question
+and ask again":
+
+| check | result |
+| --- | --- |
+| transcript stays honest | PASS — the control loads the text back into the composer and APPENDS; it never edits history, and the label says so |
+| stale assistant context | PASS — no answer is re-parented to an edited prompt; the original question and its answer stay where they were |
+| evidence survives the edit | PASS — the re-asked question was still grounded: "the account manager reference number is NW-88213 (vendor_terms.md:9-11)" |
+
+The composer does not re-display the attachment chip on reuse — the draft carries
+text only. It is NOT a correctness defect: grounding is the conversation's active
+set, decided server-side, and the answer was grounded. It does mean the composer
+UNDER-states what is in scope, which is the safe direction and is noted rather
+than changed.
+
+### 🚨 DEFECT — FIXED: a file with no pages was cited as "page 2026"
+
+Found while verifying the above, on the real product:
+
+> vendor_terms.md · **page 2026**
+
+The file is Markdown. It has no pages. `2026` came from its own heading,
+`# Northwind Vendor Terms 2026`.
+
+**Cause: an overloaded field.** A chunk's `symbol` carries a page label for a paged
+document, a code symbol for source, and a HEADING for prose — measured directly:
+
+```
+symbol="Northwind Vendor Terms 2026"   lines 1-2
+symbol="Payment" / "Penalty" / "Contact"
+```
+
+`aiRoutes` mapped `symbol` -> `location`, scraped every digit run out of it, and
+expanded first..last into a range. So a heading containing a year became a page —
+and a heading reading "Section 3 to 9" would have produced SEVEN fabricated page
+citations. That is exactly the fabricated span the code's own comment forbids,
+arriving through the one field nobody checked.
+
+**Fix: only a label the pager itself wrote counts as a page.** `pageLabel` already
+emits `page 7` / `pages 7-8`, so the shape is the discriminator. Anything else
+yields no page at all — under-reporting provenance, which is the correct direction
+to be wrong in. Extracted as `pagesFromChunks` so the invariant is testable.
+
+Seven tests, negative-checked: restoring the digit scrape fails exactly the three
+"must not be a page" cases while the four legitimate-page cases still pass, so they
+discriminate this defect rather than detecting change.
+
+Brain 3442/3442, tsc 0.

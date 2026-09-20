@@ -1555,6 +1555,50 @@ async function streamOwnedAnswer(
   return reply;
 }
 
+
+/**
+ * Which PAGES an answer was grounded in, per file.
+ *
+   * 🚨 ONLY A LABEL THE PAGER ITSELF WROTE COUNTS AS A PAGE.
+   *
+   * `location` carries the chunk's `symbol`, and that field is OVERLOADED by
+   * design: a page label for a paged document, a code symbol for source, and a
+   * HEADING for prose. This used to scrape every digit run out of it and expand
+   * first..last into a range, which turned ordinary markdown into fabricated
+   * provenance — a file with no pages at all cited as "page 2026", because its
+   * heading read "# Northwind Vendor Terms 2026". Measured end to end on the
+   * real product.
+   *
+   * The range expansion made it worse than a wrong number: a heading like
+   * "Section 3 to 9" would have produced SEVEN page citations, which is exactly
+   * the fabricated span the comment above forbids, arriving through the field
+   * nobody thought to check.
+   *
+   * `pageLabel` already emits "page 7" or "pages 7-8", so the shape is the
+   * discriminator. Anything else is a symbol or a heading and yields no page —
+   * under-reporting provenance, which is the correct direction to be wrong in.
+ 
+ */
+export function pagesFromChunks(
+  chunks: ReadonlyArray<{ path?: string }>,
+): Record<string, number[]> {
+  const PAGE_LABEL = /^page (\d+)$|^pages (\d+)-(\d+)$/;
+  const pages: Record<string, number[]> = {};
+  for (const chunk of chunks) {
+    const label = (chunk as { location?: string }).location;
+    if (!chunk.path || !label) continue;
+    const matched = PAGE_LABEL.exec(label.trim());
+    if (!matched) continue;
+    const first = Number(matched[1] ?? matched[2]);
+    const last = Number(matched[1] ?? matched[3]);
+    if (!Number.isFinite(first) || !Number.isFinite(last) || first < 1 || last < first) continue;
+    const span = new Set(pages[chunk.path] ?? []);
+    for (let page = first; page <= last; page += 1) span.add(page);
+    pages[chunk.path] = [...span].sort((a, b) => a - b);
+  }
+  return pages;
+}
+
 async function streamChat(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -1642,17 +1686,7 @@ async function streamChat(
    * Deduplicated and sorted here so the same page cited by two chunks appears
    * once.
    */
-  const pages: Record<string, number[]> = {};
-  for (const chunk of groundedChunks) {
-    const label = (chunk as { location?: string }).location;
-    if (!chunk.path || !label) continue;
-    const found = [...label.matchAll(/\d+/g)].map((m) => Number(m[0])).filter(Number.isFinite);
-    if (found.length === 0) continue;
-    const [first, last] = [found[0]!, found[found.length - 1]!];
-    const span = new Set(pages[chunk.path] ?? []);
-    for (let page = first; page <= last; page += 1) span.add(page);
-    pages[chunk.path] = [...span].sort((a, b) => a - b);
-  }
+  const pages = pagesFromChunks(groundedChunks);
 
   if (groundedIn.length > 0) {
     send('grounding', {
