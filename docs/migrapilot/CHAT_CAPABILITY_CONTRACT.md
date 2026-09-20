@@ -1285,3 +1285,82 @@ automated end-to-end verified → **READY FOR LOCAL USER TEST**. Not user-proven
 Known limits, stated rather than discovered: chart series values and embedded
 workbooks are not read (declared per deck), and `.ppt`/`.odp` remain refused —
 different formats, no reader.
+
+---
+
+## 33. A stopped answer is part of the conversation
+
+**Contract.** If the user presses Stop after receiving partial assistant text, the
+text they can see is part of the conversation and must survive reload,
+conversation switching, and later continuation.
+
+Persisted on `conversation_messages.status`, which the column already allowed — no
+migration, no parallel mechanism. `stopped` is a distinct status, not `failed` and
+not `partial`.
+
+### The discriminator is the REQUEST, never the text
+
+A user stop drops the connection, so `request.signal.aborted` is true; a stream that
+dies on its own leaves it false. Nothing infers intent from how finished the answer
+looks — that is exactly how a dropped connection gets labelled as a decision the
+person never made. The pre-existing test "a stream that ends without `done` persists
+NOTHING" passes unchanged and is the standing control for this.
+
+### Live matrix on staging `stopnotice-0920` / `b4f60c9f`
+
+| criterion | result |
+| --- | --- |
+| survives reload | PASS — full text returned |
+| survives conversation switching | PASS — via History, text and mark intact |
+| visibly distinguishable | PASS — distinct notice, returns after reload |
+| continuation does not treat it as complete | PASS — model resumed mid-narrative, Newark/Oakland -> 1968 Rotterdam |
+| no duplicates, no empty turns | PASS — records carry their own status |
+| transport failure is a different path | PASS — standing automated control |
+| **Try again on a stopped turn** | PASS — appended a new turn; stopped record untouched |
+
+Retry sequence, read back from the store: 4 records — the stopped turn keeping its
+text and `status=stopped`, then a repeated question and a new complete answer. After
+reload: two assistant turns, exactly ONE stopped notice.
+
+**Try again needed no new mechanism, and the reason matters.** `askAgain.ts` records
+that the store is APPEND-ONLY: there is no operation to delete one message, truncate,
+or fork. So "regenerate" here has always meant append, never replace — which
+satisfies every constraint by construction rather than by added guards. `canAskAgain`
+already allowed a stopped last turn; tests now pin it, including that it must not
+appear while the turn is still streaming.
+
+### 🚨 The trust defect this slice created, and then fixed
+
+The stopped answer survived reload with this sentence still under it:
+
+> "It was not finished, so it was not saved — it will not be here after you reload."
+
+It WAS saved. It WAS there. The user could disprove the product in one click. That
+sentence was true until the turn before; persisting stopped answers made it false and
+nothing re-read it — the same failure as the capability line claiming MigraPilot could
+not read PDFs while it was answering from one.
+
+It now reads: **"You stopped this answer. It is incomplete, and it has been kept in
+this conversation."** Both halves are load-bearing. Incomplete without kept leaves the
+old implication that it is about to vanish; kept without incomplete invites a
+truncated answer to be read as finished.
+
+An existing assertion was INVERTED rather than deleted. It required the words "not
+saved" for the right reason at the time — do not imply a persistence that did not
+happen. The same rule now demands the opposite words, because denying a persistence
+that DOES happen is the same lie from the other side. A green test holding a false
+sentence in place is worse than no test.
+
+### Stated honestly: one criterion not proven live
+
+"Stop before any assistant text" could NOT be reproduced through the composer —
+first-token latency is shorter than a browser round trip, so winning that race would
+be luck rather than method. It is covered deterministically by
+`STOP before any assistant text writes NO assistant turn`, which holds the stream
+open emitting nothing. That is stronger evidence than a race, and it is not the same
+as a live pass; recorded as what it is.
+
+### Status
+
+Brain 3432/3432, consumer 1319/1319, tsc 0. Implemented → staging-deployed →
+live matrix verified → **READY FOR USER TEST**. Not user-proven.
