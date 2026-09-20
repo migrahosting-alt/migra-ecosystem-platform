@@ -162,6 +162,29 @@ export async function deleteConversation(client: PoolClient, id: string): Promis
    */
   await client.query('DELETE FROM conversation_messages WHERE conversation_id = $1', [id]);
   await client.query('DELETE FROM conversation_summaries WHERE conversation_id = $1', [id]);
+  /*
+   * 🚨 EVERYTHING KEYED TO THE CONVERSATION, NOT JUST ITS TRANSCRIPT.
+   *
+   * The product's own words for this action are "delete it for good". These two
+   * tables carry `conversation_id` and have NO foreign key and NO cascade to
+   * `conversations`, so they were surviving the delete forever:
+   *
+   *   · message_feedback   — the user's own up/down ratings on messages in a
+   *                          conversation they asked to be rid of. Deleting the
+   *                          thread and keeping the opinions about it is not
+   *                          "for good", and it is their content, not ours.
+   *   · conversation_project — a binding to a project, pointing at a thread that
+   *                          no longer exists.
+   *
+   * Neither is visible in the UI, which is exactly why nothing noticed. Orphan
+   * rows with no retention policy are not harmless: they are data a user asked
+   * to be deleted, kept because no query happened to join to it.
+   *
+   * Cleared BEFORE the conversation row, inside the same transaction, so a
+   * failure leaves the thread intact rather than half-deleted.
+   */
+  await client.query('DELETE FROM message_feedback WHERE conversation_id = $1', [id]);
+  await client.query('DELETE FROM conversation_project WHERE conversation_id = $1', [id]);
   const r = await client.query('DELETE FROM conversations WHERE id = $1', [id]);
   requireAffected(r.rowCount, 'deleteConversation', id);
 }

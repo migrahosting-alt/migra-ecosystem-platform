@@ -1551,3 +1551,54 @@ losing runtime proof.
 
 Remaining order: delete/archive -> interrupted streaming -> attachment context across
 long chats -> summarization integration -> batched deploy -> live regression pass.
+
+---
+
+## 36. Delete/archive — one capability absent, one defect fixed
+
+Owner priority 3. Brief: prove the UI language matches the actual persistence, and
+that deleting does not take files still referenced elsewhere or leave orphan state
+without a retention policy.
+
+### ARCHIVE DOES NOT EXIST
+
+The conversation controls are **Rename, keep a copy, and Delete** — there is no
+archive, anywhere in the consumer. So "archive only hides and stays recoverable"
+has nothing to verify. Recorded as a MISSING CAPABILITY, not a defect, and not
+invented to satisfy a checklist.
+
+### Delete: the language is accurate, and the files are safe
+
+| check | result |
+| --- | --- |
+| "delete it for good" really removes it | PASS — conversation, messages and summaries all go, in one transaction |
+| already-deleted is not an error | PASS — a double click lands the user where they asked to be |
+| attached files survive | PASS — delete touches no file; a library file may be referenced by other threads and is the user's, not the conversation's |
+| files deleted LATER do not corrupt a transcript | PASS — `missingFileRefs` is computed against the CURRENT library at read time, so a deleted source renders as deleted rather than as a live one |
+
+### 🚨 DEFECT — FIXED: "for good" was leaving two tables behind
+
+`message_feedback` and `conversation_project` both carry `conversation_id`, and
+**neither has a foreign key or a cascade** to `conversations`. The delete cleared
+messages, summaries and the conversation row, so those two survived permanently:
+
+- **message_feedback** — the user's own up/down ratings on messages in a thread they
+  asked to be rid of. Deleting the conversation and keeping the opinions about it is
+  not "for good", and it is their content.
+- **conversation_project** — a binding pointing at a conversation that no longer
+  exists.
+
+Neither is visible in the UI, which is exactly why nothing noticed. **Orphan rows
+with no retention policy are not harmless: they are data a user asked to have
+deleted, kept because no query happened to join to it.**
+
+Both are now cleared in the same transaction, BEFORE the conversation row, so a
+failure leaves the thread intact and retryable rather than half-deleted.
+
+Three tests, asserted on the statements issued rather than against a live database,
+because the property under test is what the delete REACHES. Negative-checked:
+removing the two new deletes fails the completeness test. The tests also pin the
+ordering, and that no delete is ever unfiltered — an unscoped DELETE here would
+empty a table for every user at once.
+
+Brain 3445/3445, tsc 0. Awaiting the batched staging deploy.
