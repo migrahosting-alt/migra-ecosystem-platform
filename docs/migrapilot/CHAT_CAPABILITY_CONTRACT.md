@@ -1758,3 +1758,62 @@ The distinction that matters, and which §38 now enforces:
 > current turn must truthfully acknowledge that the file is no longer available for
 > grounding — and must never answer from a different document merely because
 > something else is still attached.
+
+---
+
+## 39. Context-pressure summarization
+
+The approved design from §34a, implemented. §34 established that
+`summarizeConversation` worked and was reachable only through a route the consumer
+never called — so `getLatestSummary` found nothing in production and a conversation
+that outgrew its budget simply lost its beginning. **This is the trigger that was
+missing**, plus the rules the owner set around it.
+
+### The rules, and where each one lives
+
+| rule | how it is met |
+| --- | --- |
+| trigger by context PRESSURE, not turn count | `readContextPressure` measures tokens over the same message set the context builder would show, against 75% of the budget |
+| summarize only the older portion | `keepRecent` excludes the newest turns from the eligible range |
+| keep recent raw turns verbatim | those turns are never compressed, so context never carries a lossy copy above an exact one |
+| file references kept SEPARATE from prose | `SummaryBody.files`, rendered as "still the source for what they contain — do not quote them from this summary" |
+| versioned | `addSummary` already versions, and each summary is source-bound to a message id range |
+| refreshable / correctable | summaries are additive and the newest wins; a later refresh covers the range after the last one |
+| failure falls back to omission markers | the trigger is wrapped and best-effort; on failure the context builder still marks what it could not fit |
+| never mutate the transcript | nothing here writes to `conversation_messages` |
+
+**Triggered AFTER the answer is committed**, so a user never waits on compression
+for an answer they already have, and a summarisation failure can never fail a turn
+that already succeeded.
+
+### 🚨 Why this summariser stays EXTRACTIVE, and why order is the whole design
+
+The owner's acceptance case: a fact stated early, corrected later, then compressed.
+
+A summariser that "resolves" the contradiction has to decide which of two things a
+person said is true, and it decides wrong exactly when it matters. **Every
+statement is kept, in order.** The correction is then the last thing said on the
+subject — which is what a reader and a model both take it to mean — and neither the
+original nor the correction is silently discarded. Rewriting the two into one
+sentence is precisely where a stale value becomes the permanent one.
+
+Proven, and negative-checked twice because the property has two ways to break:
+
+| control | result |
+| --- | --- |
+| reverse the extracted statements (lose order) | correction test FAILS |
+| keep only the first statement (a "resolving" summariser) | correction test FAILS |
+| drop `body.files` | attachment-reference test FAILS |
+
+A first attempt at the order control did NOT bite — it deduplicated on a 12-character
+prefix and the two statements differ there. The control was wrong, not the test;
+rebuilt until it attacked the property rather than the wording.
+
+### One default chosen deliberately
+
+`keepRecent` defaults to **0**, not 6. The manual `POST /…/summarize` route means
+"summarise what is there", and silently withholding its newest turns would change
+what that endpoint does to every existing caller. The pressure trigger — the thing
+that exists to keep recent turns raw — passes its own value.
+
+Brain 3453/3453, consumer 1329/1329, tsc 0. Completes the batch.

@@ -118,6 +118,16 @@ export interface SummaryBody {
   questions: string[];
   projectState: string[];
   nextActions: string[];
+  /**
+   * Artifacts referenced in the summarised range, kept AS REFERENCES.
+   *
+   * 🚨 A FILE MUST NOT BE SUMMARISED AWAY INTO PROSE. Compressing "we looked at
+   * report.pdf and it said 45 days" into a sentence turns an addressable source
+   * into a remembered claim — and the file is still sitting in the library,
+   * readable, authoritative, and now bypassed. The summary may say a file was
+   * discussed; it may never become the provenance for what the file says.
+   */
+  files?: string[];
 }
 
 export interface Summary {

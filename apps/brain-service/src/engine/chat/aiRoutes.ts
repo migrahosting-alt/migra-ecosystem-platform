@@ -1,4 +1,6 @@
 import { allowRemoteModelsFromEnv } from '../models/eligibilityPolicy.js';
+import { readContextPressure } from '../memory/contextPressure.js';
+import { summarizeConversation, PRESSURE_KEEP_RECENT } from '../memory/summarizer.js';
 /**
  * MigraAI Engine — unified public API facade (`/api/ai/*`).
  *
@@ -875,6 +877,33 @@ export function registerAiRoutes(
       ? async (text: string, modelId: string, providerId: string): Promise<void> => {
           if (!text.trim()) return;
           await memoryStore!.appendMessage(conv!.id, scope, { role: 'assistant', content: redactSecrets(text).text, status: 'complete', requestId, modelId, providerId });
+
+          /*
+           * 🚨 COMPRESS AFTER THE ANSWER, AND ONLY UNDER PRESSURE.
+           *
+           * This is the trigger that never existed: `summarizeConversation` was
+           * reachable only through a route the consumer never called, so
+           * `getLatestSummary` found nothing in production and a conversation
+           * that outgrew its budget simply lost its beginning.
+           *
+           * AFTER the commit, so a user never waits on compression for an answer
+           * they already have. Measured by TOKENS, not by a turn count, because
+           * tokens are what runs out. Best-effort by design: if this fails the
+           * conversation is exactly as it was, and the context builder still
+           * marks the turns it cannot fit — an honest gap beats a pretence of
+           * memory, and a summarisation failure must never fail a turn that
+           * already succeeded.
+           */
+          try {
+            const pressure = readContextPressure(memoryStore!, scope, conv!.id);
+            if (pressure.underPressure) {
+              const result = await summarizeConversation(memoryStore!, scope, conv!.id, { keepRecent: PRESSURE_KEEP_RECENT });
+              trace?.set('summarised', String(result.ok));
+            }
+            trace?.set('context_tokens', String(pressure.estimatedTokens));
+          } catch (error) {
+            console.error('[memory] summarisation skipped', error);
+          }
         }
       : undefined;
 

@@ -2,6 +2,7 @@ import {
   assessTranscription,
   HAITIAN_CREOLE,
   type TranscriptionCapability,
+  type TranscriptionNormalization,
   type TranscriptionProvenance,
   type TranscriptionResult,
 } from '@migrapilot/shared-types/transcription';
@@ -69,7 +70,33 @@ interface RuntimeTranscription {
   englishOnly?: boolean;
   /** Echoed back ONLY when the caller explicitly asked for a language. */
   requestedLanguage?: string | null;
+  /** The transcript before Kreyòl orthographic post-processing. */
+  rawText?: string;
+  normalization?: TranscriptionNormalization;
   error?: string;
+}
+
+/**
+ * Carry the runtime's orthographic post-processing onto the contract.
+ *
+ * `undefined` becomes `null`: a runtime that says nothing about normalization is not the
+ * same as one that normalizes and declined to this time. Only the first is a reason to
+ * suspect the Kreyòl path is misconfigured, and a surface can only tell them apart if the
+ * Brain keeps them apart.
+ *
+ * The runtime already speaks the contract's camelCase shape, so this passes it through
+ * rather than re-deriving it — the verdict is decided once, here, as everything else in this
+ * function is.
+ */
+function toNormalization(payload: RuntimeTranscription): TranscriptionNormalization | null {
+  const n = payload.normalization;
+  if (!n) return null;
+  return {
+    ...n,
+    applied: n.applied === true,
+    rawText: n.rawText ?? payload.rawText ?? payload.text ?? '',
+    changes: n.changes ?? [],
+  };
 }
 
 const unavailable = (reason: string): TranscriptionCapability => ({
@@ -221,6 +248,7 @@ export async function transcribeWithRuntime(
     englishOnly,
     durationMs: Date.now() - startedAt,
     provenance,
+    normalization: toNormalization(payload),
   });
 }
 

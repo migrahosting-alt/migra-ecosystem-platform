@@ -63,6 +63,16 @@ export function renderSummary(summary: Summary): string {
   if (s.questions.length) parts.push(`Open questions:\n- ${s.questions.join('\n- ')}`);
   if (s.projectState.length) parts.push(`Project state:\n- ${s.projectState.join('\n- ')}`);
   if (s.nextActions.length) parts.push(`Next actions:\n- ${s.nextActions.join('\n- ')}`);
+  /*
+   * Named, and explicitly NOT quoted from. The file is still the authority on
+   * its own contents; this line exists so a compressed range does not make an
+   * addressable source disappear from the conversation's memory of itself.
+   */
+  if (s.files?.length) {
+    parts.push(
+      `Files discussed earlier (still the source for what they contain — do not quote them from this summary):\n- ${s.files.join('\n- ')}`,
+    );
+  }
   return `Summary of earlier conversation (messages ${summary.sourceFromMessageId}‥${summary.sourceToMessageId}):\n${parts.join('\n')}`;
 }
 

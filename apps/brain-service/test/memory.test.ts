@@ -5,7 +5,8 @@ import type { BrainEnv } from '../src/config/env.js';
 import type { ModelDescriptor } from '../src/engine/models/modelRegistry.js';
 import { ConversationStore, type MemoryPersistence, type Scope } from '../src/engine/memory/conversationStore.js';
 import { redactSecrets, sanitizeForMemory } from '../src/engine/memory/redaction.js';
-import { buildContext } from '../src/engine/memory/contextBuilder.js';
+import { buildContext, renderSummary } from '../src/engine/memory/contextBuilder.js';
+import { readContextPressure } from '../src/engine/memory/contextPressure.js';
 import { summarizeConversation } from '../src/engine/memory/summarizer.js';
 import { registerMemoryRoutes } from '../src/engine/memory/memoryRoutes.js';
 import { registerAiRoutes } from '../src/engine/chat/aiRoutes.js';
@@ -372,4 +373,100 @@ test('the gap marker takes the role of the message it replaces', async () => {
   const marker = built.messages.find((m) => /left out/i.test(m.content));
   assert.ok(marker, 'no marker was emitted');
   assert.equal(marker.role, 'user', 'the omitted turn was the user’s');
+});
+
+// ── context-pressure summarization ─────────────────────────────────────────
+
+test('pressure is measured in TOKENS, not in turns', async () => {
+  /*
+   * A turn count compresses short conversations that never needed it and leaves
+   * long ones past the ceiling while the counter says four. Twenty tiny turns
+   * must NOT trigger; a couple of large ones must.
+   */
+  const s = new ConversationStore();
+  const small = await s.createConversation(A, { memoryMode: 'session' });
+  for (let i = 0; i < 20; i += 1) {
+    await s.appendMessage(small.id, A, { role: i % 2 ? 'assistant' : 'user', content: `turn ${i}`, status: 'complete' });
+  }
+  assert.equal(readContextPressure(s, A, small.id).underPressure, false, 'many tiny turns triggered compression');
+
+  const big = await s.createConversation(A, { memoryMode: 'session' });
+  for (let i = 0; i < 3; i += 1) {
+    await s.appendMessage(big.id, A, { role: 'user', content: 'x'.repeat(5000), status: 'complete' });
+  }
+  assert.equal(readContextPressure(s, A, big.id).underPressure, true, 'a genuinely large conversation was not compressed');
+});
+
+test('🚨 a CORRECTION survives summarization — the stale value must not win', async () => {
+  /*
+   * THE CASE THE OWNER NAMED. An account number stated early, corrected later,
+   * then compressed. A summariser that "resolves" the contradiction has to pick
+   * one, and it picks wrong exactly when it matters.
+   *
+   * Both statements are kept, IN ORDER, so the correction is the last thing said
+   * on the subject — which is what a reader and a model both take it to mean.
+   * Neither the original nor the correction is silently discarded.
+   */
+  const s = new ConversationStore();
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'My account number is 4471.', status: 'complete' });
+  await s.appendMessage(c.id, A, { role: 'assistant', content: 'Noted.', status: 'complete' });
+  await s.appendMessage(c.id, A, { role: 'user', content: 'Correction: my account number is 5582, not 4471.', status: 'complete' });
+  for (let i = 0; i < 8; i += 1) {
+    await s.appendMessage(c.id, A, { role: i % 2 ? 'assistant' : 'user', content: `filler ${i}`, status: 'complete' });
+  }
+
+  const result = await summarizeConversation(s, A, c.id, { keepRecent: 2 });
+  assert.equal(result.ok, true, `summarisation did not run: ${result.reason}`);
+
+  const rendered = renderSummary(result.summary!);
+  assert.match(rendered, /5582/, 'the corrected value was lost');
+  assert.ok(
+    rendered.indexOf('5582') > rendered.indexOf('4471'),
+    'the correction must come after the value it corrects',
+  );
+});
+
+test('the most recent turns are NOT summarised', async () => {
+  /*
+   * They are shown verbatim anyway, so compressing them puts a lossy copy above
+   * an exact one — and risks summarising a fact while the user is still
+   * correcting it.
+   */
+  const s = new ConversationStore();
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  for (let i = 0; i < 10; i += 1) {
+    await s.appendMessage(c.id, A, { role: 'user', content: `statement ${i}`, status: 'complete' });
+  }
+  const result = await summarizeConversation(s, A, c.id, { keepRecent: 3 });
+  assert.equal(result.ok, true);
+  const rendered = renderSummary(result.summary!);
+  for (const recent of ['statement 7', 'statement 8', 'statement 9']) {
+    assert.ok(!rendered.includes(recent), `${recent} was compressed while still in the raw window`);
+  }
+  assert.match(rendered, /statement 0/, 'the oldest turn was not compressed');
+});
+
+test('🚨 an attachment is kept as a REFERENCE, never summarised into prose', async () => {
+  /*
+   * Compressing "we looked at report.pdf and it said 45 days" into a sentence
+   * turns an addressable source into a remembered claim, while the file is still
+   * in the library, readable and authoritative. The summary may say a file was
+   * discussed; it may never become the provenance for what the file says.
+   */
+  const s = new ConversationStore();
+  const c = await s.createConversation(A, { memoryMode: 'session' });
+  await s.appendMessage(c.id, A, {
+    role: 'user', content: 'What are the payment terms?', status: 'complete', fileRefs: ['terms.pdf'],
+  });
+  for (let i = 0; i < 8; i += 1) {
+    await s.appendMessage(c.id, A, { role: i % 2 ? 'assistant' : 'user', content: `filler ${i}`, status: 'complete' });
+  }
+  const result = await summarizeConversation(s, A, c.id, { keepRecent: 2 });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.summary!.summary.files, ['terms.pdf'], 'the file reference was lost');
+
+  const rendered = renderSummary(result.summary!);
+  assert.match(rendered, /terms\.pdf/, 'the file was not named');
+  assert.match(rendered, /do not quote them from this summary/i, 'the summary did not defer to the file');
 });
