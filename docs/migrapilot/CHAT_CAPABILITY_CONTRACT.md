@@ -1890,3 +1890,51 @@ Conversation delete HAS a confirmation dialog. File delete still does not — §
 **Conversation-state batch: staging-proven / READY FOR USER TEST.** Not user-proven.
 NOT production-ready: the Brain lineage gate (§IV §1, `release/engineer-three-track`)
 is separate, unresolved, and unaffected by any of this.
+
+---
+
+## 41. 🚨 BLOCKS THE OWNER TEST: the staging session ends silently after ~15–20 minutes
+
+Found while starting the naturalistic pass. It stopped that pass, and it will meet
+the owner the moment they sit down to test.
+
+### What was measured
+
+| time | state |
+| --- | --- |
+| 19:16:47 | consumer restarts (deploy cutover) |
+| 19:17–19:23 | **signed in** — files uploaded, chats run as the owner |
+| 19:42 | **signed out** — "Sign in to attach documents", 401s on `/api/files` |
+
+No restarts between 19:23 and 19:42. An earlier occurrence matched: signed in,
+then signed out roughly 21 minutes later.
+
+### 🚨 A correction to something already reported
+
+I previously told the owner that **a consumer deploy signs users out**. That was
+WRONG, and the timeline above is why: the session survived the 19:16:47 restart and
+worked for six minutes afterwards. The logout is time-based, not deploy-based. The
+claim never reached this document, but it was said, so it is corrected here.
+
+### What the code says, and where the investigation stopped
+
+`migraAuthApi.ts` mints `accessTokenExpiresAt` from `(expires_in ?? 900) - 30` — a
+**15-minute** access token by default. A refresh flow exists and is properly built
+(one-time rotation, in-flight de-duplication, explicit `persistRenewal` because
+replaying a rotated token revokes the whole family).
+
+So the token lifetime matches the symptom, and the refresh either is not firing or
+is failing. **Nothing is logged** — `journalctl` for the consumer has no auth,
+refresh, reauth or 401 line for the whole window. A session ending with no record is
+its own defect: there is nothing for an operator to read.
+
+Diagnosis stopped there deliberately. MigraAuth internals belong to the auth lane,
+which has its own unresolved reconciliation, and the Chat lane guessing at token
+rotation would be the scope creep this programme keeps refusing.
+
+### Why it matters beyond the test
+
+A chat product that signs a person out roughly every fifteen minutes of thinking
+time is not usable for the work it exists to do — a long document conversation is
+exactly the session that idles. Recorded as a **defect candidate for the auth lane**,
+with the measurement rather than a theory.
