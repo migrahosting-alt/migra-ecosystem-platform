@@ -66,7 +66,7 @@ import type { Principal } from '@/server/tenancy/principal'
 import type { BrainStreamFrame } from '@/server/brain/gateway'
 import type { ConversationSummary } from '@/server/brain/contracts'
 import { resolveTurnImages } from '@/server/files/resolveTurnImages'
-import { selectTurnGrounding } from '@/server/files/turnGrounding'
+import { selectTurnGrounding, missingFileEvidence } from '@/server/files/turnGrounding'
 import { decideAttachmentState } from '@/server/files/attachmentState'
 import { canAnalyzeStructurally, canIndex, extensionOf } from '@/features/attachments/capability'
 import { workbookDisclosureFor } from '@/features/attachments/spreadsheetDisclosure'
@@ -1378,6 +1378,9 @@ export async function POST(request: Request): Promise<Response> {
         : referenceEvidence({ attachments, activeSheet, basis: [] })
 
       const prefix = [
+        // A file this conversation lost must be named as lost, or the narrowing
+        // rules quietly answer from some other document instead.
+        missingFileEvidence(reconciled.missing),
         orderEvidence,
         projectEvidence?.text,
         tableEvidence?.text,

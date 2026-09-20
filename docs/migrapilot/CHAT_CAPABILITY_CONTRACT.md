@@ -1689,3 +1689,56 @@ The four states and what each may claim:
 | `stopped` | explicit user intent, declared by the browser that saw the click |
 | `interrupted` | generation cut off, claiming nothing about why |
 | failure | transport/provider error — persists nothing |
+
+---
+
+## 38. Attachment context across long chats
+
+Owner priority 5. Tested live on staging `stopnotice-0920`: a lease summary
+attached, an unrelated turn, a second document attached, then references back.
+
+### What PASSED, and why it is stronger than I expected
+
+| case | result |
+| --- | --- |
+| attach early, unrelated turns, refer back loosely | PASS — "Go back to the lease document from earlier — what is the annual rent?" answered **84,000**, citing both files |
+| purely POSITIONAL reference | PASS — "What does the first file I attached say about its term?" quoted "The lease runs for 7 years from 1 March 2026" |
+| identity survives transcript trimming | PASS by construction — grounding is the conversation's DURABLE file set, not the transcript, so context budget cannot erase which files exist |
+| deleted file marked on historical turns | PASS — `missingFileRefs` renders "no longer in your library" on the turns that attached it |
+
+I expected the positional case to fail and it did not. The ordinal reference model
+and the durable grounding set carried it.
+
+### 🚨 DEFECT — FIXED: a deleted file was answered around, not reported
+
+The lease summary was deleted from the library. Asked **"In the lease document,
+which year is the rent review?"**:
+
+> "The term of the document is 2026 **(vendor_terms.md:1-2)**."
+
+A DIFFERENT file, cited, with nothing in that turn saying the lease was gone. The
+historical chips said "no longer in your library"; the ANSWER did not. **A
+confident answer about the wrong document is worse than a refusal, because the
+citation invites the reader to trust it.**
+
+**Cause.** Reconciliation drops a deleted file from `available` — correct, it is
+gone — and the turn then proceeds as if the user had never referred to it, so the
+narrowing rules pick some other document.
+
+**Fix: state the loss.** `reconciled.missing` already existed and nothing read it.
+The turn now carries the files this conversation HAD and no longer has, with an
+instruction to say so and not to answer from a different document.
+
+**Stated unconditionally, not gated on the prompt naming the file** — and that is
+the load-bearing decision. `mentions()` does not match "the lease document" to
+`lease_summary.md` by stem or by spacing, so a matched-only disclosure would have
+stayed silent on the exact case that produced the defect. The fact is short, true,
+and appears only on a conversation that has actually lost a file.
+
+### Noted, not changed: deleting a library file has no confirmation
+
+One click on the Files page destroys a file irreversibly, with no confirm step —
+while deleting a CONVERSATION is described as "delete it for good". Recorded as a
+UX risk for the owner rather than changed inside a context slice.
+
+Consumer 1329/1329, tsc 0. Awaiting the batched staging deploy.

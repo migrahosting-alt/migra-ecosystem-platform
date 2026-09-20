@@ -48,6 +48,8 @@ function mentions(prompt: string, fileName: string): boolean {
   return spaced.length >= 4 && haystack.includes(spaced)
 }
 
+import { composeEvidence } from '@/server/evidence/composition'
+
 export interface TurnGroundingSelection {
   /** The retrieval boundary for THIS turn. */
   active: string[]
@@ -85,6 +87,42 @@ export interface TurnGroundingSelection {
  * a long session being reactivated forever.
  */
 const CO_ATTACHED_WINDOW_MS = 120_000
+
+/**
+ * Files this conversation HAD, which are no longer in the library.
+ *
+ * 🚨 WHY THE MODEL HAS TO BE TOLD. Reconciliation drops a deleted file from the
+ * available set silently and correctly — it is gone, and grounding on it is
+ * impossible. But the turn then proceeds as though the user had never referred
+ * to it, and the narrowing rules below pick some OTHER document.
+ *
+ * Measured on staging. A lease summary was attached, discussed, and deleted from
+ * the library. Asked "In the lease document, which year is the rent review?",
+ * the answer came back "The term of the document is 2026 (vendor_terms.md:1-2)"
+ * — a different file, cited, with nothing anywhere saying the lease was gone.
+ * A confident answer about the wrong document is worse than a refusal, because
+ * the citation invites the reader to trust it.
+ *
+ * Stated UNCONDITIONALLY rather than only when the prompt appears to name the
+ * missing file, because name-matching is exactly what cannot be relied on here:
+ * "the lease document" does not match `lease_summary.md` by stem or by spacing,
+ * so a matched-only disclosure would have stayed silent on the very case that
+ * produced the defect. The fact is short, it is true, and it only appears on a
+ * conversation that has actually lost a file.
+ */
+export function missingFileEvidence(missing: readonly string[]): string | null {
+  const gone = [...new Set(missing.filter((name) => name.trim().length > 0))]
+  if (gone.length === 0) return null
+  return composeEvidence({
+    fact: [
+      `[${gone.length === 1 ? 'This file was' : 'These files were'} part of this conversation and ${gone.length === 1 ? 'is' : 'are'} NO LONGER in the user's library:`,
+      ...gone.map((name) => `  ${name}`),
+      `If the question is about ${gone.length === 1 ? 'it' : 'one of them'}, say plainly that it is no longer available.`,
+      `Do not answer about it from a different document.]`,
+    ],
+    directives: [],
+  })
+}
 
 export function selectTurnGrounding(
   prompt: string,
