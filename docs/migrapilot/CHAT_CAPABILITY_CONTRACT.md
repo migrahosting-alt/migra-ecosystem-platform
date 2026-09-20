@@ -1364,3 +1364,19 @@ as a live pass; recorded as what it is.
 
 Brain 3432/3432, consumer 1319/1319, tsc 0. Implemented → staging-deployed →
 live matrix verified → **READY FOR USER TEST**. Not user-proven.
+
+### 33a. Two points held explicitly, at the owner's instruction
+
+**1. Try again on a stopped turn APPENDS. It is not replacement.**
+The result is a repeated user turn plus a new assistant turn, both visible. The
+stopped turn keeps its text and its `stopped` status. This is not a limitation
+working around a missing feature — it is the store's append-only semantics being
+told truthfully by the UI, instead of faking a "regenerate" model the system does
+not have. A transcript that rearranged itself on reload would be the alternative,
+and it would be worse.
+
+**2. Zero-token stop is AUTOMATED-ONLY evidence. It is not a live pass.**
+First-token latency is shorter than a browser round trip, so racing it through the
+composer would be luck rather than method. It stays covered by a deterministic test
+that holds the stream open emitting nothing. It must not be written up, counted, or
+summarised as live-verified until something can actually reproduce it live.
