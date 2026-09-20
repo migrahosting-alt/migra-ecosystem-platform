@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { OpenAiCompatProvider } from '../src/providers/openAiCompatProvider.js';
 import type { ChatTurnRequest } from '@migrapilot/shared-types';
+import { creoleGreetingIntent } from '../src/providers/creoleGreetingIntent.js';
 
 const CREOLE_MARKER = 'Treat THOSE as Haitian Creole';
 const FRENCH_GUARD = '"salut", "bonjour", "coucou"';
@@ -85,4 +86,63 @@ test('the hint is matched on the user message, not on retrieved documents', asyn
   // about the language they are writing to us in.
   const system = await systemMessageFor('Summarise the attached notes.');
   assert.ok(!system.includes(CREOLE_MARKER), 'the hint leaked in from non-user text');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GREETING INTENT, NOT SUBSTRING PRESENCE  (mp-0004b)
+//
+// The gate above shipped the hint whenever a greeting APPEARED IN the message.
+// Appearing-in is not is. An owner testing the live product typed the English
+// correction "it suppose to be Bonswa"; the gate fired, the reply flipped to
+// Creole, and the model answered the WORD as a greeting instead of obeying the
+// SENTENCE about it — so every correction naming the right word re-triggered
+// the same flip and the user could not correct their way out.
+//
+// Measured on staging before the fix: 3/3 Creole with the token present, 3/3
+// English with "good evening" in its place.
+
+test('a standalone greeting carries the hint', async () => {
+  const system = await systemMessageFor('bonjou');
+  assert.ok(system.includes(CREOLE_MARKER), 'a bare Creole greeting lost the hint');
+});
+
+test('a greeting with a natural Creole continuation carries the hint', async () => {
+  // The regression risk of an intent gate is the opposite of the old bug:
+  // tightening it must not switch the hint off for real Creole speakers.
+  const system = await systemMessageFor('Bonjou, kijan ou ye? Mwen rele Bonex.');
+  assert.ok(system.includes(CREOLE_MARKER), 'genuine Creole lost the hint');
+});
+
+test('🚨 an English correction naming a greeting does NOT carry the hint', async () => {
+  // THE DEFECT. This exact sentence is what the owner typed.
+  const system = await systemMessageFor('it suppose to be Bonswa');
+  assert.ok(!system.includes(CREOLE_MARKER), 'an English correction triggered the Creole hint');
+  assert.ok(system.includes(LANGUAGE_RULE), 'the language rule must survive');
+});
+
+test('metalinguistic discussion of a greeting does NOT carry the hint', async () => {
+  for (const prompt of ['what does bonswa mean?', 'bonswa means good evening']) {
+    const system = await systemMessageFor(prompt);
+    assert.ok(!system.includes(CREOLE_MARKER), `discussing a greeting triggered the hint: ${prompt}`);
+  }
+});
+
+test('a quoted greeting is mentioned, not used, and does NOT carry the hint', async () => {
+  for (const prompt of ['the word "bonswa" is the evening greeting', "is 'bonjou' correct here?"]) {
+    const system = await systemMessageFor(prompt);
+    assert.ok(!system.includes(CREOLE_MARKER), `a quoted greeting triggered the hint: ${prompt}`);
+  }
+});
+
+test('a textless turn is not a greeting, and does not throw', () => {
+  // An image-only turn reaches the provider with userPrompt undefined. The
+  // substring gate survived that by accident — RegExp.test(undefined) coerces
+  // to the string "undefined" — whereas calling .replace on it throws and takes
+  // the whole generation down. Four longRunningInference tests caught it.
+  //
+  // Asserted on the function directly: routing it through the provider would
+  // also need an attachment to make a textless request well-formed, and this is
+  // a statement about the gate, not about request shape.
+  assert.equal(creoleGreetingIntent(undefined), false);
+  assert.equal(creoleGreetingIntent(''), false);
 });

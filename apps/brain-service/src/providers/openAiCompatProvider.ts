@@ -1,5 +1,6 @@
 import type { ChatTurnRequest, ChatTurnResponse, ModelProfile } from '@migrapilot/shared-types';
 import type { ProviderAdapter } from './providerRegistry.js';
+import { CREOLE_GREETINGS, creoleGreetingIntent } from './creoleGreetingIntent.js';
 
 export interface OpenAiCompatOptions {
   profile: Exclude<ModelProfile, 'none'>;
@@ -481,19 +482,21 @@ export class OpenAiCompatProvider implements ProviderAdapter {
      * turn where the user never wrote a word of Creole.
      *
      * So the hint is now attached to the turns it was written for — it ships
-     * only when the user's OWN message contains one of these greetings.
-     * Matching is WHOLE-WORD, which is exactly what keeps French `bonjour`
-     * from matching Creole `bonjou`: the over-capture the paired sentence was
-     * written to prevent. The two sentences travel together, because the second
-     * is the first one's guard and means nothing without it.
+     * only when the user's OWN message GREETS in Creole. The two sentences
+     * travel together, because the second is the first one's guard and means
+     * nothing without it.
+     *
+     * 🚨 THE GATE TESTS INTENT, NOT PRESENCE. It used to ask whether a greeting
+     * APPEARED IN the message, and appearing-in is not is: the English
+     * correction "it suppose to be Bonswa" fired it, flipped the reply to
+     * Creole, and the model answered the WORD instead of obeying the SENTENCE
+     * about it — so a user could not correct their way out of the loop. See
+     * `creoleGreetingIntent` for the measurement and the rule that replaced it.
      *
      * What this does NOT cost: with the hint absent, `sak pase?` still came
      * back in Creole 5/5 — the Indonesian failure above did not return.
      */
-    const CREOLE_GREETINGS = ['sak pase', 'sa k ap fet', 'kijan ou ye', 'n ap boule', 'bonjou', 'bonswa'] as const;
-    const userWroteCreoleGreeting = CREOLE_GREETINGS.some((greeting) =>
-      new RegExp(`\\b${greeting.replace(/ /g, '\\s+')}\\b`, 'i').test(request.userPrompt),
-    );
+    const userWroteCreoleGreeting = creoleGreetingIntent(request.userPrompt);
     const CREOLE_DISAMBIGUATION = userWroteCreoleGreeting
       ? `A few short Haitian Creole greetings are routinely misread as Indonesian, Malay, or a typo: ${CREOLE_GREETINGS.map(
           (greeting) => `"${greeting}"`,
