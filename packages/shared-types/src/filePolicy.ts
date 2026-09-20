@@ -72,6 +72,21 @@ export interface AttachmentType {
    */
   structured?: true
   /**
+   * Is this format legitimately BINARY — a container the bytes of which are not
+   * text, read by a real extractor?
+   *
+   * 🚨 DECLARED, NOT INFERRED. `contentMismatch` refuses a file whose bytes look
+   * binary while its name claims a text type, and it used to decide which types
+   * those were with a hardcoded `ext !== 'pdf' && ext !== 'docx'`. That is a
+   * second list of what the table already knows, and it failed the moment a
+   * third binary format shipped: making `.pptx` indexed silently enrolled it in
+   * the must-be-plain-text check, so a genuine PowerPoint deck — a zip, like
+   * every Office file — was rejected at upload as "a zip archive, not a .pptx
+   * file". Declaring it here means the NEXT binary format is refused by omission
+   * at review rather than at a user's upload.
+   */
+  binary?: true
+  /**
    * What MigraPilot can and cannot do with it. Shown to the user, so it must be
    * true — for `unsupported` this is the refusal, and for `structured` it is the
    * boundary of what works.
@@ -107,8 +122,8 @@ export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
   { ext: 'webp', kind: 'image', pipeline: 'image', support: 'indexed' },
 
   // ── documents that work end to end ──
-  { ext: 'pdf', kind: 'document', pipeline: 'document', support: 'indexed' },
-  { ext: 'docx', kind: 'document', pipeline: 'document', support: 'indexed' },
+  { ext: 'pdf', kind: 'document', pipeline: 'document', support: 'indexed', binary: true },
+  { ext: 'docx', kind: 'document', pipeline: 'document', support: 'indexed', binary: true },
   { ext: 'txt', kind: 'document', pipeline: 'document', support: 'indexed' },
   { ext: 'md', kind: 'document', pipeline: 'document', support: 'indexed' },
   { ext: 'markdown', kind: 'document', pipeline: 'document', support: 'indexed' },
@@ -163,7 +178,17 @@ export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
   { ext: 'xlsx', kind: 'data', pipeline: 'document', support: 'structured', structured: true, reason: SPREADSHEET_STRUCTURED },
   { ext: 'ods', kind: 'data', support: 'unsupported', reason: SPREADSHEET_OTHER },
   { ext: 'ppt', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
-  { ext: 'pptx', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
+  /*
+   * 🚨 A DECK IS NOT PROSE, AND IT IS NOT A WORKBOOK EITHER. It indexes like a
+   * document because its content is text, but the retrievable unit is a SLIDE:
+   * the extractor heads every slide with its number, so "which slide said that"
+   * has the same kind of answer a PDF's page citation has.
+   *
+   * Charts and embedded worksheets are NOT read. The extractor reports that per
+   * deck rather than letting a presentation whose figures live only in a chart
+   * index as prose with the numbers quietly missing.
+   */
+  { ext: 'pptx', kind: 'document', pipeline: 'document', support: 'indexed', binary: true },
   { ext: 'odp', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
   { ext: 'zip', kind: 'data', support: 'unsupported', reason: ARCHIVE },
   { ext: 'tar', kind: 'data', support: 'unsupported', reason: ARCHIVE },
@@ -366,7 +391,7 @@ const BINARY_SIGNATURES: readonly { bytes: readonly number[]; label: string }[] 
 /** Types whose bytes must actually be text. PDF/DOCX are excluded on purpose. */
 const TEXT_SHAPED = new Set(
   ATTACHMENT_TYPES
-    .filter((t) => t.support === 'indexed' && t.ext !== 'pdf' && t.ext !== 'docx')
+    .filter((t) => t.support === 'indexed' && !t.binary)
     .map((t) => t.ext),
 )
 

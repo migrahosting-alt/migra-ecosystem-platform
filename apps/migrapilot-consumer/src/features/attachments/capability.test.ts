@@ -51,13 +51,32 @@ test('every unsupported type carries a reason', () => {
   }
 })
 
-test('spreadsheets and presentations are refused deliberately, not accidentally', () => {
-  // Held back because spreadsheet ANALYSIS is a known open defect. If someone
-  // later flips these on, this test should make them think about why they were
-  // off rather than assume it was an oversight.
-  for (const ext of ['xlsx', 'xls', 'ods', 'pptx', 'ppt', 'odp']) {
+test('spreadsheets and the presentation formats without a reader stay refused', () => {
+  // Held back because no extractor exists for them. If someone later flips these
+  // on, this test should make them think about why they were off rather than
+  // assume it was an oversight.
+  //
+  // `xlsx` belongs here for a DIFFERENT reason and must not be read as pending:
+  // it is `structured`, not `indexed`, because the Brain cannot retrieve prose
+  // from a zip container. It is analysed, not indexed, and that is the finished
+  // state rather than a gap.
+  for (const ext of ['xlsx', 'xls', 'ods', 'ppt', 'odp']) {
     assert.equal(isIndexable(ext), false, `${ext} must stay refused until its path is real`)
   }
+})
+
+test('pptx is indexable, because its path is now real', () => {
+  /*
+   * FLIPPED DELIBERATELY, which is what the test above asks of anyone who does
+   * it. `.pptx` had a reader built for it: slides in presentation order, tables
+   * kept as rows, speaker notes attached to the slide that owns them, and charts
+   * reported rather than silently dropped. Validated against three genuine
+   * PowerPoint decks, not only against a fixture.
+   *
+   * `.ppt` and `.odp` are still refused — different formats, no reader.
+   */
+  assert.equal(isIndexable('pptx'), true)
+  assert.equal(isIndexable('ppt'), false, 'legacy .ppt has no reader')
 })
 
 test('plain-text code types are supported, because the indexer really reads them', () => {

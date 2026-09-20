@@ -47,7 +47,10 @@ describe('the four capability questions', () => {
   })
 
   it('an indexed document is not automatically analysable', () => {
-    for (const ext of ['pdf', 'docx', 'txt', 'md']) {
+    // pptx joins these: a deck is indexed as prose, slide by slide, and is not
+    // a table — its tables are kept as rows INSIDE the text, not exposed to the
+    // structured layer.
+    for (const ext of ['pdf', 'docx', 'pptx', 'txt', 'md']) {
       assert.equal(canIndex(ext), true, ext)
       assert.equal(canAnalyzeStructurally(ext), false, `${ext} is not a table`)
     }
@@ -61,7 +64,8 @@ describe('the four capability questions', () => {
   })
 
   it('formats with no reader stay unattachable', () => {
-    for (const ext of ['xls', 'ods', 'pptx', 'zip']) {
+    // pptx left this list when the slide reader shipped; ppt and odp remain.
+    for (const ext of ['xls', 'ods', 'ppt', 'odp', 'zip']) {
       assert.equal(canAttach(ext), false, ext)
       assert.equal(canAnalyzeStructurally(ext), false, ext)
     }

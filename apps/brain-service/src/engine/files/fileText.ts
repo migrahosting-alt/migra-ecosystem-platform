@@ -32,6 +32,7 @@ import {
 import { readWorkbook, workbookText, WorkbookError } from '@migrapilot/shared-types/workbook';
 
 import { extractDocx, DocxExtractionError } from '../rag/docxText.js';
+import { extractPptx, PptxExtractionError } from '../rag/pptxText.js';
 import { extractPdf, PdfExtractionError } from '../rag/pdfText.js';
 
 export interface ExtractedFileText {
@@ -116,6 +117,18 @@ export async function extractFileText(input: {
       return { ok: true, extraction: { text: extracted.text, complete: true } };
     } catch (error) {
       if (error instanceof DocxExtractionError) {
+        return { ok: false, reason: 'unreadable', detail: error.message };
+      }
+      throw error;
+    }
+  }
+
+  if (ext === 'pptx') {
+    try {
+      const extracted = await extractPptx(input.bytes);
+      return { ok: true, extraction: { text: extracted.text, complete: true } };
+    } catch (error) {
+      if (error instanceof PptxExtractionError) {
         return { ok: false, reason: 'unreadable', detail: error.message };
       }
       throw error;

@@ -140,10 +140,30 @@ test('formats the indexer cannot read are refused, not silently stored', async (
    * contributes nothing. It contributes deterministic totals, columns and sheets
    * — it is simply not indexed for prose, which is what `structured` states.
    */
-  for (const name of ['sheet.xls', 'deck.pptx', 'photo.png', 'archive.zip', 'notes']) {
+  /*
+   * .pptx LEFT THIS LIST when the slide reader shipped, for the same reason PDF
+   * and .xlsx did. It is indexed as prose, slide by slide, with the slide number
+   * carried so a citation can name one. `.ppt` and `.odp` stay refused: different
+   * formats, no reader.
+   */
+  for (const name of ['sheet.xls', 'deck.ppt', 'slides.odp', 'photo.png', 'archive.zip', 'notes']) {
     await assert.rejects(() => saveFile(name, bytes('x')), FileRejected, `${name} should be refused`)
   }
   assert.deepEqual(await listFiles(), [])
+  resetAuthPort()
+})
+
+test('a real .pptx is stored, because it can now be read', async () => {
+  /*
+   * The other half of the rule again. A deck now contributes slide text, tables
+   * kept as rows and speaker notes, so refusing it would hide a capability that
+   * works. Like .xlsx, a .pptx IS a zip container, so zip bytes are correct here.
+   */
+  asUser('user-pptx')
+  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]).buffer as ArrayBuffer
+  await saveFile('quarterly.pptx', zip)
+  const listed = await listFiles()
+  assert.ok(listed.some((f) => f.name === 'quarterly.pptx'), 'the deck was not stored')
   resetAuthPort()
 })
 
