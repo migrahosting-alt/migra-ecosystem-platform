@@ -1668,3 +1668,24 @@ mid-answer" now expects `interrupted`, because its own name says nobody pressed
 Stop. Negative-checked — treating any abort as a stop fails exactly that test.
 
 Consumer 1325/1325, Brain 3445/3445, tsc 0. Awaiting the batched staging deploy.
+
+### 37a. The stop declaration is a DURABILITY limitation, not a correctness one
+
+Recorded at the owner's instruction. The declaration lives in memory for seconds.
+If the consumer restarts inside that window, an explicit Stop records as
+`interrupted` instead of `stopped`.
+
+**That degrades toward truth.** "Cut off, reason unclaimed" is less specific than
+"you stopped this", and it is not false — the answer really was cut off. The
+failure this replaced went the other way: it asserted an intent the user never
+had. A durable store would be needed for multiple consumer instances; there is one
+today, and the limit is written in the module rather than discovered later.
+
+The four states and what each may claim:
+
+| state | means |
+| --- | --- |
+| `complete` | the server finished |
+| `stopped` | explicit user intent, declared by the browser that saw the click |
+| `interrupted` | generation cut off, claiming nothing about why |
+| failure | transport/provider error — persists nothing |
