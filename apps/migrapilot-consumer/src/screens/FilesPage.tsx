@@ -96,6 +96,24 @@ export function FilesPage() {
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState<'uploading' | 'indexing' | null>(null)
   const [problems, setProblems] = useState<string[]>([])
+  /*
+   * 🚨 DELETING A FILE IS IRREVERSIBLE AND REACHES BACKWARDS.
+   *
+   * It used to happen on a single click, with no confirmation, while deleting a
+   * CONVERSATION — the less destructive of the two — asks first and is described
+   * as "delete it for good". The asymmetry was backwards.
+   *
+   * A file is not only this page's row. Every past conversation that was
+   * answered from it keeps citing it, and once the bytes are gone those turns
+   * render their source as deleted and can never be checked again. §38 measured
+   * the follow-on: a later question about a removed file was answered from a
+   * DIFFERENT document until that was fixed. One stray click should not be able
+   * to do that silently.
+   *
+   * Armed per file name, so arming one row disarms any other — two rows offering
+   * to confirm at once is how the wrong one gets clicked.
+   */
+  const [armedForDelete, setArmedForDelete] = useState<string | null>(null)
   const [index, setIndex] = useState<IndexState>({ indexed: false })
 
   const refresh = useCallback(async () => {
@@ -406,13 +424,41 @@ export function FilesPage() {
                       : sizeLabel(file.bytes)}
                   </span>
                 </span>
-                <button
-                  aria-label={`Delete ${file.name}`}
-                  onClick={() => void remove(file.name)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {armedForDelete === file.name ? (
+                  /*
+                   * Confirm and Cancel, both reachable. A confirmation with no
+                   * way out is a trap rather than a safeguard: a person who
+                   * armed the wrong row must be able to leave without deleting
+                   * anything.
+                   */
+                  <span className="inline-flex items-center gap-1">
+                    <button
+                      aria-label={`Confirm deleting ${file.name} permanently`}
+                      onClick={() => {
+                        setArmedForDelete(null)
+                        void remove(file.name)
+                      }}
+                      className="inline-flex h-9 items-center rounded-lg bg-red-600 px-2.5 text-[13px] font-medium text-white transition-colors hover:bg-red-700"
+                    >
+                      Delete for good
+                    </button>
+                    <button
+                      aria-label={`Keep ${file.name}`}
+                      onClick={() => setArmedForDelete(null)}
+                      className="inline-flex h-9 items-center rounded-lg px-2.5 text-[13px] text-slate-600 transition-colors hover:bg-slate-100"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    aria-label={`Delete ${file.name}`}
+                    onClick={() => setArmedForDelete(file.name)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>

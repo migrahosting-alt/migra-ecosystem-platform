@@ -59,7 +59,7 @@ export type AttachmentPipeline = 'image' | 'document'
 export interface AttachmentType {
   ext: string
   /** Grouping for the picker and for what we tell people. */
-  kind: 'document' | 'data' | 'code' | 'image'
+  kind: 'document' | 'data' | 'code' | 'image' | 'audio'
   /** Where a supported attachment is dispatched after classification. */
   pipeline?: AttachmentPipeline
   support: AttachmentSupport
@@ -106,6 +106,23 @@ const ARCHIVE =
   'Archives are not opened yet. Attach the files inside it instead.'
 const DUMP =
   'Database dumps are not accepted. Paste the part you want read, or attach it as a .txt file.'
+/*
+ * 🚨 A SPECIFIC REFUSAL IS NOT SUPPORT, AND MUST NOT READ LIKE IT.
+ *
+ * Audio was absent from this table entirely, so attaching an .mp3 produced the
+ * generic "cannot read this format" — true, and useless. It reads as "this will
+ * never work", when the real answer is "the thing that would read it is not
+ * running yet". Those lead a person to opposite actions: one gives up, the other
+ * asks when.
+ *
+ * This is a BETTER REFUSAL, not audio support. Recognising a format by name and
+ * naming the missing dependency is honesty about a gap; it moves nothing toward
+ * being able to read the file. Audio remains a MISSING CAPABILITY until a
+ * Speech Runtime exists and Chat consumes it.
+ */
+const AUDIO_NO_RUNTIME =
+  'MigraPilot recognises this as audio, but transcription is not configured yet, ' +
+  'so there is nothing that can turn it into text. Attach a transcript if you have one.'
 
 export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
   /*
@@ -177,6 +194,25 @@ export const ATTACHMENT_TYPES: readonly AttachmentType[] = [
    */
   { ext: 'xlsx', kind: 'data', pipeline: 'document', support: 'structured', structured: true, reason: SPREADSHEET_STRUCTURED },
   { ext: 'ods', kind: 'data', support: 'unsupported', reason: SPREADSHEET_OTHER },
+  /*
+   * ── audio: RECOGNISED BY NAME, REFUSED FOR A NAMED REASON ──
+   *
+   * Two workflows will eventually consume audio and they are NOT the same
+   * feature: microphone capture turns speech into the user's own turn, while an
+   * attached file is a persistent artifact that gets transcribed once and then
+   * answered from, with provenance, like any other document. Neither exists yet.
+   * Listing the formats here is what makes the refusal specific.
+   */
+  { ext: 'mp3', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'wav', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'm4a', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'aac', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'ogg', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'opus', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'flac', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'wma', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'aiff', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
+  { ext: 'amr', kind: 'audio', support: 'unsupported', reason: AUDIO_NO_RUNTIME },
   { ext: 'ppt', kind: 'document', support: 'unsupported', reason: NO_EXTRACTOR },
   /*
    * 🚨 A DECK IS NOT PROSE, AND IT IS NOT A WORKBOOK EITHER. It indexes like a

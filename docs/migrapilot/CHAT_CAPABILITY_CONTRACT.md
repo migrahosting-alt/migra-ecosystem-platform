@@ -1957,3 +1957,87 @@ the lead, and the one unknown that decides whether the lead is the cause.
 that out and the reason is sound: a test that keeps re-authenticating is testing a
 workaround, not the product. The session behaviour IS part of what is being
 accepted.
+
+---
+
+## 42. Short-session Chat slices, run while auth is in flight
+
+Three slices chosen because none of them needs a session that outlives the
+15-minute token boundary (§41).
+
+### 42.1 Audio policy honesty — a BETTER REFUSAL, not audio support
+
+Audio was absent from the policy table entirely, so attaching an `.mp3` produced
+the generic "MigraPilot cannot read this format yet". True, and useless: it reads
+as "this will never work" when the real answer is "the thing that would read it is
+not running yet". Those lead a person to opposite actions — one gives up, the
+other asks when.
+
+Ten formats (`mp3 wav m4a aac ogg opus flac wma aiff amr`) are now recognised as
+`kind: 'audio'`, **still `unsupported`**, with a named reason: transcription is not
+configured, and attach a transcript if you have one.
+
+🚨 **This moves nothing toward reading audio.** It remains a MISSING CAPABILITY.
+Tests hold both halves — the message must be specific AND the capability must stay
+refused, so a future change that makes audio attachable without a runtime fails.
+
+**An instrument error worth recording.** The first negative-control run PASSED,
+which would have meant the tests were vacuous. The cause was mine: the consumer
+resolves `shared-types` to BUILT output, so editing the source never reached the
+code under test. With a rebuild between control edits, removing the entries fails
+2 tests and claiming support fails 3. **A negative control on a workspace package
+needs a rebuild, or it proves nothing.**
+
+### 42.2 Speech Runtime contract — provider-neutral, two distinct workflows
+
+`packages/shared-types/src/speechRuntime.ts`, exported as `./speech-runtime`.
+
+It imports `TranscriptionResult` from `transcription.ts` rather than restating it.
+That file already owns the transcript PAYLOAD and is actively developed by the
+Engineer lane; this module owns the BOUNDARY. Two definitions of a transcript is
+how the lanes would drift apart.
+
+In: audio, with the workflow **declared** rather than guessed. Out:
+`SpeechRuntimeOutcome` — a discriminated union, so no caller can read `text` off a
+failed attempt and render an empty string as a transcript.
+
+| element | why |
+| --- | --- |
+| `SpeechRuntimeIdentity` — runtime, runtimeVersion, model | a model name alone cannot distinguish two deployments of the same weights; when a transcript is later found wrong, "what produced this" must be answerable |
+| `TranscriptionSegment` — optional | demanding timings would exclude a good runtime, or invite one to invent them. Absent means "not offered", never "no speech there" |
+| `SpeechRuntimeFailureStage` | "transcription failed" cannot distinguish "never set up" from "your file is corrupt" — opposite words to a user, opposite actions for an operator |
+| `speechWorkflowAvailable(cap, workflow)` | asked PER WORKFLOW |
+
+**The two workflows are related and not the same feature.** Microphone speech
+becomes the user's own turn — ephemeral, latency-sensitive, stored as nothing.
+An attachment is a persistent artifact, transcribed once and answered from later
+with provenance like a PDF. Getting the first wrong wastes a moment; getting the
+second wrong puts a wrong transcript in a library and cites it for months. A
+runtime may serve one and not the other, and one flag for both is how a product
+promises what it cannot do.
+
+`NO_SPEECH_RUNTIME` is the honest default and today's real state.
+
+**Not model qualification.** Which ASR model is good enough — for Haitian Creole
+above all — is Engineer's, once a runtime exists to qualify.
+
+### 42.3 File deletion now asks first
+
+Deleting a library file was ONE CLICK, irreversible, unconfirmed — while deleting
+a CONVERSATION, the less destructive of the two, asks first and calls itself
+"delete it for good". The asymmetry was backwards.
+
+A file is not only a row on that page. Every past conversation answered from it
+keeps citing it, and once the bytes are gone those turns render their source as
+deleted and can never be checked again — §38 measured the follow-on, where a later
+question about a removed file was answered from a DIFFERENT document until that was
+fixed.
+
+The trash control now ARMS a confirmation ("Delete for good" / "Cancel"), scoped to
+one row at a time, because two rows offering to confirm at once is how the wrong
+one gets clicked. A confirmation with no escape would be a trap rather than a
+safeguard.
+
+Consumer verify 1337/1337 (typecheck, tests, build, bundle), Brain 3453/3453.
+Not deployed — staging currently serves the conversation-state batch, and this
+group can ride the next deploy.
