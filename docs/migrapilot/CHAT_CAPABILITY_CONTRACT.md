@@ -1938,3 +1938,22 @@ A chat product that signs a person out roughly every fifteen minutes of thinking
 time is not usable for the work it exists to do — a long document conversation is
 exactly the session that idles. Recorded as a **defect candidate for the auth lane**,
 with the measurement rather than a theory.
+
+### 41a. Routed to the auth lane — and the owner test is NOT worked around
+
+Handoff: `docs/migrapilot/AUTH_HANDOFF_SESSION_EXPIRY.md`, carrying the owner's
+acceptance target, the four cases, the logging requirement, the measured timeline,
+the lead, and the one unknown that decides whether the lead is the cause.
+
+**Priorities, as the owner set them:**
+
+1. Auth lane fixes the silent session expiry / refresh path
+2. Re-run the staging owner test once sessions survive the token boundary
+3. PPTX, stopped answers and the conversation-state batch stay **READY FOR USER
+   TEST** until then
+4. Production stays frozen behind the separate Brain lineage gate
+
+🚨 **Nobody re-signs in during acceptance to work around this.** The owner ruled
+that out and the reason is sound: a test that keeps re-authenticating is testing a
+workaround, not the product. The session behaviour IS part of what is being
+accepted.
