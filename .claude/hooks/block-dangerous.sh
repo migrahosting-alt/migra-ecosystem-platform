@@ -89,15 +89,36 @@ dbcore_brain_postgres_provisioning() {
 
   # 4. DATABASE SCOPE — only the Brain's own database may be named. The
   #    Console's Prisma-managed `migrapilot` database is explicitly excluded.
+  #
+  # 🚨 HOOK-3, fixed 2026-09-22. This case was a BLOCKLIST WITH NO DEFAULT ARM,
+  # so a database it had never heard of matched nothing, fell through to
+  # `return 0`, and was permitted. `annoupale` — the production social database —
+  # was one of those, meaning this rule authorised arbitrary elevated psql
+  # against live user data. The rule is dispatched before every narrower one, so
+  # no later exception could have limited it.
+  #
+  # It is now an ALLOWLIST. A command that names a database must name the
+  # Brain's; one that names none still passes, because role and cluster work
+  # legitimately runs against the default database.
   case "$c" in
     *"mpanel"*|*"davical"*|*"elize_competition"*|*"lituation_ticketing"*|*"migracredit"*) return 1 ;;
+    *"annoupale"*) return 1 ;;
     *"migrapilot_brain"*) : ;;
     *"migrapilot"*) return 1 ;;
+    *" -d "*|*"--dbname"*|*"postgres://"*|*"postgresql://"*) return 1 ;;
   esac
 
   # 5. DESTRUCTIVE SQL — provisioning creates and grants. It never drops.
-  case "$c" in
-    *"DROP DATABASE"*|*"DROP ROLE"*|*"DROP SCHEMA"*|*"DROP TABLE"*|*"TRUNCATE"*|*"DELETE FROM"*) return 1 ;;
+  #
+  # 🚨 HOOK-3, fixed 2026-09-22. These patterns matched UPPERCASE ONLY, while
+  # SQL keywords are case-insensitive: `DROP TABLE` was refused and `drop table`
+  # was permitted, against the same database, doing the same thing. Matched
+  # case-insensitively now, and `${cl}` is built with bash's own lowercasing so
+  # nothing external has to run for the guard to work.
+  local cl="${c,,}"
+  case "$cl" in
+    *"drop database"*|*"drop role"*|*"drop schema"*|*"drop table"*|*"drop index"*) return 1 ;;
+    *"truncate"*|*"delete from"*|*"drop owned"*|*"drop user"*) return 1 ;;
   esac
 
   return 0
