@@ -2267,3 +2267,62 @@ for a service that logs to a file, a 110-second timeout on a twenty-minute deplo
 What is established: I cannot currently sign in, and therefore cannot verify §42's
 UX. That is a lack of credentials, which is correct and by design — not a product
 fault, and not something to route to another lane as one.
+
+---
+
+## 46. §42 verified live, and the session measurement finally started
+
+Owner signed in on the Playwright-driven browser. Consumer `authtrace-0926b` /
+`6728ec9e`.
+
+### The tunnel port mattered — §45's finding, applied
+
+Previous sessions tunnelled `127.0.0.1:3300`, but `MIGRAAUTH_REDIRECT_URI` is
+`http://127.0.0.1:3200/api/auth/callback`. An OAuth callback to 3300 lands on a
+dead port, which is what the two `callback exchange failed: Invalid OAuth state`
+entries in the staging log look like. Tunnelling **3200** was the change, and
+sign-in completed first time.
+
+That is the surviving §45 finding paying for itself: not a logout mechanism, but a
+real configuration inconsistency that makes sign-in depend on forwarding the right
+port.
+
+### §42.1 audio honesty — PASS
+
+An `.mp3` attached through the real composer returns the SPECIFIC refusal, not the
+generic one:
+
+> interview.mp3 — MigraPilot recognises this as audio, but transcription is not
+> configured yet, so there is nothing that can turn it into text. Attach a
+> transcript if you have one.
+
+It names the format, names the missing dependency, and offers the action that
+works. Still a MISSING CAPABILITY — this is a better refusal, not audio support.
+
+### §42.3 file-delete confirmation — PASS, both directions
+
+| step | result |
+| --- | --- |
+| one click on the trash control | **ARMS** — file still present, other rows unaffected |
+| controls offered | "Confirm deleting … permanently" and "Keep …" |
+| clicking Keep | disarms, plain Delete restored, **file survived** |
+
+The escape path is the half that matters: a confirmation with no way out is a trap
+rather than a safeguard.
+
+### 🚨 The measurement that was missing is now running
+
+**Session observed signed-in at `2026-09-26T15:07:08Z`.** A 12-hour TTL puts
+expiry near `2026-09-27T03:07Z`.
+
+`session_expired` count since sign-in: **0**.
+
+This is what §45 retracted for want of: a known start time, with instrumentation
+that will record `livedSeconds` when the session actually ends. Either outcome is
+informative — a ~12h life closes the retracted claim properly, and anything
+markedly shorter is the defect, measured for the first time rather than inferred.
+
+### Status
+
+§42.1 and §42.3 move from DEPLOYED, UX-UNVERIFIED to **staging-proven / READY FOR
+USER TEST**. §42.2 (Speech Runtime contract) is types and has no UX to verify.
