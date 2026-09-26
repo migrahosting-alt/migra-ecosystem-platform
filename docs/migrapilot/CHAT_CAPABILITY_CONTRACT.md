@@ -2208,3 +2208,62 @@ The app does not timestamp its own lines, so intervals cannot be recovered from
 history. That is what the new events fix: `session_expired` now carries
 `livedSeconds`, and `session_absent` distinguishes a vanished cookie from a refused
 one. **The next occurrence writes its own diagnosis.**
+
+---
+
+## 45. 🚨 RETRACTED: the premature session expiry was never measured
+
+The §41 handoff is withdrawn at its premise. Recorded here because a wrong finding
+that stays on the record costs more than the original defect would have.
+
+### What the claim rested on
+
+"~15–20 minutes" was the gap between the owner SAYING they had signed in and me
+OBSERVING a logout. It was never the session's lifetime — **I never established
+when the session was created.** I reported a number I had not measured.
+
+### What reading the mechanism end to end found
+
+| mechanism | value |
+| --- | --- |
+| app session TTL | **12 hours** — `resolveAuthPort.ts` default, no staging override |
+| cookie `maxAge` | tracks `expiresAt` (`auth-client/session.js`) |
+| renewal | `persistRenewal` spreads the session, **preserving** `expiresAt` |
+| anonymous identity | 30 days |
+| `secure` flag | true under `NODE_ENV=production`; 127.0.0.1 is a trustworthy origin, so the cookie stores |
+
+**No path in this system produces a short session.** A session created ~12 hours
+before I looked, expiring during my window, fits every observation — including nine
+sign-ins across six days, which I had cited as evidence FOR the defect.
+
+### The pattern, named
+
+Six wrong calls in this programme share one shape: read the code, form a confident
+conclusion, REPORT it, then measure. The findings that held — the fabricated "page
+2026", stopped-versus-interrupted, the silent context holes — were measured first
+and reported second.
+
+The instrument was wrong as often as the product: a control that never rebuilt the
+package under test, a test asserting only the half that could not fail, `journalctl`
+for a service that logs to a file, a 110-second timeout on a twenty-minute deploy.
+
+### What survives, and it is not nothing
+
+- **`MIGRAAUTH_REDIRECT_URI` and `APP_BASE_URL` point at port 3200; the service
+  listens on 3000.** Two `Invalid OAuth state` failures in the log are consistent
+  with an interrupted callback. Cookies are host-scoped rather than port-scoped, so
+  this does NOT partition sessions — a real config inconsistency, not a logout
+  mechanism.
+- **`MIGRAAUTH_CLIENT_SECRET` is unset on staging** while the code's own comment
+  asserts it is set. A lead, still not a cause.
+- **The instrumentation is real and verified firing**, and is what should have
+  produced the retracted number. If a premature-expiry defect exists, the next
+  occurrence writes its own evidence; if it does not, the absence of those lines is
+  equally informative.
+
+### Status correction
+
+"Auth blocks acceptance and verification" is **no longer an established defect**.
+What is established: I cannot currently sign in, and therefore cannot verify §42's
+UX. That is a lack of credentials, which is correct and by design — not a product
+fault, and not something to route to another lane as one.

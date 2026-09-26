@@ -1,5 +1,34 @@
 # Auth handoff — the staging session ends silently around the token boundary
 
+> ## 🚨 RETRACTED 2026-09-26 — READ THIS FIRST
+>
+> **The premise of this document is withdrawn.** It claimed a ~15–20 minute session
+> lifetime. That number was never a measurement of session lifetime: it was the gap
+> between the owner SAYING they had signed in and me OBSERVING a logout. I never
+> established when the session was actually created, so I never measured what I
+> reported.
+>
+> Reading the mechanism end to end afterwards found **no code path that produces a
+> short session**:
+>
+> | mechanism | value | source |
+> | --- | --- | --- |
+> | app session TTL | **12 hours** | `resolveAuthPort.ts` default, no staging override |
+> | cookie `maxAge` | tracks `expiresAt` | `auth-client/session.js` |
+> | token renewal | **preserves** `expiresAt`, never shortens it | `persistRenewal` |
+> | anonymous identity | 30 days | `anonymousIdentity.ts` |
+>
+> A session created ~12 hours before I looked, expiring during my window, fits every
+> observation — including nine sign-ins spread across six days.
+>
+> **Also retracted: the "nothing is logged" finding.** The unit writes to
+> `/opt/migrapilot-staging/logs/consumer.log`, not journald. I grepped journald. A
+> pre-existing `[auth]` logger was there the whole time.
+>
+> What survives is below, marked. The rest of this document is kept for the record
+> rather than deleted, because another lane may already have read it.
+
+
 Owner-routed 2026-09-20 from the Chat lane. **It blocks the staging owner test**,
 which is why it jumped the queue: PPTX, stopped answers and the conversation-state
 batch are all waiting on a session that survives a person thinking for twenty
@@ -91,3 +120,52 @@ to act on.
 
 Rewriting MigraAuth internals, changing token lifetimes, or touching rotation. The
 Chat lane's involvement ends at the measurement, this lead, and the named unknown.
+
+
+---
+
+## SURVIVING FINDINGS — what is still worth the auth lane's time
+
+These were measured, not inferred, and none depends on the retracted premise.
+
+### 1. 🚨 The OAuth redirect points at a port nothing serves
+
+```
+APP_BASE_URL           = http://127.0.0.1:3200
+MIGRAAUTH_REDIRECT_URI = http://127.0.0.1:3200/api/auth/callback
+service listens on     = 3000
+```
+
+The consumer serves on **3000**; sign-in is redirected to **3200**. The log carries
+two `callback exchange failed: Invalid OAuth state` entries, which is what an
+interrupted callback looks like.
+
+Stated carefully: cookies are scoped by HOST, not by port, so this does not
+partition sessions between ports and is **not** a logout mechanism. It is a real
+configuration inconsistency that makes sign-in depend on someone happening to
+forward 3200.
+
+### 2. `MIGRAAUTH_CLIENT_SECRET` is not set on staging
+
+`migraAuthApi.ts` asserts in a comment that *"the deployed environment has
+`MIGRAAUTH_CLIENT_SECRET` set, so the environment is taken as the authority over
+the comment"*, and warns that omitting it for a confidential client "turns every
+refresh into an unexplained 401". **That comment is false for staging.**
+
+Still a lead, not a cause: nothing observed shows a failed refresh ending a
+session, and `reauth_required` is consumed only by account-management routes.
+
+### 3. The instrumentation that now measures the real thing
+
+`server/auth/authTrace.ts`, deployed in `authtrace-0926b` and **verified firing**
+against the real service. `session_expired` carries `livedSeconds`;
+`session_absent` distinguishes a vanished cookie from a refused one.
+
+This is what should have produced the number in the retracted premise. If a
+premature-expiry defect exists, the next occurrence now writes its own evidence —
+and if none exists, the absence of those lines is equally informative.
+
+## What the auth lane should NOT spend time on
+
+Hunting a 15-minute session lifetime. It is not in the code, not in the
+configuration, and was never measured.
