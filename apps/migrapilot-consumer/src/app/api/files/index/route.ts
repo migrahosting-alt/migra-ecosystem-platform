@@ -115,11 +115,40 @@ export async function POST(): Promise<Response> {
 
   const synced = await callBrain<{ ok?: boolean; index?: IndexRecord }>({ kind: 'syncIndex', indexId })
   if (synced.kind !== 'ok') {
-    return fail(
-      synced.kind === 'timeout' ? 504 : 502,
-      'sync_failed',
-      'Your files could not be read. Nothing was indexed.',
-    )
+    /*
+     * A TIMEOUT IS NOT A FAILED READ, AND IT IS NOT AN OUTCOME WE KNOW.
+     *
+     * Both branches used to say "Your files could not be read. Nothing was
+     * indexed." Measured on staging 2026-09-26 that sentence was wrong twice over
+     * for the case that produced it — a 504 after ~39 s on a 306 KB deck:
+     *
+     * - It BLAMED THE DOCUMENT. The deck was fine; a second attempt indexed it in
+     *   469 ms. What had stalled was the embedding provider, which is not the
+     *   user's file and not something they can fix by editing it.
+     * - It CLAIMED AN OUTCOME WE CANNOT SEE. We stopped waiting; the Brain did
+     *   not stop working. Its sync commits atomically, so it may land after this
+     *   response is written. "Nothing was indexed" was true that day by luck, not
+     *   by knowledge, and asserting it is the same class of defect as a fabricated
+     *   ready state.
+     *
+     * So the timeout branch says what is actually known — we ran out of time —
+     * and points at the per-file readiness the list already shows, instead of
+     * making a library-wide claim.
+     */
+    if (synced.kind === 'timeout') {
+      return fail(
+        504,
+        'sync_timeout',
+        'Indexing did not finish in time. Your documents are still here, and some may not be ' +
+          'searchable yet — check the list, or index again.',
+      )
+    }
+    /*
+     * A real failure rolls back: the Brain keeps the previous index rather than a
+     * corrupted one. So nothing NEW was indexed — which is not the same as the
+     * library being empty, and the old wording invited that reading.
+     */
+    return fail(502, 'sync_failed', 'Your files could not be read, so nothing new was indexed.')
   }
 
   /*

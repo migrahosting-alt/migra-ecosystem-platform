@@ -2422,10 +2422,11 @@ re-indexes 66 MB for nothing, or stops trusting the answers they get.
 ### Verification
 
 - 3462/3462 brain tests; 1344/1344 consumer tests; root `tsc -b` clean
-- **seven negative controls**, each failing exactly its own test and nothing else:
+- **eight negative controls**, each failing exactly its own test and nothing else:
   signal removed · deadline neutered · clamp removed · `embedding_file` moved
   after the await · `listing_files` moved after the await · `sync_failed`
-  reporting a fixed stage · `setIndex({ indexed: false })` restored
+  reporting a fixed stage · `setIndex({ indexed: false })` restored · the single
+  "could not be read. Nothing was indexed." message restored
 - one **positive** control: a bare `fetch` against the blackhole, still pending at
   47 s, proving the defect was real rather than theoretical
 - live on staging `syncstall-0926c` / commit `057587a1`; re-index, upload and
@@ -2438,3 +2439,52 @@ re-indexes 66 MB for nothing, or stops trusting the answers they get.
 🚨 **For the Engineer lane:** §47 is a Chat-lane change to Brain code made while
 the Brain lineage reconciliation is open. It must survive that reconciliation. It
 is not a reason to promote this Brain line.
+
+### 47.2 The 504's own copy blamed the document, and claimed what it could not see
+
+The chip that appeared on the stall read:
+
+> Your files could not be read. Nothing was indexed. · 300 KB
+
+Both halves were wrong for what had actually happened.
+
+**It blamed the document.** The deck was fine — a second attempt indexed it in
+469 ms. What stalled was the embedding provider. Telling someone their file could
+not be read sends them to edit, re-export or split a document that was never the
+problem. That is the refusal-blames-user-data failure, in the indexing path.
+
+**It claimed an outcome the consumer cannot see.** The consumer stopped waiting at
+its 20 s budget; the Brain did not stop working, and its sync commits atomically,
+so it can land *after* the response is written. "Nothing was indexed" was true
+that day because the sync hung outright — true by luck, not by knowledge.
+Asserting an unobserved outcome is the fabricated-ready-state defect pointing the
+other way.
+
+Both branches now say only what is known:
+
+| case | status | message |
+| --- | --- | --- |
+| timeout | 504 `sync_timeout` | "Indexing did not finish in time. Your documents are still here, and some may not be searchable yet — check the list, or index again." |
+| refused | 502 `sync_failed` | "Your files could not be read, so nothing new was indexed." |
+
+The refused branch keeps "could not be read" because a refusal really is a failed
+read, but says **nothing new** — the Brain rolls back and keeps the previous
+index, so previously indexed documents are still searchable and the bare original
+invited the opposite reading.
+
+Tested behaviourally — the route is driven with the Brain timing out and with the
+Brain refusing, and the body is read — not by asserting on source, which a
+comment could satisfy. The first version of that harness was wrong in a way worth
+recording: it stubbed the index listing with `root = UPLOAD_ROOT`, but the route
+scopes to `userDirectory()`, so it never reached the sync and all three tests
+failed against the *preparation* branch instead. And `POST()` on this route takes
+no `Request`; passing one ran fine and was caught only by `tsc`.
+
+### 47.3 The bound is per sync, not per file
+
+Worth stating so it is not "fixed" later into something worse. There is no
+per-file `catch` in the sync loop, so the first embedding failure ends the whole
+sync. A dead provider therefore costs `listing + 75 s` once — not 75 s per changed
+file. The consumer's 20 s budget sitting inside the Brain's 75 s is deliberate:
+the user gets a truthful answer quickly, and the Brain stops working on a batch
+nobody is waiting for shortly after, instead of the ~25 minutes it used to spend.

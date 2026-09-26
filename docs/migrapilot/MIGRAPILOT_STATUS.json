@@ -3926,12 +3926,22 @@
    "brain": "3462/3462",
    "consumer": "npm run verify — typecheck + 1344/1344 + build + bundle check PASS",
    "rootTsc": "tsc -b clean",
-   "negativeControls": "SEVEN, each failing exactly its own test: signal removed / deadline neutered / clamp removed / embedding_file after the await / listing_files after the await / sync_failed fixed stage / setIndex({indexed:false}) restored",
+   "negativeControls": "EIGHT, each failing exactly its own test: signal removed / deadline neutered / clamp removed / embedding_file after the await / listing_files after the await / sync_failed fixed stage / setIndex({indexed:false}) restored / single \"could not be read. Nothing was indexed\" message restored",
    "positiveControl": "a bare fetch against the blackhole, still pending at 47s — the defect was real, not theoretical",
    "liveThroughTheBrowser": "re-index, upload and delete all driven through the staging UI"
   },
   "releaseIdentity": "staging brain syncstall-0926c / commit 057587a1; running process reported both; rollback target coding-loop-rc50 validated BEFORE cutover",
   "🚨 forTheEngineerLane": "this is a Chat-lane change to BRAIN code made while the Brain lineage reconciliation is open. It must survive that reconciliation. It is NOT a reason to promote this Brain line. Production remains frozen.",
-  "toolingLessonRecorded": "`git checkout -- <file>` to revert a negative-control mutation DESTROYED the uncommitted implementation in that file, because it reverts to HEAD and not to the pre-mutation state. Snapshot to the scratchpad and restore from there."
+  "toolingLessonRecorded": "`git checkout -- <file>` to revert a negative-control mutation DESTROYED the uncommitted implementation in that file, because it reverts to HEAD and not to the pre-mutation state. Snapshot to the scratchpad and restore from there.",
+  "defect4_failureCopyBlamedTheDocument": {
+   "_authority": "CHAT_CAPABILITY_CONTRACT.md §47.2",
+   "was": "\"Your files could not be read. Nothing was indexed.\" on BOTH the timeout and the refused branch",
+   "wrongTwice": "(a) it blamed a 306KB deck that indexed fine in 469ms on the retry — the provider stalled, not the file; (b) \"Nothing was indexed\" is not observable: the consumer stops at its 20s budget while the Brain keeps working and commits atomically, so it may land after the response is written. True that day by luck, not knowledge.",
+   "nowTimeout": "504 sync_timeout — \"Indexing did not finish in time. Your documents are still here, and some may not be searchable yet — check the list, or index again.\"",
+   "nowRefused": "502 sync_failed — \"Your files could not be read, so nothing NEW was indexed.\" (a refusal rolls back, so previously indexed documents are still searchable)",
+   "testedHow": "behaviourally — the route driven with the Brain timing out and refusing, body read; not a source assertion, which a comment could satisfy",
+   "harnessDefectsFoundInMyOwnTest": "(1) stubbed the index listing with root=UPLOAD_ROOT while the route scopes to userDirectory(), so it never reached the sync and all three tests failed against the PREPARATION branch; (2) POST() on this route takes no Request — passing one ran fine and was caught only by tsc"
+  },
+  "boundIsPerSyncNotPerFile": "no per-file catch in the sync loop, so the first embedding failure ends the whole sync: a dead provider costs listing + 75s ONCE, not 75s per changed file. The consumer 20s budget inside the Brain 75s budget is deliberate — truthful answer fast, Brain stops shortly after, instead of ~25 minutes. Do not \"fix\" this by raising the consumer timeout."
  }
 }

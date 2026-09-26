@@ -2010,7 +2010,19 @@ indexed and the Brain said so in the same second. The old code reset the reading
 `false` because the library had changed; the reasoning was right and the remedy replaced a
 stale truth with a definite falsehood. It now asks the server.
 
-Seven negative controls, each failing exactly its own test, plus one positive control
+**A fourth defect, in the 504's own copy.** The chip said "Your files could not be read.
+Nothing was indexed." Both halves were wrong for what happened: the deck was fine (it
+indexed in 469 ms on retry — the *provider* stalled), and "Nothing was indexed" is not
+something the consumer can see, because it stops waiting at 20 s while the Brain keeps
+working and commits atomically. A timeout now says it ran out of time and points at the
+per-file readiness the list already shows; a genuine refusal says nothing **new** was
+indexed, since the Brain rolls back and keeps the previous index.
+
+**The bound is per sync, not per file** — there is no per-file `catch`, so a dead provider
+costs `listing + 75 s` once, not 75 s per document. The consumer's 20 s budget sitting
+inside the Brain's 75 s is deliberate; do not "fix" it by raising the consumer timeout.
+
+Eight negative controls, each failing exactly its own test, plus one positive control
 showing the timeout defect was real. Brain 3462/3462; consumer `npm run verify` green.
 
 🚨 **For the Engineer lane:** this touched **Brain** code while the Brain lineage
