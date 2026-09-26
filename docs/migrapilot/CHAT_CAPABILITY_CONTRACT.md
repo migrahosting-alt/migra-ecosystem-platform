@@ -2158,3 +2158,53 @@ context an operator already has, and putting identity in an auth log invites it 
 become an audit trail, which has different rules.
 
 Consumer 1343/1343 via `npm run verify`.
+
+### 44a. 🚨 I was grepping the wrong place — §41's "nothing is logged" was MY error
+
+The instrumentation is live and verified end to end on `authtrace-0926b`. Proving
+it fires exposed a mistake in my own earlier finding.
+
+**The unit does not log to journald.**
+
+```
+StandardOutput=append:/opt/migrapilot-staging/logs/consumer.log
+StandardError=append:/opt/migrapilot-staging/logs/consumer.log
+```
+
+§41 reported that a session ended with "no auth line, no refresh line, no 401 line
+— nothing an operator could read", and routed a LOGGING GAP to the auth lane on
+that basis. That conclusion came from `journalctl`, which only ever held systemd's
+own lines. The application had been logging all along, to a file.
+
+**A pre-existing `[auth]` logger was already there** — sign-in claims and OAuth
+callback failures — which I would have found immediately had I looked in the right
+place. The handoff's logging-gap section is therefore overstated: the gap was
+narrower than described (no SESSION-EXPIRY events specifically), not total.
+
+Recorded plainly because the handoff is being acted on by another lane, and
+sending them to fix a hole that is partly my own measurement error would waste
+their time.
+
+### Verified, not assumed
+
+A request carrying a deliberately bogus session cookie produced exactly the
+intended line:
+
+```
+[auth] {"event":"session_absent","reason":"cookie_present_but_no_session"}
+```
+
+So the pipeline works: the event fires, reaches the real destination, and carries
+the discriminator. Untested logging is false comfort; this is tested.
+
+### What the historical log DOES show
+
+**Nine sign-ins**, plus two `callback exchange failed: Invalid OAuth state`. Nine
+sign-ins on a staging instance used by one person is the fingerprint of repeated
+session loss — consistent with the symptom, and the first independent corroboration
+that it is real rather than a measurement artefact.
+
+The app does not timestamp its own lines, so intervals cannot be recovered from
+history. That is what the new events fix: `session_expired` now carries
+`livedSeconds`, and `session_absent` distinguishes a vanished cookie from a refused
+one. **The next occurrence writes its own diagnosis.**
