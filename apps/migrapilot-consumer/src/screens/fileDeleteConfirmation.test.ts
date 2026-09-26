@@ -56,3 +56,26 @@ test('only ONE row can be armed at a time', () => {
     'arming is not a single-value state')
   assert.match(code, /armedForDelete === file\.name/, 'arming is not scoped to one row')
 })
+
+test('🚨 deleting one file does not claim the whole library is unsearchable', () => {
+  /*
+   * MEASURED ON STAGING 2026-09-26. After deleting one 83-byte file the panel
+   * read "Searchable — Not yet", which says NOTHING can be searched, while the
+   * other thirteen files were still indexed — a reload of the same page showed
+   * "Searchable — 13 entries". The Brain's own log confirmed the truth at the
+   * time: `sync_completed files=13 chunks=410 deletedFiles=1`.
+   *
+   * The old code reasoned correctly that the previous reading was stale and then
+   * replaced it with a definite falsehood. Staleness is fixed by ASKING; a user
+   * who believes their library stopped being searchable re-indexes 66 MB for no
+   * reason, or stops trusting the answers they get.
+   */
+  const code = source()
+  const handler = /const remove = useCallback\(([\s\S]*?)\n  \)/.exec(code)?.[1] ?? ''
+  assert.ok(handler, 'could not find the remove handler to assert on')
+  assert.match(handler, /await refreshIndex\(\)/, 'the delete handler does not re-read the index status')
+  assert.ok(
+    !/setIndex\(\{\s*indexed:\s*false\s*\}\)/.test(handler),
+    'the delete handler still asserts the library is unsearchable instead of asking',
+  )
+})

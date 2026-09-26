@@ -7,7 +7,7 @@ Why this exists: work kept discovering something, moving three lanes away, and t
 reconstruct what was finished — or why a decision was made — from conversation history. Every agent
 (Claude, Engineer, MigraPilot) reads this instead.
 
-_Last updated: 2026-09-16_
+_Last updated: 2026-09-26_
 
 > ⚠️ `CLAUDE.md` and `AGENTS.md` are **gitignored** in this repository, so the pointers added there are
 > local only. This file and its JSON are the tracked copies — link to `docs/migrapilot/` from any new
@@ -1970,3 +1970,49 @@ non-idempotent tool. Connect-project and read-only inspect from Web do not.
 🚨 **Do not fix the wording alone.** A remediation string that stops naming VS Code while the
 capability is still owned by one client hides the architecture defect instead of closing it — the leak
 is only the symptom that made it visible.
+
+---
+
+## 2026-09-26 — a sync that hung, and left nothing to read
+
+Full record: `CHAT_CAPABILITY_CONTRACT.md` §47. Staging `syncstall-0926c` / `057587a1`.
+**Staging-proven, READY FOR USER TEST — not user-proven.**
+
+Found by using the product: attaching a 31-slide chart deck returned **504** on
+`/api/files/index` after ~39 s. The product's own handling was correct — the chip said
+nothing was indexed, the composer text survived, a retry worked — so this is about what
+happened underneath.
+
+**The hypothesis I started with was wrong, and that is worth recording.** I began from
+"indexing is too slow for the 20 s budget". Every sync that *completed* took between
+0.34 ms and 469 ms. The 15:16:31 request has an `incoming request` line and **no
+completion line at all**. It stalled; it did not run slowly.
+
+Two defects were behind it:
+
+1. **The embedding call had no timeout.** The provider is an Ollama on a **tailnet
+   peer**, and a peer that sleeps accepts the connection then goes quiet — the one
+   failure a bare `fetch` waits out. Worst case was ~25 minutes across five attempts.
+   Now bounded, and proven against a real listener that accepts and never answers:
+   a bare `fetch` was **still pending at 47 s**; the shipped embedder **gave up at 75.5 s**.
+
+2. **Nothing recorded the stages of a sync**, so the stall is *still* unattributable.
+   Stages are now emitted **before** each blocking step — a line written on completion is
+   absent for exactly the step that hung.
+
+🚨 **Still not proven:** which stage the 15:16 stall was in. The instrumentation did not
+exist then. The embedder is the leading candidate because it is the only step that leaves
+the host, but that is a candidate, not a measurement.
+
+**A third defect, found while cleaning up.** Deleting one 83-byte file made the panel read
+"Searchable — Not yet", i.e. nothing can be searched, while thirteen files were still
+indexed and the Brain said so in the same second. The old code reset the reading to
+`false` because the library had changed; the reasoning was right and the remedy replaced a
+stale truth with a definite falsehood. It now asks the server.
+
+Seven negative controls, each failing exactly its own test, plus one positive control
+showing the timeout defect was real. Brain 3462/3462; consumer `npm run verify` green.
+
+🚨 **For the Engineer lane:** this touched **Brain** code while the Brain lineage
+reconciliation is open. It must survive that reconciliation, and is not a reason to
+promote this Brain line. Production remains frozen.

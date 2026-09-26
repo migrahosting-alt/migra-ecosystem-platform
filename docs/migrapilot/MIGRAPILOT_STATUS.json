@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
- "updated": "2026-09-20",
- "updatedBy": "Claude — VM111 PASS 2 resolved by evidence: PASS2_COMPLETE_ARTIFACT, 726/726 pages, PLATFORM-MANIFEST is the stale document. Kreyòl normalizer frozen, wired into both speech paths and gated, but READY FOR USER TEST only — restart + real consumer round-trip still required. OCR admission gate holds at 0 of 726 pages training-eligible.",
+ "updated": "2026-09-26",
+ "updatedBy": "Claude — Chat lane. A 504 on /api/files/index traced to a HUNG index sync, not a slow one. Two defects fixed and deployed to staging as syncstall-0926c (commit 057587a1); one consumer UI honesty defect found while cleaning up.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3894,5 +3894,44 @@
    "🚨 stillZeroAdmitted": "A complete transcription is not a cleared one. All 726 pages are certified:false and every source is still rights_status=needs_review with training_allowed null.",
    "🚨 myOwnProcessError": "I recorded the three-way contradiction and then OCR'd 120 sample pages anyway, instead of  checking VM111 first. A complete 726-page transcription already existed. The sampled OCR  was avoidable work. What the inventory added that PASS 2 did not produce — the rights  admission boundary, the Kreyòl-proportion / noise / orthography profile, the content-level  duplication check, and the front-matter rights evidence — still stands, and its confidence  figures independently corroborate PASS 2's 90.65 mean. But the OCR itself was redundant,  and the rule that would have caught it is: a recorded infra fact is historical, so verify  the host before acting on its absence."
   }
+ },
+ "syncStallAttribution_2026_09_26": {
+  "_authority": "docs/migrapilot/CHAT_CAPABILITY_CONTRACT.md §47",
+  "status": "STAGING-PROVEN / READY FOR USER TEST — not user-proven",
+  "foundBy": "using the product, not by a test — a 31-slide chart deck returned 504 after ~39s",
+  "🚨 hypothesisIStartedWithWasWrong": "I began from \"indexing is too slow for the 20s budget\". The Brain log refutes it: every sync that COMPLETED took 0.34ms to 469ms. The 15:16:31 request has an incoming line and NO completion line at all. It stalled; it did not run slowly. Recorded so the slow-index hypothesis is not re-derived.",
+  "defect1_noEmbeddingTimeout": {
+   "mechanism": "embedBatch passed no signal to fetch. MIGRAPILOT_PROVIDER_URL is an Ollama on a TAILNET PEER (100.86.143.93:11434); a peer that sleeps or loses its route accepts the connection then goes quiet — the one failure a bare fetch waits out.",
+   "worstCaseBefore": "~300s undici default x 5 attempts = ~25 minutes, index pinned in `syncing`",
+   "nowBounded": "30s per request, 75s per batch, each attempt clamped to the remaining budget so the deadline is the real bound rather than permitting one more full attempt",
+   "provenAgainstARealBlackhole": "bare fetch: STILL PENDING at 47s. Shipped embedder: gave up at 75.5s — \"gave up after 3 attempts in 75000ms; last: embedder timed out after 11146ms with no response\"",
+   "stillRetryable": "a provider blip still gets its backoff — a timeout is classified transient"
+  },
+  "defect2_syncLeftNothingToRead": {
+   "mechanism": "listing+extracting every document, embedding one named file, and the durable commit are all awaits, and nothing recorded which one a sync was in",
+   "sameClassAs": "the auth silence defect — an event that leaves no record costs the whole investigation again next time",
+   "🚨 theInvariant": "stages are emitted BEFORE each blocking step, never only after. A line written on completion is absent for exactly the step that hung.",
+   "liveStages": "sync_started / listing_files / files_listed / embedding_file / file_embedded / committing / sync_completed / sync_failed(stage)",
+   "sideFindingFromTheData": "files_listed ms=474 for 14 files incl. a 35MB scanned PDF and a 28.6MB text file — extraction is NOT the bottleneck"
+  },
+  "🚨 stillNotProven": "WHICH stage the 15:16 stall was in. The instrumentation did not exist then and cannot be applied retroactively. The embedder is the leading candidate because it is the only step leaving the host, but that is a candidate, not a measurement. The next occurrence names itself.",
+  "defect3_falseUnsearchableClaim": {
+   "symptom": "deleting ONE 83-byte file made the panel read \"Searchable — Not yet\", which says nothing can be searched",
+   "contradictedBy": "the Brain in the same second: sync_completed files=13 chunks=410 deletedFiles=1; reloading the same page showed \"Searchable — 13 entries\"",
+   "cause": "remove() ran setIndex({ indexed: false }), reasoning the old reading was stale. The reasoning was right; the remedy replaced a stale truth with a definite falsehood.",
+   "fix": "await refreshIndex() — the delete route purges the index before it answers, so the server already knew and only had to be asked",
+   "whyItMatters": "a user who believes their library stopped being searchable re-indexes 66MB for nothing, or stops trusting the answers they get"
+  },
+  "verification": {
+   "brain": "3462/3462",
+   "consumer": "npm run verify — typecheck + 1344/1344 + build + bundle check PASS",
+   "rootTsc": "tsc -b clean",
+   "negativeControls": "SEVEN, each failing exactly its own test: signal removed / deadline neutered / clamp removed / embedding_file after the await / listing_files after the await / sync_failed fixed stage / setIndex({indexed:false}) restored",
+   "positiveControl": "a bare fetch against the blackhole, still pending at 47s — the defect was real, not theoretical",
+   "liveThroughTheBrowser": "re-index, upload and delete all driven through the staging UI"
+  },
+  "releaseIdentity": "staging brain syncstall-0926c / commit 057587a1; running process reported both; rollback target coding-loop-rc50 validated BEFORE cutover",
+  "🚨 forTheEngineerLane": "this is a Chat-lane change to BRAIN code made while the Brain lineage reconciliation is open. It must survive that reconciliation. It is NOT a reason to promote this Brain line. Production remains frozen.",
+  "toolingLessonRecorded": "`git checkout -- <file>` to revert a negative-control mutation DESTROYED the uncommitted implementation in that file, because it reverts to HEAD and not to the pre-mutation state. Snapshot to the scratchpad and restore from there."
  }
 }

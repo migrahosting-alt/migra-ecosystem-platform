@@ -2326,3 +2326,115 @@ markedly shorter is the defect, measured for the first time rather than inferred
 
 §42.1 and §42.3 move from DEPLOYED, UX-UNVERIFIED to **staging-proven / READY FOR
 USER TEST**. §42.2 (Speech Runtime contract) is types and has no UX to verify.
+
+## 47. 🚨 A sync that hung, and left nothing to read
+
+Found by using the product, not by a test. Attaching a 31-slide chart deck
+returned **504 Gateway Timeout** on `/api/files/index` after ~39 s. The product
+itself behaved correctly — the chip read "Your files could not be read. Nothing
+was indexed. · 300 KB", the composer text survived, and a second "Index files"
+succeeded — so this is about what happened underneath.
+
+### The hypothesis I started with was wrong
+
+I began from "indexing is too slow for the 20 s budget". The Brain's own log does
+not support it:
+
+| completed sync | duration |
+| --- | --- |
+| 09-20 14:43:22 | 0.34 ms |
+| 09-20 16:27:02 | 1.1 ms |
+| 09-26 15:20:33 | **469 ms** |
+
+Every sync that finished did so in well under a second. The 15:16:31 request has
+an `incoming request` line and **no completion line at all** — no response, no
+error, ever. It stalled; it did not run slowly. Recorded here because the wrong
+hypothesis was nearly written up as a finding.
+
+### What was actually wrong
+
+**1. The embedding call had no timeout.** `embedBatch` passed no `signal` to
+`fetch`. `MIGRAPILOT_PROVIDER_URL` is an Ollama on a **tailnet peer**, and a peer
+that sleeps or loses its route accepts the connection and then goes quiet — the
+one failure a bare `fetch` waits out. Undici's default is ~300 s per attempt,
+across 5 attempts: ~25 minutes, with the index pinned in `syncing`.
+
+Proven, not assumed. Against a real TCP listener that accepts and never answers:
+
+```
+bare fetch, no signal:   STILL PENDING after 47s   (nothing bounded it)
+shipped embedder:        gave up after 75.5s
+  embedder gave up after 3 attempts in 75000ms;
+  last: embedder timed out after 11146ms with no response
+```
+
+The 11146 ms in that message is the clamp working: each attempt gets the smaller
+of its own timeout and the remaining batch budget, so the 75 s deadline is the
+real bound instead of permitting one more full-length attempt on top of it.
+
+**2. Nothing recorded the stages, so the stall is still unattributable.** Listing
+and extracting every document, embedding one named file, and the durable commit
+are all `await`s. No evidence exists to say which stopped, and none ever would
+have. Same class as the auth-silence defect: the event that costs the whole
+investigation again next time.
+
+Stages are now emitted **before** each blocking step. A line written on
+completion is absent for exactly the step that hung, which is the one worth
+naming. Live on staging, from a real upload through the UI:
+
+```
+15:48:37.390 sync_started    version=45
+15:48:37.390 listing_files
+15:48:37.864 files_listed    files=14 ms=474
+15:48:37.871 embedding_file  file=stage-probe.txt chunks=2     <- named BEFORE it blocks
+15:48:38.404 file_embedded   file=stage-probe.txt chunks=2 ms=533
+15:48:38.405 committing      version=46 changedFiles=1 changedChunks=2
+15:48:38.484 sync_completed  files=14 chunks=412 ms=1094 version=46
+```
+
+`files_listed ms=474` also settles a side question: extracting all 14 files,
+including a 35 MB scanned PDF and a 28.6 MB text file, costs under half a second.
+Extraction is not the bottleneck.
+
+### What is still NOT proven
+
+**Which stage the 15:16 stall was in.** The instrumentation did not exist then and
+cannot be applied retroactively. The embedder is the leading candidate — it is the
+only step that leaves the host — but that is a candidate, not a measurement. The
+honest claim is that the next occurrence names itself.
+
+### 47.1 A second defect, found while cleaning up
+
+Deleting the 83-byte probe file made the panel read **"Searchable — Not yet"**,
+which says nothing at all can be searched. The Brain disagreed in the same
+second: `sync_completed files=13 chunks=410 deletedFiles=1`. Reloading the same
+page showed "Searchable — 13 entries".
+
+`remove()` ran `setIndex({ indexed: false })`, reasoning that the library had
+changed so the old reading was stale. The reasoning was right; the remedy
+replaced a stale truth with a definite falsehood. Staleness is fixed by asking —
+the delete route purges the index before it answers, so the server already knew.
+Now `await refreshIndex()`.
+
+Not cosmetic: a user who believes their library stopped being searchable
+re-indexes 66 MB for nothing, or stops trusting the answers they get.
+
+### Verification
+
+- 3462/3462 brain tests; 1344/1344 consumer tests; root `tsc -b` clean
+- **seven negative controls**, each failing exactly its own test and nothing else:
+  signal removed · deadline neutered · clamp removed · `embedding_file` moved
+  after the await · `listing_files` moved after the await · `sync_failed`
+  reporting a fixed stage · `setIndex({ indexed: false })` restored
+- one **positive** control: a bare `fetch` against the blackhole, still pending at
+  47 s, proving the defect was real rather than theoretical
+- live on staging `syncstall-0926c` / commit `057587a1`; re-index, upload and
+  delete all driven through the browser
+
+### Status
+
+**staging-proven / READY FOR USER TEST.** Not user-proven.
+
+🚨 **For the Engineer lane:** §47 is a Chat-lane change to Brain code made while
+the Brain lineage reconciliation is open. It must survive that reconciliation. It
+is not a reason to promote this Brain line.

@@ -220,10 +220,25 @@ export function FilesPage() {
       }
 
       await refresh()
-      // The library changed, so any previous index result is now stale.
-      setIndex({ indexed: false })
+      /*
+       * ASK, rather than assume nothing is searchable.
+       *
+       * This used to `setIndex({ indexed: false })`, reasoning that the library
+       * had changed so the previous reading was stale. The reasoning was right
+       * and the remedy replaced a stale truth with a definite falsehood: the
+       * panel read "Searchable — Not yet" immediately after deleting ONE file,
+       * while the other thirteen were still indexed and answerable. Measured on
+       * staging 2026-09-26 — deleting one file showed "Not yet", and a reload of
+       * the same page showed "Searchable — 13 entries".
+       *
+       * The delete route purges the index before it answers, so the server
+       * already knows the post-delete truth and only had to be asked. When the
+       * purge half-failed, `problems` above says so; that caveat belongs in a
+       * warning, not in a blanket claim that the library cannot be searched.
+       */
+      await refreshIndex()
     },
-    [refresh],
+    [refresh, refreshIndex],
   )
 
   const runIndex = useCallback(async () => {
