@@ -2488,3 +2488,55 @@ sync. A dead provider therefore costs `listing + 75 s` once — not 75 s per cha
 file. The consumer's 20 s budget sitting inside the Brain's 75 s is deliberate:
 the user gets a truthful answer quickly, and the Brain stops working on a batch
 nobody is waiting for shortly after, instead of the ~25 minutes it used to spend.
+
+### 47.4 The timeout copy, verified live — and the old copy proven false
+
+§47.2 shipped on the argument that "Nothing was indexed" is not observable. That
+argument is now a measurement.
+
+A real 504 was induced through the product with an ordinary action — no config
+change, no injected fault: a 16 MB text file of unique lines, uploaded and
+indexed. It chunks to **9682 chunks**, which is ~152 sequential embedding batches,
+so the sync legitimately outruns the consumer's 20 s budget.
+
+**The consumer said, in an `alert`, at ~20 s:**
+
+> Indexing did not finish in time. Your documents are still here, and some may not
+> be searchable yet — check the list, or index again.
+
+**The Brain's own log for that same sync:**
+
+```
+16:19:07.230  sync_started     version=50
+16:19:07.804  files_listed     files=74 ms=574
+16:19:08.006  embedding_file   file=slow-index-probe.txt chunks=9682
+16:27:20.990  file_embedded    file=slow-index-probe.txt chunks=9682 ms=492984
+16:27:20.998  committing       version=51 changedFiles=1 changedChunks=9682
+16:27:35.055  sync_completed   files=74 chunks=10152 ms=507825 version=51
+```
+
+**9682 chunks were indexed, 8 minutes 13 seconds after the old copy would have
+said "Nothing was indexed."** Not arguably wrong — wrong.
+
+Three further facts this run establishes, each of which would previously have been
+guesswork:
+
+- **Per-file embedding is ~171 ms** (60 one-chunk files: min 164, median 171, max
+  313; whole sync 11158 ms). The earlier "~400 ms" came from two cold samples, and
+  the first attempt to force a timeout therefore *succeeded* — 60 files indexed
+  comfortably inside the budget. Measure at scale, not from n=2.
+- **The 75 s deadline is per BATCH, not per sync.** A 9682-chunk document ran for
+  8 minutes and was never abandoned, because every individual batch answered
+  quickly. Only a provider that stops answering is abandoned. This is the
+  distinction the whole slice exists to draw, and it is now demonstrated.
+- **The stage line did its job under real load.** For eight minutes the only thing
+  an operator needed was there: `embedding_file file=slow-index-probe.txt
+  chunks=9682`. Before this slice that window held one `incoming request` line and
+  nothing else.
+
+Cleaned up through the product: all 61 probe files deleted, every one answering
+`searchPurged: true`; library restored to 19 files / 66.3 MB / 13 searchable and
+the Brain back to `files=13 chunks=410`, its exact pre-test baseline.
+
+Live on consumer `indexcopy-0926d` / commit `7094feea`, brain `syncstall-0926c` /
+commit `057587a1`.

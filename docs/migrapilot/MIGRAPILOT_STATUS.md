@@ -2028,3 +2028,34 @@ showing the timeout defect was real. Brain 3462/3462; consumer `npm run verify` 
 🚨 **For the Engineer lane:** this touched **Brain** code while the Brain lineage
 reconciliation is open. It must survive that reconciliation, and is not a reason to
 promote this Brain line. Production remains frozen.
+
+### 2026-09-26 (later) — the timeout copy verified live, and the old copy proven false
+
+Full record: §47.4. A real 504 was induced through the product with an ordinary
+action — a 16 MB text file of unique lines, uploaded and indexed. It chunks to **9682
+chunks** (~152 sequential embedding batches), which legitimately outruns the consumer's
+20 s budget. No config change, no injected fault.
+
+The consumer said, at ~20 s: *"Indexing did not finish in time. Your documents are still
+here, and some may not be searchable yet — check the list, or index again."*
+
+The Brain, for that same sync: `embedding_file chunks=9682` at 16:19:08 →
+`file_embedded ms=492984` at 16:27:20 → `sync_completed version=51 chunks=10152`.
+
+**9682 chunks were indexed 8 m 13 s after the old copy would have said "Nothing was
+indexed."** Not arguably wrong — wrong.
+
+Three things that were guesswork and are now measured:
+
+- **Per-file embedding is ~171 ms**, not the ~400 ms I had estimated from two cold
+  samples — which is why my first attempt to force a timeout *succeeded* (60 files in
+  11.2 s). Measure at scale, not from n=2.
+- **The 75 s deadline is per batch, not per sync.** The 9682-chunk document ran eight
+  minutes and was never abandoned, because each batch answered quickly. Only a provider
+  that has stopped answering is abandoned — the distinction the whole slice exists for.
+- **The new stage line carried the eight minutes on its own:** `embedding_file
+  file=slow-index-probe.txt chunks=9682`. Before this slice that window held one
+  `incoming request` line and nothing else.
+
+Cleaned up through the product: 61 probe files deleted, all `searchPurged: true`; library
+back to 19 files / 66.3 MB / 13 searchable, Brain back to `files=13 chunks=410`.

@@ -3897,7 +3897,7 @@
  },
  "syncStallAttribution_2026_09_26": {
   "_authority": "docs/migrapilot/CHAT_CAPABILITY_CONTRACT.md §47",
-  "status": "STAGING-PROVEN / READY FOR USER TEST — not user-proven",
+  "status": "STAGING-PROVEN (incl. the timeout path, live) / READY FOR USER TEST — not user-proven",
   "foundBy": "using the product, not by a test — a 31-slide chart deck returned 504 after ~39s",
   "🚨 hypothesisIStartedWithWasWrong": "I began from \"indexing is too slow for the 20s budget\". The Brain log refutes it: every sync that COMPLETED took 0.34ms to 469ms. The 15:16:31 request has an incoming line and NO completion line at all. It stalled; it did not run slowly. Recorded so the slow-index hypothesis is not re-derived.",
   "defect1_noEmbeddingTimeout": {
@@ -3940,7 +3940,18 @@
    "nowTimeout": "504 sync_timeout — \"Indexing did not finish in time. Your documents are still here, and some may not be searchable yet — check the list, or index again.\"",
    "nowRefused": "502 sync_failed — \"Your files could not be read, so nothing NEW was indexed.\" (a refusal rolls back, so previously indexed documents are still searchable)",
    "testedHow": "behaviourally — the route driven with the Brain timing out and refusing, body read; not a source assertion, which a comment could satisfy",
-   "harnessDefectsFoundInMyOwnTest": "(1) stubbed the index listing with root=UPLOAD_ROOT while the route scopes to userDirectory(), so it never reached the sync and all three tests failed against the PREPARATION branch; (2) POST() on this route takes no Request — passing one ran fine and was caught only by tsc"
+   "harnessDefectsFoundInMyOwnTest": "(1) stubbed the index listing with root=UPLOAD_ROOT while the route scopes to userDirectory(), so it never reached the sync and all three tests failed against the PREPARATION branch; (2) POST() on this route takes no Request — passing one ran fine and was caught only by tsc",
+   "🚨 liveVerified_oldCopyPROVEN_FALSE": {
+    "_authority": "CHAT_CAPABILITY_CONTRACT.md §47.4",
+    "method": "a real 504 induced through the product with an ORDINARY action — no config change, no injected fault: a 16MB text file of unique lines chunks to 9682 chunks (~152 sequential embedding batches), which legitimately outruns the consumer 20s budget",
+    "consumerSaid": "at ~20s, in an alert: \"Indexing did not finish in time. Your documents are still here, and some may not be searchable yet — check the list, or index again.\"",
+    "brainDid": "16:19:08 embedding_file chunks=9682 -> 16:27:20 file_embedded ms=492984 -> 16:27:35 sync_completed version=51 chunks=10152 ms=507825",
+    "🚨 verdict": "9682 chunks WERE indexed 8m13s after the old copy would have said \"Nothing was indexed\". Not arguably wrong — wrong. The §47.2 argument is now a measurement.",
+    "perFileEmbedMeasuredAtScale": "~171ms for a 1-chunk file (n=60: min 164 / median 171 / max 313; whole sync 11158ms). The earlier ~400ms came from TWO COLD SAMPLES, so the first attempt to force a timeout SUCCEEDED instead. Measure at scale, not from n=2.",
+    "🚨 deadlineIsPerBatchNotPerSync": "a 9682-chunk document ran 8 minutes and was NEVER abandoned, because each individual batch answered quickly. Only a provider that stops answering is abandoned. This is the distinction the slice exists to draw, now demonstrated rather than asserted.",
+    "instrumentationUnderRealLoad": "for 8 minutes the one thing an operator needed was present: `embedding_file file=slow-index-probe.txt chunks=9682`. Before this slice that window held one `incoming request` line and nothing else.",
+    "cleanup": "all 61 probe files deleted through the product, every one searchPurged:true; library restored to 19 files / 66.3MB / 13 searchable; Brain back to files=13 chunks=410, its exact pre-test baseline"
+   }
   },
   "boundIsPerSyncNotPerFile": "no per-file catch in the sync loop, so the first embedding failure ends the whole sync: a dead provider costs listing + 75s ONCE, not 75s per changed file. The consumer 20s budget inside the Brain 75s budget is deliberate — truthful answer fast, Brain stops shortly after, instead of ~25 minutes. Do not \"fix\" this by raising the consumer timeout."
  }
