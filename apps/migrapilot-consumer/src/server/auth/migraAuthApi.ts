@@ -24,6 +24,7 @@ import 'server-only'
 import { createHash } from 'node:crypto'
 import { getSession } from './index'
 import { setAppSession } from '@migrateck/auth-client'
+import { logAuthEvent } from './authTrace'
 import { readEnv, readFirstEnv, absoluteHttpUrl } from './env'
 import type { AppSession } from './authPort'
 
@@ -92,7 +93,20 @@ function tokensOf(session: AppSession): StoredTokens | null {
 async function refreshAccessToken(refreshToken: string): Promise<StoredTokens | null> {
   const base = issuer()
   const clientId = readEnv('MIGRAAUTH_CLIENT_ID')
-  if (!base || !clientId) return null
+  /*
+   * 🚨 REPORTED AS A BOOLEAN, NEVER A VALUE. Whether a secret was sent is the
+   * fact that explains an unexplained 401 — the comment above records that a
+   * confidential client refused without one — and staging was measured with
+   * MIGRAAUTH_CLIENT_SECRET unset while this file's comment asserted it was set.
+   * An operator needs to know WHICH of those is true without reading the env,
+   * and without the secret ever reaching a log.
+   */
+  const clientSecretConfigured = Boolean(readEnv('MIGRAAUTH_CLIENT_SECRET'))
+  if (!base || !clientId) {
+    logAuthEvent('refresh_failed', { reason: 'issuer_or_client_id_missing', clientSecretConfigured })
+    return null
+  }
+  logAuthEvent('refresh_attempted', { clientSecretConfigured })
 
   try {
     const response = await fetch(`${base}/token`, {
@@ -108,14 +122,23 @@ async function refreshAccessToken(refreshToken: string): Promise<StoredTokens | 
       }),
       cache: 'no-store',
     })
-    if (!response.ok) return null
+    if (!response.ok) {
+      // The status is the whole diagnosis: 401 with no secret configured is the
+      // confidential-client case; 400 is a rotated or reused token.
+      logAuthEvent('refresh_failed', { status: response.status, clientSecretConfigured })
+      return null
+    }
 
     const payload = (await response.json()) as {
       access_token?: string
       refresh_token?: string
       expires_in?: number
     }
-    if (!payload.access_token) return null
+    if (!payload.access_token) {
+      logAuthEvent('refresh_failed', { status: response.status, reason: 'no_access_token_in_response', clientSecretConfigured })
+      return null
+    }
+    logAuthEvent('refresh_succeeded', { status: response.status })
 
     return {
       accessToken: payload.access_token,

@@ -2078,3 +2078,83 @@ summarization all survived, and that branch is this one plus three commits.
 batch, four verified fixes would have silently reverted on staging with no signal —
 the same hazard as the Brain lineage gate, one level down, on the environment where
 acceptance happens.
+
+---
+
+## 44. Auth: two hypotheses disproven, and the silence fixed
+
+Taken up on the owner's authorisation after §43 showed the session defect had
+stopped being an acceptance blocker and become a VERIFICATION blocker. Scoped to
+the consumer session path and the logging gap — not a rewrite of MigraAuth.
+
+### 🚨 Two of my own hypotheses, disproven by measurement
+
+**1. "The app session inherits the 15-minute access token."** FALSE, and already
+fixed before I looked. `resolveAuthPort.ts` sets `sessionTtlSeconds` to a 12-hour
+default, and its comment documents this exact defect verbatim — *"It must NOT
+inherit the access token's… Inheriting 15 minutes signed users out
+mid-conversation."* Landed in `87e8f63d feat(consumer): durable conversations, and
+stop the 15-minute sign-out`, and it IS in the deployed commit. Staging sets no
+override, so the 12-hour default applies.
+
+**2. "A failed refresh clears the session."** FALSE. `reauth_required` is consumed
+only by account-management routes (sessions, email, MFA recovery codes), and
+`clearSession()` only by explicit logout and account close. The 401s observed were
+on `/api/files`, which never calls MigraAuth.
+
+Recorded because both were plausible, both were mine, and acting on either would
+have "fixed" something that was not broken.
+
+### One unexplained observation, and one real configuration finding
+
+The ~20-minute logouts measured in §41 remain UNEXPLAINED. They are not the token
+lifetime and not a refresh failure, and the event cannot be reproduced on demand
+from this lane without a live session to observe.
+
+Measured while looking: **`MIGRAAUTH_CLIENT_SECRET` is NOT SET on staging**, while
+this codebase's own comment asserts *"the deployed environment has
+`MIGRAAUTH_CLIENT_SECRET` set, so the environment is taken as the authority over
+the comment"* — and warns that omitting it for a confidential client "turns every
+refresh into an unexplained 401". That comment is false for staging. It is a lead
+for the auth lane, NOT a proven cause: nothing yet shows a failed refresh ending a
+session.
+
+### What was actually built: the silence is gone
+
+`server/auth/authTrace.ts`, wired into the two decision points that know.
+
+The defect was never the logout — a session ending is ordinary. It was that a
+session ended leaving NOTHING to read, so every occurrence costs the same
+investigation again. `isLive` is the one place that knows a session has just been
+refused, so it now says so, and reports **how long the session lived** — the fact
+that separates "the TTL is wrong" from "something cut it short", which is exactly
+the question §41 could not answer.
+
+The owner's required stages are all expressible: `token_expired`,
+`refresh_attempted`, `refresh_succeeded`, `refresh_failed`,
+`renewal_persist_failed`, `reauth_required` — plus `session_expired` and
+`session_absent`.
+
+`refresh_failed` carries the issuer STATUS and `clientSecretConfigured` as a
+BOOLEAN. That pair is the whole diagnosis for the lead above: a 401 with no secret
+configured is the confidential-client case, and an operator can see it without
+reading the environment and without the secret existing anywhere near a log.
+
+### 🚨 It is structurally incapable of logging a credential
+
+The payload is built from NAMED fields, never a spread, so an extra property a
+caller happens to hold — a token, a cookie, an authorization header — has no path
+into the line. That is why the function takes durations and booleans instead of an
+object it forwards.
+
+Proven adversarially: a test hands it `accessToken`, `refresh_token` and a session
+cookie, and asserts none reach the line while the diagnosable fields survive.
+Negative-checked — replacing the named copies with `{ event, ...fields }` fails
+that test and two others. Free-text `reason` is capped at 120 characters, because
+an issuer error body can echo input. Logging never throws.
+
+A subject id is deliberately NOT logged: "which user" is answerable from request
+context an operator already has, and putting identity in an auth log invites it to
+become an audit trail, which has different rules.
+
+Consumer 1343/1343 via `npm run verify`.

@@ -6,6 +6,7 @@ import {
   type AppSession,
   type AuthPort,
 } from './authPort'
+import { logAuthEvent, secondsBetween } from './authTrace'
 
 /**
  * The single place the application resolves its auth implementation.
@@ -64,9 +65,35 @@ export function resetAuthPort(): void {
   resolved = undefined
 }
 
-/** An expired session is not a session. */
-const isLive = (session: AppSession | null): session is AppSession =>
-  session !== null && !(session.expiresAt && session.expiresAt <= Date.now())
+/**
+ * An expired session is not a session — and the moment it stops being one is
+ * RECORDED.
+ *
+ * 🚨 THE SILENCE WAS THE DEFECT. A staging session became unauthenticated with
+ * nothing in the log for the entire window: no auth line, no 401, nothing an
+ * operator could read. Two hypotheses were disproven from code alone and the
+ * third could not be tested, because the event leaves no trace when it happens
+ * and cannot be reproduced on demand.
+ *
+ * This is the one place that knows a session has just been refused, so it is
+ * the one place that can say so. It reports HOW LONG the session lived, which
+ * is the fact that distinguishes "the TTL is wrong" from "something cut it
+ * short" — the exact question that could not be answered before.
+ */
+const isLive = (session: AppSession | null): session is AppSession => {
+  if (session === null) return false
+  if (!session.expiresAt) return true
+  const now = Date.now()
+  if (session.expiresAt > now) return true
+  logAuthEvent('session_expired', {
+    livedSeconds: session.createdAt ? secondsBetween(session.createdAt, now) : undefined,
+    remainingSeconds: secondsBetween(now, session.expiresAt),
+    configuredTtlSeconds: session.createdAt
+      ? Math.round(secondsBetween(session.createdAt, session.expiresAt))
+      : undefined,
+  })
+  return false
+}
 
 /**
  * The current session, or null. Never throws for the unauthenticated case.
