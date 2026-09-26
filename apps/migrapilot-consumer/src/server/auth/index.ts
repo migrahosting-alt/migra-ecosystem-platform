@@ -6,7 +6,10 @@ import {
   type AppSession,
   type AuthPort,
 } from './authPort'
+import { cookies } from 'next/headers'
+
 import { logAuthEvent, secondsBetween } from './authTrace'
+import { readEnv } from './env'
 
 /**
  * The single place the application resolves its auth implementation.
@@ -105,7 +108,38 @@ const isLive = (session: AppSession | null): session is AppSession => {
  */
 export async function getSession(): Promise<AppSession | null> {
   const session = await (await getAuthPort()).getSession()
-  return isLive(session) ? session : null
+  if (session) return isLive(session) ? session : null
+
+  /*
+   * 🚨 THE BLIND SPOT THIS CLOSES — and it is the most likely cause.
+   *
+   * `isLive` can only report a session it was GIVEN. When the port returns null
+   * there is nothing to measure, so a session that vanished rather than expired
+   * produced no line at all — which is precisely the unexplained case in §41.
+   *
+   * These are different failures with different fixes, and only the cookie tells
+   * them apart:
+   *   · no cookie at all  → the browser dropped it. A cookie Max-Age or domain
+   *                         problem, or the person really did sign out.
+   *   · cookie PRESENT and no session → the server refused it: a bad signature,
+   *                         a rotated `APP_SESSION_SECRET`, or an expired payload.
+   *
+   * Only the SECOND is logged. An anonymous visitor with no cookie is ordinary
+   * traffic, and logging every such request would bury the one line that matters
+   * — a log nobody can read is the defect this whole module exists for.
+   *
+   * Presence only. The cookie's value is never read, compared or recorded.
+   */
+  try {
+    const jar = await cookies()
+    const name = readEnv('APP_SESSION_COOKIE_NAME') ?? 'migrapilot_consumer_session'
+    if (jar.get(name)) {
+      logAuthEvent('session_absent', { reason: 'cookie_present_but_no_session' })
+    }
+  } catch {
+    /* No request scope — a unit test or a statically evaluated module. */
+  }
+  return null
 }
 
 /**
