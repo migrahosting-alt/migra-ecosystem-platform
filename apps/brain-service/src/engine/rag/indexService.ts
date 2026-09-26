@@ -104,6 +104,26 @@ interface Entry {
   approvedIndex?: VectorIndex;
 }
 
+/**
+ * The steps of a sync, each named before it is attempted.
+ *
+ * Deliberately a closed union rather than free text: an operator greps for a
+ * stage name, and a monitor can alert on `embedding_file` never being followed by
+ * `file_embedded` without parsing prose.
+ */
+export type SyncStage =
+  | 'sync_started'
+  /** About to walk the workspace and extract every readable document. */
+  | 'listing_files'
+  | 'files_listed'
+  /** About to embed one file — the stage a stalled provider hangs in. */
+  | 'embedding_file'
+  | 'file_embedded'
+  /** About to write the durable commit. */
+  | 'committing'
+  | 'sync_completed'
+  | 'sync_failed'
+
 export class IndexService {
   private readonly byId = new Map<string, Entry>();
 
@@ -116,6 +136,21 @@ export class IndexService {
     /** Durable persistence for index records + chunks (optional; in-memory only
      * when absent). */
     private readonly persistence?: RagIndexPersistence,
+    /**
+     * Where a sync currently IS, emitted before each step that can block.
+     *
+     * 🚨 A HUNG SYNC USED TO LEAVE NOTHING TO READ. Staging logged `incoming
+     * request` for a sync at 15:16:31 and no completion line ever followed; the
+     * user saw a 504 and an operator had no way to tell whether the time went
+     * into listing files, extracting a document, embedding a particular file, or
+     * the durable commit. The hang was real and is still unattributable, because
+     * nothing recorded the stages.
+     *
+     * Emitted BEFORE each await, never only after. A line that appears once a
+     * step has finished is absent for exactly the step that hung, which is the
+     * one worth naming.
+     */
+    private readonly onStage: (stage: SyncStage, fields: Record<string, unknown>) => void = () => {},
   ) {}
 
   /** Rebuild in-memory indexes from durable storage on startup — approved indexes
@@ -407,9 +442,18 @@ export class IndexService {
     if (!e) return { ok: false, code: 'UNKNOWN_INDEX', error: 'Index not found.' };
     const started = this.now();
     e.record.syncing = true;
+    // Named so `sync_failed` can say which step it died in without a stack.
+    let stage: SyncStage = 'sync_started';
+    this.onStage('sync_started', { indexId: e.record.id, version: e.record.version });
     try {
       const source = this.sourceFactory(e.record);
+      // Extraction of every PDF/DOCX/PPTX in the workspace happens in here, on
+      // every sync — so this is a genuine candidate for a long or hung step and
+      // has to be announced before it is entered.
+      stage = 'listing_files';
+      this.onStage('listing_files', { indexId: e.record.id });
       const files = await source.files();
+      this.onStage('files_listed', { indexId: e.record.id, files: files.length, ms: this.now() - started });
       const staging = e.index.clone(); // build into a staging copy
       const seen = new Set<string>();
       const changedFiles: string[] = [];
@@ -423,7 +467,19 @@ export class IndexService {
         const unchanged = existing.size === newHashes.size && [...newHashes].every((h) => existing.has(h));
         if (unchanged) continue; // incremental: skip re-embedding
 
+        // The step a stalled provider hangs in, and the only place the FILE is
+        // known. Without this line a hung sync cannot even say which document it
+        // was on.
+        stage = 'embedding_file';
+        const embedStarted = this.now();
+        this.onStage('embedding_file', { indexId: e.record.id, file: f.relPath, chunks: raw.length });
         const vectors = raw.length ? await this.embedder.embed(raw.map((c) => c.text)) : [];
+        this.onStage('file_embedded', {
+          indexId: e.record.id,
+          file: f.relPath,
+          chunks: raw.length,
+          ms: this.now() - embedStarted,
+        });
         const chunks: IndexedChunk[] = raw.map((c, i) => ({
           id: `${f.relPath}#${c.startLine}`,
           workspaceId: scope.workspace,
@@ -466,6 +522,14 @@ export class IndexService {
       // Durable commit (one transaction). It validates every vector before BEGIN,
       // so an invalid candidate throws here having written nothing.
       if (this.persistence) {
+        stage = 'committing';
+        this.onStage('committing', {
+          indexId: e.record.id,
+          version: nextVersion,
+          changedFiles: changedFiles.length,
+          changedChunks: changedChunks.length,
+          deletedFiles: deletedFiles.length,
+        });
         // AWAITED, or the swap below is not "only after the durable commit
         // succeeded" — it is concurrent with it. Un-awaited, a commit that threw
         // (an invalid vector, a rolled-back transaction) surfaced as an unhandled
@@ -495,8 +559,23 @@ export class IndexService {
       if (e.record.state === 'approved' && e.record.approvedVersion !== nextVersion) e.record.state = 'evaluated';
       nextStats.lastSyncMs = this.now() - started;
       e.record.stats = nextStats;
+      this.onStage('sync_completed', {
+        indexId: e.record.id,
+        version: nextVersion,
+        ms: nextStats.lastSyncMs,
+        files: nextStats.files,
+        chunks: nextStats.chunks,
+      });
       return { ok: true, record: e.record };
     } catch (error) {
+      // The stage is the point: "it failed" was already knowable, "it failed
+      // while embedding liv_kreyol_AI-Training.pdf" was not.
+      this.onStage('sync_failed', {
+        indexId: e.record.id,
+        stage,
+        ms: this.now() - started,
+        error: error instanceof Error ? error.message.slice(0, 200) : String(error),
+      });
       // The prior index really is untouched: validation happens before BEGIN and
       // the transaction rolls back, so nothing durable changed.
       e.record.syncing = false;

@@ -47,6 +47,41 @@ const MAX_EMBED_BATCH = 64;
  */
 const EMBED_ATTEMPTS = 5;
 
+/**
+ * How long ONE embeddings request may take before it is abandoned.
+ *
+ * 🚨 THERE WAS NO TIMEOUT HERE AT ALL, AND A SYNC HUNG FOR MINUTES IN SILENCE.
+ *
+ * Measured on staging 2026-09-26: `POST /api/ai/indexes/<id>/sync` logged
+ * `incoming request` at 15:16:31 and NEVER logged a completion — no response, no
+ * error, nothing, while the consumer's caller gave up and the user saw a 504.
+ * Every sync that did finish took between sub-millisecond and 469 ms, so this was
+ * a stall, not slowness.
+ *
+ * The provider is not local: `MIGRAPILOT_PROVIDER_URL` points at an Ollama on a
+ * TAILNET PEER. A peer that sleeps, roams or loses its route does not refuse a
+ * connection — it accepts and goes quiet, which is the one failure a bare `fetch`
+ * will wait out. Undici's own default is ~300 s per attempt; across
+ * {@link EMBED_ATTEMPTS} that is twenty-five minutes of work nobody is waiting
+ * for any more, holding a staging index in `syncing` the whole time.
+ *
+ * 30 s is ~70x the slowest healthy call measured against that peer (0.41 s), so
+ * it cannot fire on a merely loaded provider — only on one that has stopped
+ * answering.
+ */
+const EMBED_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Total time one batch may spend across ALL of its attempts.
+ *
+ * A per-request timeout alone is not a bound: five timed-out attempts plus their
+ * backoff still add up to two and a half minutes, and the retry budget above was
+ * sized for a provider that recovers in ~3 seconds, not for one that is gone.
+ * When a batch has spent this long the provider is not blipping, and further
+ * attempts only delay an answer the caller needs now.
+ */
+const EMBED_BATCH_DEADLINE_MS = 75_000;
+
 /** Provider failures worth retrying: the connection or the runner, not the request. */
 function isTransient(status: number, detail: string): boolean {
   if (status === 429 || status >= 500) return true;
@@ -65,6 +100,10 @@ export class OllamaEmbedder implements Embedder {
     /** Injectable so tests exercise the retry path without real delays. */
     private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
     private readonly attempts = EMBED_ATTEMPTS,
+    private readonly requestTimeoutMs = EMBED_REQUEST_TIMEOUT_MS,
+    private readonly batchDeadlineMs = EMBED_BATCH_DEADLINE_MS,
+    /** Injectable so the deadline can be tested without waiting for it. */
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   /** Splits into bounded requests; `result[i]` still corresponds to `texts[i]`. */
@@ -86,27 +125,72 @@ export class OllamaEmbedder implements Embedder {
    */
   private async embedWithRetry(texts: string[]): Promise<number[][]> {
     let last: Error | undefined;
+    const deadline = this.now() + this.batchDeadlineMs;
     for (let attempt = 0; attempt < this.attempts; attempt += 1) {
       try {
-        return await this.embedBatch(texts);
+        /*
+         * CLAMPED TO WHAT IS LEFT, or the deadline is not the bound it claims.
+         *
+         * Checked only BETWEEN attempts, a 75 s deadline still permits a final
+         * 30 s attempt that starts at 61 s — a 92 s worst case under a constant
+         * that says 75. An attempt is given the smaller of its own timeout and
+         * the remaining budget, so the number in the constant is the number an
+         * operator actually gets.
+         */
+        const remaining = deadline - this.now();
+        return await this.embedBatch(texts, Math.max(1, Math.min(this.requestTimeoutMs, remaining)));
       } catch (error) {
         last = error instanceof Error ? error : new Error(String(error));
         // A thrown fetch (connection refused/reset) is transient by nature; an
         // HTTP failure is only retried when the provider says so.
         const retryable = !(last instanceof EmbedderHttpError) || isTransient(last.status, last.message);
         if (!retryable || attempt === this.attempts - 1) throw last;
+        /*
+         * Stop on the DEADLINE, and say that is why.
+         *
+         * Reported as its own error rather than re-throwing the last transport
+         * message, because "provider stopped answering for 75 seconds" and "one
+         * request was reset" call for different operator responses, and the
+         * retry budget was sized for the second.
+         */
+        if (this.now() >= deadline) {
+          throw new Error(
+            `embedder gave up after ${attempt + 1} attempts in ${this.batchDeadlineMs}ms; last: ${last.message}`,
+          );
+        }
         await this.sleep(500 * 2 ** attempt); // 0.5s, 1s, 2s, 4s
       }
     }
     throw last ?? new Error('embedder failed');
   }
 
-  private async embedBatch(texts: string[]): Promise<number[][]> {
-    const res = await this.fetchImpl(`${this.baseUrl.replace(/\/$/, '')}/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}) },
-      body: JSON.stringify({ model: this.model, input: texts }),
-    });
+  private async embedBatch(texts: string[], timeoutMs = this.requestTimeoutMs): Promise<number[][]> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl.replace(/\/$/, '')}/embeddings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}) },
+        body: JSON.stringify({ model: this.model, input: texts }),
+        // The bound that was missing. A provider that accepts the connection and
+        // then says nothing is abandoned here instead of waiting out undici's
+        // ~300 s default — see EMBED_REQUEST_TIMEOUT_MS.
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      /*
+       * Name the timeout, rather than letting a bare `DOMException:
+       * TimeoutError` reach `stats.lastError`.
+       *
+       * It also makes the retry decision deliberate: the word `timeout` is what
+       * {@link isTransient} looks for, so a stalled provider is retried because
+       * this says so, not because an unrecognised error happened to fall through
+       * to the retryable branch.
+       */
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new Error(`embedder timed out after ${timeoutMs}ms with no response`);
+      }
+      throw error;
+    }
     if (!res.ok) throw new EmbedderHttpError(res.status, `embedder HTTP ${res.status}${await providerDetail(res)}`);
     const data = (await res.json()) as { data?: Array<{ embedding: number[] }> };
     const out = (data.data ?? []).map((d) => d.embedding);

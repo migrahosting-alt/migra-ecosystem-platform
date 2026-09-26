@@ -646,7 +646,17 @@ async function main(): Promise<void> {
   // real OllamaEmbedder is used whenever a concrete provider is configured.
   const baseEmbedder = env.localProvider === 'stub' ? new FakeEmbedder() : new OllamaEmbedder(env.providerBaseUrl, 'nomic-embed-text:latest', 'v1', env.openAiApiKey);
   const embedder = new CachedEmbedder(baseEmbedder, 20000, durable ?? undefined);
-  const indexService = new IndexService(embedder, (rec) => new FsFileSource(rec.root), undefined, undefined, durable ?? undefined);
+  const indexService = new IndexService(
+    embedder,
+    (rec) => new FsFileSource(rec.root),
+    undefined,
+    undefined,
+    durable ?? undefined,
+    // `info`, not `debug`: a sync that hangs is diagnosed from the log that was
+    // already being written, and a level nobody enables in staging would have
+    // left the 2026-09-26 stall exactly as unattributable as it was.
+    (stage, fields) => app.log.info({ ...fields, stage }, `index sync: ${stage}`),
+  );
   // AWAITED: the vector indexes, their approved pointers and any startup
   // quarantine all load here. Detached, the engine answered retrieval requests
   // against an empty index set while claiming it had hydrated.
