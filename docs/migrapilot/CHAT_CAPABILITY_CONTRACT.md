@@ -2540,3 +2540,104 @@ the Brain back to `files=13 chunks=410`, its exact pre-test baseline.
 
 Live on consumer `indexcopy-0926d` / commit `7094feea`, brain `syncstall-0926c` /
 commit `057587a1`.
+
+## 48. 🚨 An attached document is never read — only sampled. And the sampling is not disclosed.
+
+Found by using the product as a person would: attach the 31-slide chart deck, ask
+*"What's on slide 12, and did you manage to read the whole deck?"*
+
+The answer was accurate about slide 12 — "a three card layout", which is exactly
+what the extractor finds there; the deck is a lorem-ipsum template. Then it said:
+
+> However, I couldn't find any content for slides before 11 or after 29, as there
+> is no retrieved evidence from the provided context.
+
+All 31 slides had been extracted and indexed. Nothing was missing from the deck.
+
+### The measurement
+
+| fact | value | how |
+| --- | --- | --- |
+| slides | 31 | deployed `extractPptx` on the real file |
+| extracted text | **21,944 chars** (~5.5k tokens) | same |
+| chunks in the index | **74** | deployed `chunkFile` on that text |
+| chunks one chat answer may see | **6** (`maxChunks: 6`, and `tokenBudget: 2000` can bind first) | `aiRoutes.ts` |
+| **share of the deck one answer can see** | **~8%** | 6 / 74 |
+
+The whole document would fit in context several times over. It is sampled anyway.
+
+### Three distinct defects, and the model is not one of them
+
+**48.1 There is no whole-document path for a chat attachment.** `fileEvidenceFrom`
+— the path that reads a file whole and carries a completeness flag — is reached
+only from `capabilityTurn` for attachments fetched by `migra.email`. An ordinary
+attached document is grounded exclusively through RAG. `turnGrounding` decides
+*which* files a turn may use; nothing decides *how much* of one.
+
+**48.2 The retrieval budget is computed and then thrown away.** `hybridRetriever`
+counts `omittedForBudget` and returns it in `diagnostics` — and the
+`retrieveApproved` closure in `aiRoutes.ts` maps `rag.chunks` and drops
+`rag.diagnostics` on the floor. It reaches no prompt, no log line and no user.
+
+🚨 **So the model could not have known it was given 6 of 74 passages.** It was not
+hallucinating and it was not evasive: it described its context truthfully, and the
+product had withheld the fact that its context was a sample. *The product turned
+its own truncation into the model's false statement about the document.* This is
+[[absence is not evidence of absence]] at the architecture level, and it is the
+THIRD time in this programme that a computed signal was discarded before it could
+be used.
+
+**48.3 `hasUnreadCharts` is still discarded in the path chat actually uses — my
+earlier fix landed in the wrong one.** §PPTX recorded that "a charted deck is
+reported as not read whole." That is true of `fileText.ts`, the email/whole-file
+path. `fsFileSource.ts` — the INDEX path, the one behind every chat attachment —
+does this:
+
+```ts
+const extracted = await extractPptx(new Uint8Array(await fs.readFile(childAbs)));
+if (extracted.text) out.push({ relPath: childRel, content: extracted.text });
+```
+
+`extracted.hasUnreadCharts` is **true** for this deck and is dropped on that line.
+`FileSource` has no completeness field at all. So when the user asked, in plain
+words, whether the whole deck had been read, the one concrete thing the product
+knew — that it cannot read the charts — was unavailable to answer with.
+
+I reported that disclosure as done. It is done in one of two paths, and not the
+one a user reaches.
+
+### Not a defect, checked and dismissed
+
+`GET /api/ai/documents/quarterly_operating_review.pptx` returns **404** during the
+turn. That is deliberate and documented in `documentRoutes.ts`: a document read
+inside the request never enters the processing table, and 404-ing is how the
+consumer avoids treating an ordinary document as broken. Chased because it looked
+alarming; it is correct.
+
+### Recommendation — and 48.A is worth doing whether or not 48.B is
+
+**48.A — disclose the sample (small, self-contained, durable).** Thread
+`omittedForBudget` from the retriever through `GroundingDecision` into the turn
+context, so the model is told how much of the document it received and the answer
+can distinguish *"not in this document"* from *"not in the part I was given."* This
+does not change what is retrieved, what it costs, or which model runs. It stays
+necessary even after 48.B, because a 245-page book will always be sampled.
+
+**48.B — read documents that fit (architectural, owner's call).** Give a chat
+attachment under a size budget a whole-document path, so a 22 KB deck is read
+rather than sampled. This is what parity actually requires for "summarise this
+deck" — the question a person asks first. It changes context composition and
+therefore cost and latency, which is why it is a ruling rather than a fix.
+
+**48.C — carry completeness through the index path.** Add a completeness field to
+`FileSource` so `hasUnreadCharts` survives, and surface it where a user already
+looks — the library row, beside the existing per-file messages. Closes 48.3
+properly rather than in one path.
+
+### Status
+
+**MEASURED, NOT FIXED.** Nothing in §48 is implemented. Recorded rather than
+built: 48.A/48.C are Brain changes and the Brain lineage reconciliation is open,
+so each one added now raises what the Engineer lane must carry — and 48.B is a
+ruling I should not make alone. The measurements above are complete enough to act
+on without repeating any of this.

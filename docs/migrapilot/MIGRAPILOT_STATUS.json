@@ -3954,5 +3954,28 @@
    }
   },
   "boundIsPerSyncNotPerFile": "no per-file catch in the sync loop, so the first embedding failure ends the whole sync: a dead provider costs listing + 75s ONCE, not 75s per changed file. The consumer 20s budget inside the Brain 75s budget is deliberate — truthful answer fast, Brain stops shortly after, instead of ~25 minutes. Do not \"fix\" this by raising the consumer timeout."
+ },
+ "attachmentSampledNotRead_2026_09_26": {
+  "_authority": "docs/migrapilot/CHAT_CAPABILITY_CONTRACT.md §48",
+  "status": "🚨 MEASURED, NOT FIXED — nothing in §48 is implemented",
+  "foundBy": "using the product as a person would: attached the 31-slide chart deck and asked \"What's on slide 12, and did you manage to read the whole deck?\"",
+  "theAnswerSaid": "\"I couldn't find any content for slides before 11 or after 29, as there is no retrieved evidence from the provided context.\" All 31 slides WERE extracted and indexed. Nothing was missing from the deck.",
+  "measured": {
+   "slides": "31",
+   "extractedChars": "21944 (~5.5k tokens — fits in context several times over)",
+   "chunksInIndex": "74",
+   "chunksOneAnswerMaySee": "6 (maxChunks:6; tokenBudget:2000 can bind first)",
+   "🚨 shareOfTheDeckOneAnswerCanSee": "~8% (6/74)"
+  },
+  "defect_48_1_noWholeDocumentPath": "fileEvidenceFrom — the path that reads a file whole and carries a completeness flag — is reached only from capabilityTurn for attachments fetched by migra.email. An ordinary attached document is grounded EXCLUSIVELY through RAG. turnGrounding decides WHICH files a turn may use; nothing decides HOW MUCH of one.",
+  "🚨 defect_48_2_retrievalBudgetComputedThenDiscarded": "hybridRetriever counts omittedForBudget and returns it in diagnostics; the retrieveApproved closure in aiRoutes.ts maps rag.chunks and DROPS rag.diagnostics. It reaches no prompt, no log line, no user. So the model could not have known it was given 6 of 74 passages — it described its context truthfully and the PRODUCT withheld that the context was a sample. The product turned its own truncation into the model's false statement about the document. THIRD instance in this programme of a computed signal discarded before use.",
+  "🚨 defect_48_3_myEarlierFixLandedInTheWrongPath": "§PPTX recorded \"a charted deck is reported as not read whole\". True of fileText.ts (email/whole-file path). fsFileSource.ts — the INDEX path behind EVERY chat attachment — does `if (extracted.text) out.push({relPath, content: extracted.text})` and drops extracted.hasUnreadCharts, which is TRUE for this deck. FileSource has no completeness field at all. I reported that disclosure as done; it is done in one of two paths, and not the one a user reaches.",
+  "checkedAndDismissed": "GET /api/ai/documents/<name> returns 404 during the turn. DELIBERATE and documented in documentRoutes.ts: a document read inside the request never enters the processing table, and 404-ing is how the consumer avoids treating an ordinary document as broken. Not a defect.",
+  "recommendation": {
+   "48A_discloseTheSample": "SMALL, SELF-CONTAINED, DURABLE — thread omittedForBudget through GroundingDecision into the turn context so the model is told how much of the document it got, and can distinguish \"not in this document\" from \"not in the part I was given\". Does not change what is retrieved, what it costs, or which model runs. Stays necessary even after 48B, because a 245-page book will always be sampled.",
+   "48B_readDocumentsThatFit": "ARCHITECTURAL, OWNER RULING — give a chat attachment under a size budget a whole-document path, so a 22KB deck is READ rather than sampled. This is what parity actually requires for \"summarise this deck\", the question a person asks first. Changes context composition and therefore cost and latency.",
+   "48C_carryCompletenessThroughTheIndexPath": "add a completeness field to FileSource so hasUnreadCharts survives, and surface it in the library row beside the existing per-file messages. Closes 48.3 properly rather than in one path."
+  },
+  "whyRecordedRatherThanBuilt": "48A/48C are BRAIN changes and the Brain lineage reconciliation is open, so each one added now raises what the Engineer lane must carry; 48B is a ruling I should not make alone. The measurements are complete enough to act on without repeating any of this."
  }
 }

@@ -2059,3 +2059,42 @@ Three things that were guesswork and are now measured:
 
 Cleaned up through the product: 61 probe files deleted, all `searchPurged: true`; library
 back to 19 files / 66.3 MB / 13 searchable, Brain back to `files=13 chunks=410`.
+
+---
+
+## 2026-09-26 — 🚨 an attached document is never read, only sampled (MEASURED, NOT FIXED)
+
+Full record: §48. Found by using the product as a person would — attach the 31-slide chart
+deck, ask *"What's on slide 12, and did you manage to read the whole deck?"*
+
+It answered slide 12 correctly, then said it *"couldn't find any content for slides before
+11 or after 29."* All 31 slides had been extracted and indexed. Nothing was missing.
+
+| | |
+| --- | --- |
+| slides / extracted text | 31 / **21,944 chars** (~5.5k tokens — fits in context several times over) |
+| chunks in the index | **74** |
+| chunks one answer may see | **6** |
+| **share of the deck one answer can see** | **~8%** |
+
+**The model is not the defect.** `hybridRetriever` counts `omittedForBudget`, and the
+`retrieveApproved` closure in `aiRoutes.ts` drops `rag.diagnostics` on the floor. The model
+could not have known it was given 6 of 74 passages — it described its context truthfully,
+and the product had withheld that its context was a sample. *The product turned its own
+truncation into the model's false statement about the document.* Third time in this
+programme that a computed signal was discarded before it could be used.
+
+**And a correction to my own earlier report.** §PPTX said "a charted deck is reported as not
+read whole." That holds for `fileText.ts` — the email/whole-file path. `fsFileSource.ts`, the
+index path behind *every chat attachment*, drops `extracted.hasUnreadCharts` (which is `true`
+for this deck) on the line that pushes the text. I fixed one of two paths and reported it
+done; the one a user reaches is still silent.
+
+Recommended, in order: **48.A** disclose the sample (small, self-contained, and still needed
+even after 48.B, since a 245-page book will always be sampled) · **48.C** carry completeness
+through the index path · **48.B** read documents that fit — *an owner ruling*, because it
+changes context composition, cost and latency, and it is what parity for "summarise this
+deck" actually requires.
+
+Recorded rather than built: 48.A/48.C are Brain changes while the Brain lineage
+reconciliation is open, so each one raises what the Engineer lane must carry.
