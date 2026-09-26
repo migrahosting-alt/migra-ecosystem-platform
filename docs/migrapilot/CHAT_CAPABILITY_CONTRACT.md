@@ -2041,3 +2041,40 @@ safeguard.
 Consumer verify 1337/1337 (typecheck, tests, build, bundle), Brain 3453/3453.
 Not deployed — staging currently serves the conversation-state batch, and this
 group can ride the next deploy.
+
+---
+
+## 43. §42 deployed — and the auth defect now blocks VERIFICATION, not just acceptance
+
+Consumer `audiohonesty-0925` / `ad2b8aae`. Brain `coding-loop-rc50` / `cc498fe8`.
+
+### 🚨 The escalation
+
+§41's silent session expiry was recorded as blocking the OWNER TEST. It now also
+blocks the Chat lane from verifying its own user-visible work: both §42 slices —
+the audio refusal and the file-delete confirmation — are reached only through an
+authenticated UI, and the session is gone before they can be exercised.
+
+That changes what the defect costs. It is no longer "the owner cannot accept"; it
+is "nothing user-facing can be proven on staging at all". Every future Chat slice
+with a UI surface inherits this.
+
+**What IS proven:** both changes are present in the deployed artifact —
+`transcription is not configured` and `Delete for good` / `Confirm deleting` are in
+the served `.next` chunks. That is evidence the code SHIPPED. It is not evidence the
+UX behaves, and it is recorded as the weaker claim it is.
+
+**Status of §42 slices: DEPLOYED, UX-UNVERIFIED.** Not READY FOR USER TEST, because
+nobody — me or the owner — can currently reach them.
+
+### A near-miss worth recording
+
+Staging's Brain was redeployed by the agent-capabilities lane as `coding-loop-rc50`
+while this lane was away. Checked rather than assumed: `cc498fe8` CONTAINS
+`feb6ea6c`, so the context-gap marker, page provenance, delete completeness and
+summarization all survived, and that branch is this one plus three commits.
+
+**Nobody coordinated that.** Had they branched from before the conversation-state
+batch, four verified fixes would have silently reverted on staging with no signal —
+the same hazard as the Brain lineage gate, one level down, on the environment where
+acceptance happens.
