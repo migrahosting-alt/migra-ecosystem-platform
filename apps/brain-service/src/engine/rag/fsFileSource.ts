@@ -19,6 +19,7 @@ import { Exclusions, DEFAULT_MIGRAAI_EXCLUSIONS } from './exclusions.js';
 import { extractPdf, PdfExtractionError } from './pdfText.js';
 import { extractDocx, DocxExtractionError } from './docxText.js';
 import { extractPptx, PptxExtractionError } from './pptxText.js';
+import type { SourceFile } from './indexService.js';
 import { OCR_SIDECAR_DIR } from './scannedPdfJob.js';
 import type { FileSource } from './indexService.js';
 
@@ -104,7 +105,7 @@ export class FsFileSource implements FileSource {
     private readonly maxFileSize = DEFAULT_MAX_INDEX_FILE_BYTES,
   ) {}
 
-  async files(): Promise<Array<{ relPath: string; content: string; pageStartLines?: number[] }>> {
+  async files(): Promise<Array<SourceFile>> {
     /*
      * AN UNREADABLE ROOT IS NOT AN EMPTY LIBRARY.
      *
@@ -140,7 +141,7 @@ export class FsFileSource implements FileSource {
     abs: string,
     rel: string,
     excl: Exclusions,
-    out: Array<{ relPath: string; content: string; pageStartLines?: number[] }>,
+    out: Array<SourceFile>,
   ): Promise<void> {
     if (out.length >= this.maxFiles) return;
     let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
@@ -294,7 +295,26 @@ export class FsFileSource implements FileSource {
           if (/\.pptx$/i.test(childRel)) {
             try {
               const extracted = await extractPptx(new Uint8Array(await fs.readFile(childAbs)));
-              if (extracted.text) out.push({ relPath: childRel, content: extracted.text });
+              /*
+               * 🚨 `hasUnreadCharts` TRAVELS. It used to die on this line.
+               *
+               * A deck's charts are pictures of numbers; the extractor can see
+               * that they exist and cannot read them. That fact was computed
+               * here and thrown away, so a chat answer grounded on this deck had
+               * no way to say "I could not read the charts" — and when a user
+               * asked, in plain words, whether the whole deck had been read, the
+               * one concrete limitation the product knew about was unavailable.
+               */
+              if (extracted.text) {
+                out.push({
+                  relPath: childRel,
+                  content: extracted.text,
+                  complete: !extracted.hasUnreadCharts,
+                  ...(extracted.hasUnreadCharts
+                    ? { incompleteReason: 'This deck contains charts, which cannot be read as text.' }
+                    : {}),
+                });
+              }
             } catch (error) {
               if (!(error instanceof PptxExtractionError)) throw error;
             }

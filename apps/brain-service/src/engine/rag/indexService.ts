@@ -41,7 +41,30 @@ export interface FileSource {
    * actually find. Carried here because extraction is the only place the page
    * boundaries still exist; once the text is chunked they are gone.
    */
-  files(): Promise<Array<{ relPath: string; content: string; pageStartLines?: number[] }>>;
+  files(): Promise<Array<SourceFile>>;
+}
+
+/**
+ * One file as the source produced it.
+ *
+ * 🚨 `complete` EXISTS BECAUSE IT WAS DROPPED ONCE ALREADY. `extractPptx`
+ * returns `hasUnreadCharts`, and it was wired to a completeness flag in
+ * `fileText.ts` — the email/whole-file path — while `fsFileSource`, the INDEX
+ * path behind every chat attachment, discarded it on the line that pushes the
+ * text. The fix was reported as done and the path a user actually reaches stayed
+ * silent. A field on the contract is harder to drop than a local variable.
+ *
+ * Absent means "nothing known to be unread", never "verified whole": a format
+ * with no completeness signal yet simply does not set it.
+ */
+export interface SourceFile {
+  relPath: string;
+  content: string;
+  pageStartLines?: number[];
+  /** False only when extraction KNOWS it could not read part of the file. */
+  complete?: boolean;
+  /** Plain-language reason, safe to show a user. */
+  incompleteReason?: string;
 }
 
 /** The scope a persisted index record already carries. */
@@ -434,6 +457,54 @@ export class IndexService {
       e.approvedIndex = e.index; // the reviewed content becomes the served content
     }
     return e.record;
+  }
+
+  /**
+   * The FULL text of named documents, for a turn that can afford to read them.
+   *
+   * 🚨 WHY THIS EXISTS. A chat attachment was only ever sampled: a 31-slide deck
+   * is 74 chunks and an answer saw 6 of them — 8% — while its entire text is
+   * 21,944 characters and the prompt window was measured to hold at least 15,728
+   * tokens. Retrieval is the right tool for a 245-page book and the wrong one for
+   * a document that fits.
+   *
+   * SCOPE-CHECKED like every other read here: `entry(id, scope)` first, so one
+   * caller can never read another's document by naming its path.
+   *
+   * COST, STATED PLAINLY: this goes through `source.files()`, which re-extracts
+   * every readable file in the workspace — measured at 474–575 ms for a 74-file
+   * library. It is called only when a turn HAS active documents, so an ordinary
+   * chat pays nothing. A single-file read on the `FileSource` contract is the
+   * optimisation if that cost ever matters; it was not taken now because the walk
+   * carries the OCR-sidecar and size-gate logic that indexing depends on, and
+   * refactoring that to save 500 ms on a path that already takes seconds would
+   * risk the core capability for no user-visible gain.
+   */
+  async readDocuments(
+    id: string,
+    scope: Scope,
+    relPaths: readonly string[],
+  ): Promise<Array<{ path: string; text: string; complete: boolean; incompleteReason?: string }>> {
+    const e = this.entry(id, scope);
+    if (!e || relPaths.length === 0) return [];
+    const wanted = new Set(relPaths);
+    const files = await this.sourceFactory(e.record).files();
+    const byPath = new Map(files.filter((f) => wanted.has(f.relPath)).map((f) => [f.relPath, f]));
+    // The CALLER's order, not the walk's: it encodes which document the question
+    // is about. See `selectWholeDocuments`.
+    const out: Array<{ path: string; text: string; complete: boolean; incompleteReason?: string }> = [];
+    for (const relPath of relPaths) {
+      const f = byPath.get(relPath);
+      if (!f) continue;
+      out.push({
+        path: f.relPath,
+        text: f.content,
+        // Absent means nothing is KNOWN to be unread — see `SourceFile.complete`.
+        complete: f.complete !== false,
+        ...(f.incompleteReason ? { incompleteReason: f.incompleteReason } : {}),
+      });
+    }
+    return out;
   }
 
   /** Incremental, atomic sync. Returns the record or an error string. */

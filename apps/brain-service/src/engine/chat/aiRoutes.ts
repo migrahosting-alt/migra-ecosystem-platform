@@ -1,4 +1,10 @@
 import { allowRemoteModelsFromEnv } from '../models/eligibilityPolicy.js';
+import {
+  SAMPLED_PASSAGE_LIMIT,
+  SAMPLED_PASSAGE_TOKEN_BUDGET,
+  remainingPassageBudget,
+  selectWholeDocuments,
+} from '../grounding/documentBudget.js';
 import { readContextPressure } from '../memory/contextPressure.js';
 import { summarizeConversation, PRESSURE_KEEP_RECENT } from '../memory/summarizer.js';
 /**
@@ -941,6 +947,16 @@ export function registerAiRoutes(
     }
 
     let ragChunks: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }> | undefined;
+    /*
+     * Documents read WHOLE, and the coverage of any that had to be sampled.
+     *
+     * 🚨 `retrievalCoverage` is the fact whose absence produced a false answer:
+     * the retriever counted the passages it dropped and the closure below threw
+     * the count away, so a model holding 6 of 74 passages reported content as
+     * missing from the user's document. See documentBudget.ts for the numbers.
+     */
+    let wholeDocuments: ChatTurnRequest['context']['wholeDocuments'];
+    let retrievalCoverage: ChatTurnRequest['context']['retrievalCoverage'];
     let grounding: GroundingDecision | undefined;
     /*
      * Files the caller explicitly attached to this conversation.
@@ -971,15 +987,73 @@ export function registerAiRoutes(
         {
           approvedIndexId: () => indexService.approvedIndexFor(scope),
           retrieveApproved: async (indexId, query) => {
+            /*
+             * 🚨 READ THE DOCUMENT IF IT FITS, BEFORE SAMPLING IT.
+             *
+             * A 31-slide deck is 74 chunks; this used to hand the model 6 of them
+             * — 8% — while the whole text is 21,944 chars and the window was
+             * measured to hold at least 15,728 tokens. Retrieval is right for a
+             * 245-page book and wrong for a document that fits.
+             */
+            let passageBudget = SAMPLED_PASSAGE_TOKEN_BUDGET;
+            let mustSample = scopedFiles;
+            if (scopedFiles.length > 0) {
+              const candidates = await indexService.readDocuments(indexId, scope, scopedFiles);
+              const picked = selectWholeDocuments(candidates);
+              if (picked.whole.length) {
+                wholeDocuments = picked.whole.map((d) => ({
+                  path: d.path,
+                  text: d.text,
+                  complete: d.complete,
+                  ...(d.incompleteReason ? { incompleteReason: d.incompleteReason } : {}),
+                }));
+              }
+              passageBudget = remainingPassageBudget(picked.tokensUsed);
+              // Only the documents we could NOT read whole still need passages —
+              // and only those can owe the model a coverage disclosure.
+              mustSample = picked.sampled;
+            }
+
+            /*
+             * Nothing left to retrieve: every attached document was read whole.
+             * Returning early is not an optimisation, it is correctness — a
+             * retrieval scoped to an empty file list means NO scope, so it would
+             * quietly widen to the entire library.
+             */
+            if (scopedFiles.length > 0 && mustSample.length === 0) return [];
+
             const rag = await indexService.retrieve(indexId, scope, query, {
-              maxChunks: 6,
-              tokenBudget: 2000,
+              maxChunks: SAMPLED_PASSAGE_LIMIT,
+              tokenBudget: passageBudget,
               requireApproved: true,
               // Same value the grounding decision sees. An empty array is NO scope, never
               // "scope to nothing".
-              ...(scopedFiles.length > 0 ? { files: scopedFiles } : {}),
+              ...(mustSample.length > 0 ? { files: mustSample } : {}),
             });
             if (!rag.ok) throw new Error(rag.code);
+            /*
+             * 🚨 THE COUNT THAT USED TO DIE HERE. `rag.diagnostics` was dropped by
+             * this closure, so the truncation was invisible to the prompt and the
+             * model described its own sample as the document's contents.
+             *
+             * Attributed per path rather than as one total: a turn can hold a
+             * document read whole and another sampled, and one global number would
+             * make the complete one look partial.
+             */
+            const perPath = new Map<string, number>();
+            for (const c of rag.chunks) perPath.set(c.filePath, (perPath.get(c.filePath) ?? 0) + 1);
+            const totals = indexService.approvedChunkCounts(indexId, scope);
+            const coverage = [...perPath]
+              .map(([path, provided]) => ({
+                path,
+                passagesProvided: provided,
+                passagesTotal: totals[path] ?? provided,
+              }))
+              // Only a document we did NOT see whole needs the caveat. Emitting it
+              // for a fully covered file would teach the model to hedge about
+              // documents it holds entirely.
+              .filter((c) => c.passagesTotal > c.passagesProvided);
+            if (coverage.length) retrievalCoverage = coverage;
             return rag.chunks.map((c) => ({
               path: c.filePath, startLine: c.startLine, endLine: c.endLine,
               snippet: c.snippet, score: c.score,
@@ -1078,7 +1152,10 @@ export function registerAiRoutes(
       : undefined;
 
     trace.mark('context')
-    const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks, directives);
+    const chatRequest = await buildChatRequest(body, userPrompt, effectiveSummary, ragChunks, directives, {
+      whole: wholeDocuments,
+      coverage: retrievalCoverage,
+    });
     trace.mark('request_built');
     await auditStore.append({
       correlationId: requestId,
@@ -1258,6 +1335,15 @@ export function registerAiRoutes(
     summary: string,
     ragChunks?: Array<{ path: string; startLine: number; endLine: number; snippet: string; score: number; source: 'embedding' }>,
     responseDirectives: string[] = [],
+    /*
+     * Passed rather than closed over: this function is declared in the
+     * registration scope, not inside the request handler, so the turn's
+     * documents are not visible here unless they travel as arguments.
+     */
+    documents: {
+      whole?: ChatTurnRequest['context']['wholeDocuments'];
+      coverage?: ChatTurnRequest['context']['retrievalCoverage'];
+    } = {},
   ): Promise<ChatTurnRequest> {
     let retrievedChunks: ChatTurnRequest['context']['retrievedChunks'] = ragChunks;
     // ── The silent fallback that made "approved index" a preference ───────────
@@ -1270,7 +1356,7 @@ export function registerAiRoutes(
     // above, and `none` must gather nothing at all.
     const requestedMode: GroundingMode = body.groundingMode ?? modeFromLegacy(body.requireApproved);
     if (requestedMode === 'approved' || requestedMode === 'none') {
-      return finishChatRequest(body, userPrompt, summary, requestedMode === 'none' ? undefined : retrievedChunks, responseDirectives);
+      return finishChatRequest(body, userPrompt, summary, requestedMode === 'none' ? undefined : retrievedChunks, responseDirectives, documents);
     }
     if (!retrievedChunks?.length && body.workspaceRoot) {
       try {
@@ -1291,7 +1377,7 @@ export function registerAiRoutes(
         /* grounding is best-effort — never fail a turn on retrieval */
       }
     }
-    return finishChatRequest(body, userPrompt, summary, retrievedChunks, responseDirectives);
+    return finishChatRequest(body, userPrompt, summary, retrievedChunks, responseDirectives, documents);
   }
 
   function finishChatRequest(
@@ -1300,6 +1386,10 @@ export function registerAiRoutes(
     summary: string,
     retrievedChunks: ChatTurnRequest['context']['retrievedChunks'],
     responseDirectives: string[] = [],
+    documents: {
+      whole?: ChatTurnRequest['context']['wholeDocuments'];
+      coverage?: ChatTurnRequest['context']['retrievalCoverage'];
+    } = {},
   ): ChatTurnRequest {
     return {
       feature: 'chat',
@@ -1311,6 +1401,8 @@ export function registerAiRoutes(
         selectionText: body.selectionText,
         activeFile: body.activeFile,
         ...(retrievedChunks?.length ? { retrievedChunks } : {}),
+        ...(documents.whole?.length ? { wholeDocuments: documents.whole } : {}),
+        ...(documents.coverage?.length ? { retrievalCoverage: documents.coverage } : {}),
         ...(body.attachments?.length ? { attachments: body.attachments } : {}),
         // Omitted entirely when empty, so a user who changed nothing leaves no
         // trace in the request or the prompt.

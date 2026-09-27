@@ -121,6 +121,60 @@ export interface RetrievedChunk {
   source: 'grep' | 'symbol' | 'embedding' | 'recent';
 }
 
+/**
+ * A document supplied IN FULL, because it fit the turn's document budget.
+ *
+ * 🚨 DISTINCT FROM `RetrievedChunk` ON PURPOSE. A passage and a whole document
+ * licence different answers: "the deck does not mention pricing" is sound from a
+ * document read whole and is a fabrication from six passages out of seventy-four.
+ * Collapsing them into one list would erase exactly the distinction that a model
+ * needs in order to say which it is doing.
+ */
+export interface WholeDocument {
+  path: string;
+  /** The complete extracted text, as indexed. */
+  text: string;
+  /**
+   * False when extraction could not read part of it.
+   *
+   * A deck whose charts cannot be read is NOT a document read whole, and saying
+   * so is the difference between a limit disclosed and a limit hidden.
+   */
+  complete: boolean;
+  /** Why it is incomplete, in words a user can be shown. Never jargon. */
+  incompleteReason?: string;
+}
+
+/**
+ * How much of a SAMPLED document this turn actually received.
+ *
+ * 🚨 THE FACT WHOSE ABSENCE CAUSED A FALSE ANSWER. `hybridRetriever` counted the
+ * passages it dropped and the count was discarded before it reached a prompt, so
+ * a model given 6 of a document's 74 passages had no way to know it held a
+ * sample. It then reported, truthfully about its context and falsely about the
+ * document, that it "couldn't find any content for slides before 11 or after 29".
+ *
+ * Carrying this is what lets an answer separate "not in this document" from "not
+ * in the part I was given".
+ */
+export interface RetrievalCoverage {
+  path: string;
+  passagesProvided: number;
+  /**
+   * Passages this document holds in the index that answers are served from.
+   *
+   * 🚨 THE DOCUMENT'S TOTAL, NOT "CANDIDATES DROPPED FOR BUDGET". The first
+   * version of this used the retriever's `omittedForBudget`, which counts how
+   * many already-matching candidates missed the budget — a different quantity,
+   * and one that is ZERO whenever the search returned few candidates. A model
+   * given 6 of a deck's 74 passages would then have been told nothing at all,
+   * and would have gone on reporting content as absent from the document. What
+   * licenses the "do not claim absence" instruction is how much of the DOCUMENT
+   * went unseen, so that is what travels.
+   */
+  passagesTotal: number;
+}
+
 export interface RetrieveRequest {
   query: string;
   workspaceRoot: string;
@@ -176,6 +230,10 @@ export interface ChatTurnRequest {
     selectionText?: string;
     diagnostics?: DiagnosticItem[];
     retrievedChunks?: RetrievedChunk[];
+    /** Documents small enough to be read rather than sampled. */
+    wholeDocuments?: WholeDocument[];
+    /** For documents that had to be sampled: how much of each was supplied. */
+    retrievalCoverage?: RetrievalCoverage[];
     gitDiff?: string;
     conversationSummary?: string;
     /** User-uploaded attachments (images for vision analysis, documents, …). */

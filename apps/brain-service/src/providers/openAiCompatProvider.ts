@@ -417,7 +417,13 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     withheld: ReadonlyArray<{ name: string; mimeType: string }> = [],
   ): ChatMessage[] {
     const hasWorkspaceContext =
-      (request.context.retrievedChunks?.length ?? 0) > 0 || Boolean(request.context.selectionText);
+      (request.context.retrievedChunks?.length ?? 0) > 0 ||
+      // A document read WHOLE is evidence too. Counting only passages here would
+      // have given a turn grounded entirely on a full document the ungrounded
+      // identity, so the one turn holding the most evidence looked like the one
+      // holding none.
+      (request.context.wholeDocuments?.length ?? 0) > 0 ||
+      Boolean(request.context.selectionText);
 
     /*
      * IDENTITY FOLLOWS THE CAPABILITY, NOT THE ENGINE.
@@ -624,8 +630,43 @@ export class OpenAiCompatProvider implements ProviderAdapter {
     if (request.context.gitDiff) {
       context.push(`Diff under review:\n\`\`\`diff\n${request.context.gitDiff}\n\`\`\``);
     }
+    /*
+     * 🚨 A WHOLE DOCUMENT IS LABELLED AS WHOLE, AND A SAMPLE AS A SAMPLE.
+     *
+     * Measured: a model handed 6 of a deck's 74 passages reported that it
+     * "couldn't find any content for slides before 11 or after 29". That was
+     * true of its context and false of the document, and it was the PRODUCT's
+     * fault — the passage count was computed by the retriever and discarded
+     * before it reached this prompt, so the model could not have known it held a
+     * sample. Whatever else changes here, these two cases must never render
+     * identically.
+     */
+    for (const doc of request.context.wholeDocuments ?? []) {
+      const caveat = doc.complete
+        ? ''
+        : `\n(Not everything in this file could be read: ${doc.incompleteReason ?? 'part of it is not text.'})`;
+      context.push(
+        `Full text of ${doc.path} — this is the ENTIRE document, not an excerpt.` +
+          `${caveat}\n\`\`\`\n${doc.text}\n\`\`\``,
+      );
+    }
     for (const chunk of request.context.retrievedChunks ?? []) {
       context.push(`Context from ${chunk.path}:${chunk.startLine}-${chunk.endLine}\n\`\`\`\n${chunk.snippet}\n\`\`\``);
+    }
+    /*
+     * The instruction is narrow on purpose. It forbids ONE inference — treating
+     * absence from the excerpt as absence from the document — and does not ask
+     * for general hedging, because a model told to be uncertain becomes useless
+     * on the parts it can actually see.
+     */
+    for (const cov of request.context.retrievalCoverage ?? []) {
+      if (cov.passagesTotal <= cov.passagesProvided) continue;
+      context.push(
+        `You were given ${cov.passagesProvided} of ${cov.passagesTotal} passages from ${cov.path}. ` +
+          `The rest were not included. Answer from what you were given, and do not state that ` +
+          `something is missing from ${cov.path} — you have not seen all of it. If asked about ` +
+          `coverage, say you were shown part of the document.`,
+      );
     }
     if (request.context.conversationSummary) {
       context.push(`Conversation so far:\n${request.context.conversationSummary}`);
