@@ -167,3 +167,60 @@ test('a LONE document may use the whole budget — no phantom per-document cap',
   assert.equal(picked.whole.length, 1, 'a document within budget was sampled anyway');
   assert.equal(picked.sampled.length, 0);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The regression that reading documents whole introduced
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('🚨 a turn holding only whole documents is NOT refused for lack of evidence', async () => {
+  /*
+   * MEASURED ON STAGING, and it was my own regression. Reading attached documents
+   * whole leaves nothing to retrieve, so the retriever hands back zero chunks —
+   * and the relevance gate read zero chunks as "no evidence" and refused the turn
+   * with `insufficient-relevance`. Attaching a SMALL document therefore BROKE the
+   * answer while a large one still worked, which is the exact opposite of the
+   * feature's purpose.
+   *
+   * Evidence is evidence whatever shape it arrives in: a whole document is more
+   * of it than six passages, not less.
+   */
+  const { decideGrounding } = await import('../src/engine/grounding/groundingDecision.js');
+
+  const decision = await decideGrounding(
+    {
+      mode: 'approved',
+      query: 'what is on slide 12',
+      scopedFiles: ['deck.pptx'],
+      wholeDocumentsRead: 1,
+    },
+    {
+      approvedIndexId: () => 'idx_test',
+      // Nothing left to retrieve: the document was already supplied in full.
+      retrieveApproved: async () => [],
+      indexIdentity: () => ({ version: 1 }),
+      minScore: 0.53,
+    },
+  );
+
+  assert.equal(decision.allowed, true,
+    `a turn holding a whole document was refused (${'reason' in decision ? decision.reason : ''})`);
+});
+
+test('a turn with NO evidence of any kind is still refused', async () => {
+  // The control in the other direction: the gate must still close when the turn
+  // genuinely holds nothing, or the fix above would disable it entirely.
+  const { decideGrounding } = await import('../src/engine/grounding/groundingDecision.js');
+
+  const decision = await decideGrounding(
+    { mode: 'approved', query: 'what is on slide 12', scopedFiles: ['deck.pptx'] },
+    {
+      approvedIndexId: () => 'idx_test',
+      retrieveApproved: async () => [],
+      indexIdentity: () => ({ version: 1 }),
+      minScore: 0.53,
+    },
+  );
+
+  assert.equal(decision.allowed, false, 'an empty turn was allowed through as grounded');
+  assert.equal('reason' in decision ? decision.reason : '', 'insufficient-relevance');
+});

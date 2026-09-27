@@ -977,48 +977,59 @@ export function registerAiRoutes(
      */
     const planRepoEvidence = capabilityTurn?.turn.repoPlanning !== false;
     if (indexService && userPrompt && policy.retrieve !== false && planRepoEvidence) {
+      /*
+       * 🚨 READ THE DOCUMENTS FIRST, THEN DECIDE. A 31-slide deck is 74 chunks and
+       * an answer used to be built from 6 — 8% — while the whole text is 21,944
+       * chars and the window was measured to hold at least 15,728 tokens.
+       *
+       * ORDER MATTERS AND WAS WRONG ONCE. Doing this inside `retrieveApproved`
+       * meant the decision could not know the turn already held whole documents,
+       * so a turn with nothing left to retrieve was refused for "insufficient
+       * relevance" — attaching a SMALL document broke the answer while a large one
+       * worked. Reading before deciding is what makes the count available to it.
+       */
+      let passageBudget = SAMPLED_PASSAGE_TOKEN_BUDGET;
+      let mustSample: readonly string[] = scopedFiles;
+      if (scopedFiles.length > 0) {
+        const approvedId = indexService.approvedIndexFor(scope);
+        if (approvedId) {
+          const candidates = await indexService.readDocuments(approvedId, scope, scopedFiles);
+          const picked = selectWholeDocuments(candidates);
+          if (picked.whole.length) {
+            wholeDocuments = picked.whole.map((d) => ({
+              path: d.path,
+              text: d.text,
+              complete: d.complete,
+              ...(d.incompleteReason ? { incompleteReason: d.incompleteReason } : {}),
+            }));
+          }
+          passageBudget = remainingPassageBudget(picked.tokensUsed);
+          // Only documents we could NOT read whole still need passages, and only
+          // those can owe the model a coverage disclosure.
+          mustSample = picked.sampled;
+        }
+      }
+
       grounding = await decideGrounding(
         {
           mode: body.groundingMode ?? modeFromLegacy(body.requireApproved),
           query: userPrompt,
           currentBranch: body.currentBranch,
           ...(scopedFiles.length > 0 ? { scopedFiles } : {}),
+          ...(wholeDocuments?.length ? { wholeDocumentsRead: wholeDocuments.length } : {}),
         },
         {
           approvedIndexId: () => indexService.approvedIndexFor(scope),
           retrieveApproved: async (indexId, query) => {
             /*
-             * 🚨 READ THE DOCUMENT IF IT FITS, BEFORE SAMPLING IT.
+             * Nothing left to retrieve: every attached document was read whole,
+             * above. Returning early is correctness, not an optimisation — a
+             * retrieval scoped to an EMPTY file list means no scope at all and
+             * would quietly widen to the entire library.
              *
-             * A 31-slide deck is 74 chunks; this used to hand the model 6 of them
-             * — 8% — while the whole text is 21,944 chars and the window was
-             * measured to hold at least 15,728 tokens. Retrieval is right for a
-             * 245-page book and wrong for a document that fits.
-             */
-            let passageBudget = SAMPLED_PASSAGE_TOKEN_BUDGET;
-            let mustSample = scopedFiles;
-            if (scopedFiles.length > 0) {
-              const candidates = await indexService.readDocuments(indexId, scope, scopedFiles);
-              const picked = selectWholeDocuments(candidates);
-              if (picked.whole.length) {
-                wholeDocuments = picked.whole.map((d) => ({
-                  path: d.path,
-                  text: d.text,
-                  complete: d.complete,
-                  ...(d.incompleteReason ? { incompleteReason: d.incompleteReason } : {}),
-                }));
-              }
-              passageBudget = remainingPassageBudget(picked.tokensUsed);
-              // Only the documents we could NOT read whole still need passages —
-              // and only those can owe the model a coverage disclosure.
-              mustSample = picked.sampled;
-            }
-
-            /*
-             * Nothing left to retrieve: every attached document was read whole.
-             * Returning early is not an optimisation, it is correctness — a
-             * retrieval scoped to an empty file list means NO scope, so it would
-             * quietly widen to the entire library.
+             * Safe only because `wholeDocumentsRead` tells the grounding decision
+             * this turn holds evidence; without it, zero chunks is read as "no
+             * evidence" and the turn is refused.
              */
             if (scopedFiles.length > 0 && mustSample.length === 0) return [];
 

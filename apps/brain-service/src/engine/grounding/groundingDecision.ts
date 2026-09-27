@@ -169,6 +169,20 @@ export interface GroundingRequest {
    * at them at all.
    */
   scopedFiles?: readonly string[];
+  /**
+   * How many of those documents were already supplied to this turn IN FULL.
+   *
+   * 🚨 WITHOUT THIS, READING A DOCUMENT WHOLE REFUSES THE TURN. When every
+   * attached document fits the budget there are no passages left to retrieve, so
+   * the caller hands back zero chunks — and the relevance gate below reads zero
+   * chunks as "no evidence" and refuses. Attaching a SMALL document would then
+   * break the answer while a large one worked, which is the opposite of the
+   * intent. Caught on staging by asking the real question against a real deck.
+   *
+   * Evidence is evidence whatever shape it arrives in: a whole document is more
+   * of it than six passages, not less.
+   */
+  wholeDocumentsRead?: number;
   /** Branch of the working tree, when the caller knows it. */
   currentBranch?: string;
 }
@@ -290,7 +304,9 @@ export async function decideGrounding(req: GroundingRequest, deps: GroundingDeps
    */
   const scoped = (req.scopedFiles?.length ?? 0) > 0;
   const relevant = scoped ? chunks : chunks.filter((c) => c.score >= deps.minScore);
-  if (relevant.length === 0) {
+  // A turn already holding whole documents has evidence, even with no passages.
+  const heldWhole = (req.wholeDocumentsRead ?? 0) > 0;
+  if (relevant.length === 0 && !heldWhole) {
     const bestScore = chunks.length ? Math.max(...chunks.map((c) => c.score)) : undefined;
     if (requested === 'approved') {
       return {
