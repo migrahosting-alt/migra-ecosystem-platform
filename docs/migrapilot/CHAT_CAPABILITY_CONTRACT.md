@@ -2751,3 +2751,105 @@ loop. Four of its five cases passed immediately; the fifth is how §49.2 was fou
 The consumer UI path. The owner's staging session expired (~12 h), so every live
 check above was made at the Brain, which is where all of §48–§49 lives. The
 consumer was not changed by this slice.
+
+## 50. Vision measured for the first time — one candidate, and nothing approved
+
+Four vision models have been installed on the provider for weeks with none
+approved, so image input is honestly disabled. Nobody had measured whether any of
+them is good enough to approve. Now measured.
+
+Evidence: `docs/migrapilot/evidence/vision-2026-09-27-*.json`.
+
+### How the suites avoid measuring nothing
+
+The obvious harness is worthless. Render a cat, ask "is there a cat?", grep the
+reply for "cat" — the word is in the question, so a model that always answers
+"yes, a cat" scores perfectly. A keyword search standing in for a semantic claim
+is a mistake this programme has already made three times.
+
+**Transcription** rasterises a real PDF (`test/fixtures/sample-text.pdf`, 150 dpi)
+and scores the reply against **that PDF's own text layer**, extracted
+independently. The ground truth is not written by me and is not visible to the
+model. Scored on recall AND precision together, because recall alone rewards a
+model that dumps every word it can imagine and precision alone rewards one that
+returns a single correct word.
+
+**Counting** renders disks at randomised positions — a grid can be counted by its
+rows rather than by seeing each shape — and compares an exact integer. The answer
+parser takes the LAST number in the reply, because replies restate the question
+("in the image with 5 shapes, I count 7 circles") and the first match grades the
+question. `null` is kept distinct from `0`: "I cannot tell" and "zero" are
+different answers.
+
+Bars were fixed in the module **before any number was seen**: recall ≥ 0.80,
+precision ≥ 0.60, counting exact on ≥ 0.80.
+
+### What the four models actually do
+
+| model | transcription | counting (14 images) |
+| --- | --- | --- |
+| **qwen2.5vl:7b** | recall **1.00**, precision **1.00** — PASS | 11/14 = **79%** — FAIL |
+| minicpm-v:8b | recall 1.00, precision 0.94 — PASS | 6/14 = 43% — FAIL |
+| llama3.2-vision:11b | **cannot run** | cannot run |
+| llava:latest | recall 0.24, precision 0.47 — FAIL | 0/14, returns no number |
+
+### 🚨 The governance split is now empirically justified, not just prudent
+
+`minicpm-v:8b` transcribes a page **perfectly** and cannot count: 6→7, 7→8, 9→10,
+11→10. Had `vision.general` and `vision.object_counting` been one capability, a
+model with flawless reading would have inherited approval to count things. The
+split was designed on principle; this is the measurement that earns it.
+
+### 🚨 n=6 produced a PASS that n=14 destroyed
+
+The first counting run used 6 images and `qwen2.5vl` scored 5/6 = 83% — a PASS,
+one image above the bar. Widening to 14 randomised images gives **79%, a FAIL**.
+The verdict was hanging on a single picture, and had I reported the first run this
+would have been recommended for a capability it does not have.
+
+79% against an 80% bar is agonisingly close, and it is still a fail. A threshold
+renegotiated after seeing the data is not a threshold — which is exactly why the
+bars live in the module rather than in this section.
+
+### The failure has a shape, and that is more useful than the verdict
+
+```
+2✓ 3✓ 4✓ 5✓ 6✓ 7✓ 8✓ 9✓ 10✓ 11→15✗ 4✓ 7✓ 9→10✗ 11→12✗
+```
+
+**qwen2.5vl counts ≤10 objects at 11/12 and >10 objects at 0/2.** It does not
+count badly; it counts within a range and collapses past it. `minicpm-v` has no
+such range — 6/12 even at ≤10.
+
+### 🚨 llama3.2-vision:11b is installed and cannot serve
+
+```
+llama-server process has terminated: exit status 1:
+error loading model: unknown model architecture: 'mllama'
+```
+
+The provider's runtime cannot load it at all, for every request. It is listed as
+an installed vision model and would appear to an operator as a candidate. A live
+instance of **installed ≠ working ≠ qualified ≠ routable**, and it should be
+marked unusable on this provider rather than left looking available.
+
+### Recommendation: approve NOTHING yet
+
+- **`vision.general`** — `qwen2.5vl:7b` is the candidate and its score is perfect,
+  but the corpus is **one page, ~40 content words, and no Haitian Creole**. That
+  is not a qualification corpus for a product whose hardest reading task is
+  Kreyòl. Broaden it, then approve.
+- **`vision.object_counting`** — fails. Keep it honestly unavailable; an
+  unqualified capability is not a defect.
+- **`llama3.2-vision:11b`** — mark unusable on this provider.
+- **`llava:latest`** — reject on evidence.
+
+### Blocked, and not by engineering
+
+Staging has **no qualification signing key**, so every governed mutation is
+refused (`governed model qualification registered WITHOUT a signing key`).
+Approval also requires a human approver through MigraAuth: the CLI states that
+neither authority is sufficient alone. That is a security control, not a
+convenience, and it was not worked around. To unblock, the owner sets a signing
+key in `/etc/migrapilot-staging/brain.env` — generated by them, never shared with
+me — and then `migrapilot-qualify` can record this evidence and approve.

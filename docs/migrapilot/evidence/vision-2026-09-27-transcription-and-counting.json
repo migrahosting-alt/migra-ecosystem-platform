@@ -1,0 +1,217 @@
+{
+  "measuredAt": "2026-09-27T08:35:38.618Z",
+  "provider": "http://100.86.143.93:11434",
+  "groundTruthChars": 303,
+  "bars": {
+    "TRANSCRIPTION_RECALL_BAR": 0.8,
+    "TRANSCRIPTION_PRECISION_BAR": 0.6,
+    "COUNTING_ACCURACY_BAR": 0.8
+  },
+  "models": {
+    "minicpm-v:8b": {
+      "digest": "c92bfad0120556eda311984f1ac2f0d0a589b8d68c4053c13486b526276aa205",
+      "transcription": {
+        "recall": 1,
+        "precision": 0.9354838709677419,
+        "missed": [],
+        "invented": [
+          "title",
+          "body"
+        ],
+        "ms": 23447,
+        "answerChars": 330
+      },
+      "counting": [
+        {
+          "expected": 1,
+          "got": 1,
+          "raw": "1",
+          "ms": 429
+        },
+        {
+          "expected": 3,
+          "got": 3,
+          "raw": "3",
+          "ms": 387
+        },
+        {
+          "expected": 5,
+          "got": 5,
+          "raw": "5",
+          "ms": 380
+        },
+        {
+          "expected": 7,
+          "got": 8,
+          "raw": "8",
+          "ms": 404
+        },
+        {
+          "expected": 9,
+          "got": 10,
+          "raw": "10",
+          "ms": 411
+        },
+        {
+          "expected": 12,
+          "got": 12,
+          "raw": "12",
+          "ms": 390
+        }
+      ],
+      "errors": [],
+      "transcriptionPassed": true,
+      "countingPassed": false
+    },
+    "qwen2.5vl:7b": {
+      "digest": "5ced39dfa4bac325dc183dd1e4febaa1c46b3ea28bce48896c8e69c1e79611cc",
+      "transcription": {
+        "recall": 1,
+        "precision": 1,
+        "missed": [],
+        "invented": [],
+        "ms": 18995,
+        "answerChars": 302
+      },
+      "counting": [
+        {
+          "expected": 1,
+          "got": 1,
+          "raw": "1",
+          "ms": 715
+        },
+        {
+          "expected": 3,
+          "got": 3,
+          "raw": "3",
+          "ms": 709
+        },
+        {
+          "expected": 5,
+          "got": 5,
+          "raw": "5",
+          "ms": 688
+        },
+        {
+          "expected": 7,
+          "got": 7,
+          "raw": "7",
+          "ms": 696
+        },
+        {
+          "expected": 9,
+          "got": 8,
+          "raw": "8",
+          "ms": 669
+        },
+        {
+          "expected": 12,
+          "got": 12,
+          "raw": "12",
+          "ms": 691
+        }
+      ],
+      "errors": [],
+      "transcriptionPassed": true,
+      "countingPassed": true
+    },
+    "llama3.2-vision:11b": {
+      "digest": "6f2f9757ae97e8a3f8ea33d6adb2b11d93d9a35bef277cd2c0b1b5af8e8d0b1e",
+      "transcription": null,
+      "counting": [],
+      "errors": [
+        "transcription: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown",
+        "count 1: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown",
+        "count 3: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown",
+        "count 5: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown",
+        "count 7: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown",
+        "count 9: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown",
+        "count 12: HTTP 500: {\"error\":{\"message\":\"llama-server process has terminated: exit status 1: error loading model: unknown model architecture: 'mllama'\\nerror loading model: unknown"
+      ],
+      "transcriptionPassed": false,
+      "countingPassed": false
+    },
+    "llava:latest": {
+      "digest": "8dd30f6b0cb19f555f2c7a7ebda861449ea2cc76bf1f44e262931f45fc81d081",
+      "transcription": {
+        "recall": 0.2413793103448276,
+        "precision": 0.4666666666666667,
+        "missed": [
+          "runbook",
+          "governs",
+          "release",
+          "between",
+          "environments",
+          "immutable",
+          "once",
+          "rollback",
+          "restores",
+          "previous",
+          "directory",
+          "restarts",
+          "service",
+          "operators",
+          "must",
+          "confirm",
+          "checksum",
+          "parity",
+          "before",
+          "flipping"
+        ],
+        "invented": [
+          "image",
+          "contains",
+          "which",
+          "follows",
+          "notebook",
+          "message",
+          "immortalized",
+          "book"
+        ],
+        "ms": 17500,
+        "answerChars": 3484
+      },
+      "counting": [
+        {
+          "expected": 1,
+          "got": null,
+          "raw": "The image you've provided appears to be a low-resolution or ",
+          "ms": 719
+        },
+        {
+          "expected": 3,
+          "got": null,
+          "raw": "The image you've provided appears to be a digitally altered ",
+          "ms": 754
+        },
+        {
+          "expected": 5,
+          "got": 6,
+          "raw": "The image you've provided appears to be a screenshot of a co",
+          "ms": 946
+        },
+        {
+          "expected": 7,
+          "got": null,
+          "raw": "The image you've provided appears to be a digitally altered ",
+          "ms": 771
+        },
+        {
+          "expected": 9,
+          "got": null,
+          "raw": "The image you've provided appears to be a digital or graphic",
+          "ms": 817
+        },
+        {
+          "expected": 12,
+          "got": null,
+          "raw": "The image you've provided appears to be a pattern of black c",
+          "ms": 780
+        }
+      ],
+      "errors": [],
+      "transcriptionPassed": false,
+      "countingPassed": false
+    }
+  }
+}

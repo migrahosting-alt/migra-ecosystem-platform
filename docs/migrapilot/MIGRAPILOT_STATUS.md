@@ -2142,3 +2142,42 @@ weak in both directions. The proof is a route-level test capturing the actual
 Verified through the Brain's API in an isolated workspace that was created and then
 deleted; the 19-file library was never touched. The consumer UI path is **not** verified —
 the staging session expired, and the consumer was not changed by this slice.
+
+---
+
+## 2026-09-27 — vision measured for the first time (§50): one candidate, nothing approved
+
+Four vision models have sat installed and unapproved for weeks, so image input is honestly
+disabled — and nobody had measured whether any of them is good enough. Evidence in
+`docs/migrapilot/evidence/vision-2026-09-27-*.json`.
+
+| model | transcription | counting (14 images) |
+| --- | --- | --- |
+| **qwen2.5vl:7b** | recall **1.00** / precision **1.00** PASS | 11/14 = **79%** FAIL |
+| minicpm-v:8b | recall 1.00 / precision 0.94 PASS | 6/14 = 43% FAIL |
+| llama3.2-vision:11b | **cannot run** | cannot run |
+| llava:latest | 0.24 / 0.47 FAIL | 0/14, no number |
+
+Transcription is scored against the **PDF's own text layer**, so the ground truth is
+neither written by me nor visible to the model. Bars were fixed before any number was seen.
+
+**Three things worth more than the table:**
+
+- **The governance split is now earned, not just prudent.** `minicpm-v` transcribes a page
+  perfectly and cannot count (6→7, 7→8, 9→10). One combined capability would have handed a
+  flawless reader an approval to count.
+- **n=6 produced a PASS that n=14 destroyed.** qwen scored 5/6 = 83% on the first run —
+  one image above the bar — and 79% on 14 randomised images. Had I reported the first run,
+  I'd have recommended a capability it does not have. 79% vs 80% is close and still a fail.
+- **`llama3.2-vision:11b` is installed and cannot serve anything**: `unknown model
+  architecture: 'mllama'`. Live proof of *installed ≠ working*.
+
+The failure has a shape: qwen counts **≤10 objects at 11/12, >10 at 0/2**.
+
+**Recommendation: approve nothing yet.** qwen2.5vl is the `vision.general` candidate, but
+the corpus is one page, ~40 content words and **no Haitian Creole** — not a qualification
+corpus for this product. Counting fails and should stay honestly unavailable.
+
+**Blocked, and not by engineering:** staging has no qualification signing key, and approval
+also needs a human approver through MigraAuth. That is a security control and was not
+worked around.
