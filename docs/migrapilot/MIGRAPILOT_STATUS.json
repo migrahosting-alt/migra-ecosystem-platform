@@ -1,7 +1,7 @@
 {
  "$schema": "MIGRAPILOT_STATUS — canonical cross-agent state. Update on every material change.",
- "updated": "2026-09-26",
- "updatedBy": "Claude — Chat lane. A 504 on /api/files/index traced to a HUNG index sync, not a slow one. Two defects fixed and deployed to staging as syncstall-0926c (commit 057587a1); one consumer UI honesty defect found while cleaning up.",
+ "updated": "2026-09-27",
+ "updatedBy": "Claude — Chat lane. §48 BUILT: an attached document is now READ, not sampled to 8%. Building it exposed three further defects (turn refused, chunk cap enforced in lines, chunk ids unique per line). Live on staging docread-0927c / 8d192c23.",
  "rules": {
   "easyFirst": "Do not start deep capability work while meaningful easy user-facing items remain.",
   "provenLive": "PROVEN_LIVE requires the real user-facing workflow to pass. Code existing and tests passing is NOT proof.",
@@ -3957,7 +3957,7 @@
  },
  "attachmentSampledNotRead_2026_09_26": {
   "_authority": "docs/migrapilot/CHAT_CAPABILITY_CONTRACT.md §48",
-  "status": "🚨 MEASURED, NOT FIXED — nothing in §48 is implemented",
+  "status": "✅ SUPERSEDED by §49 — BUILT and staging-proven on brain docread-0927c / 8d192c23. Owner removed the ruling as a blocker (\"build test and publish, no limit\").",
   "foundBy": "using the product as a person would: attached the 31-slide chart deck and asked \"What's on slide 12, and did you manage to read the whole deck?\"",
   "theAnswerSaid": "\"I couldn't find any content for slides before 11 or after 29, as there is no retrieved evidence from the provided context.\" All 31 slides WERE extracted and indexed. Nothing was missing from the deck.",
   "measured": {
@@ -3977,5 +3977,24 @@
    "48C_carryCompletenessThroughTheIndexPath": "add a completeness field to FileSource so hasUnreadCharts survives, and surface it in the library row beside the existing per-file messages. Closes 48.3 properly rather than in one path."
   },
   "whyRecordedRatherThanBuilt": "48A/48C are BRAIN changes and the Brain lineage reconciliation is open, so each one added now raises what the Engineer lane must carry; 48B is a ruling I should not make alone. The measurements are complete enough to act on without repeating any of this."
+ },
+ "documentReadNotSampled_2026_09_27": {
+  "_authority": "docs/migrapilot/CHAT_CAPABILITY_CONTRACT.md §49",
+  "status": "STAGING-PROVEN / READY FOR USER TEST — not user-proven",
+  "release": "brain docread-0927c / commit 8d192c23",
+  "beforeAfter": {
+   "slide12": "\"a three card layout\" -> all three cards AND the Topic section, verbatim",
+   "deckSize": "\"couldn't find content before slide 11 or after 29\" -> \"this deck has 31 slides\"",
+   "charts": "silent -> \"Not everything in this file could be read: This deck contains charts, which cannot be read as text.\"",
+   "sampledDoc": "claimed absence from the DOCUMENT -> \"no mention ... in the retrieved excerpts from long-contract.txt\"",
+   "chartCountChecked": "the model volunteered \"6 of these slides contain charts\"; VERIFIED grounded — the extracted text holds exactly 6 chart/graph markers, on slides 19 and 23-27"
+  },
+  "🚨 windowWasNeverTheConstraint": "marker at the START of the prompt recalled at 8,099 / 8,977 / 15,728 prompt_tokens against the exact endpoint the Brain uses; qwen2.context_length=32,768. The product was spending ~5k of a proven 15.7k window and sampling to 8% for no runtime reason.",
+  "🚨 defect_49_1_readingWholeRefusedTheTurn": "MY OWN REGRESSION, and it passed 3,482 tests. Reading documents whole leaves nothing to retrieve; decideGrounding read zero chunks as \"no evidence\" and refused with insufficient-relevance. Attaching a SMALL document broke the answer while a large one worked. Fixed by ORDER — the read moved out of the retrieveApproved closure to BEFORE the decision, because inside the closure the count could not exist yet.",
+  "🚨 defect_49_2_chunkCapEnforcedInLines": "51,600 chars with no newlines -> ONE chunk of 51,600 chars (target 1,600); the same text with newlines -> 31 chunks, largest 1,676. slidingWindow divides a LINE RANGE. nomic-bert.context_length is 2048 tokens (~8k chars), so such a chunk is TRUNCATED by the embedder — its vector describes only the beginning while the chunk claims all of it. Two caps now: MAX_CHARS 1,600 stays a granularity target (my first attempt enforced it exactly and DOUBLED every normal document, 31->61, churning citations for nothing); HARD_MAX_CHARS 8,000 is the measured correctness boundary. Confirmed on real data after deploy: deck stayed 74 chunks, contract 27.",
+  "🚨 defect_49_3_chunkIdsUniquePerLine": "caught by READING the constraint before shipping the split. Durable store keys on (owner, workspace, index, version, chunk_key) with ON CONFLICT DO NOTHING / DO UPDATE, so same-line pieces would have been DROPPED or OVERWRITTEN — most of a long-line document missing durably while memory held it. Suffix added only from the 2nd chunk on a line, so every existing id is byte-identical.",
+  "🚨 whatIRefusedAsEvidence": "the model said \"12 passages\" (looked like success) and then \"NONE\" when asked to quote the coverage sentence. Both model-mediated and weak in both directions — \"12\" could have come from counting `Context from` blocks. Proof is a ROUTE-LEVEL test capturing the actual ChatTurnRequest, no model in the loop. 4 of 5 cases passed at once; the 5th found defect 49.2.",
+  "verification": "brain 3496/3496, consumer 1347/1347, root tsc -b clean; ELEVEN negative controls across §48-§49 each failing its own test, incl. the completeness flag broken in BOTH directions; prompt assertions on the outbound HTTP body; live through the Brain API in an ISOLATED workspace that was created and then deleted — the owner 19-file library was never touched",
+  "notVerified": "the consumer UI path. The owner staging session expired (~12h), so every live check was made at the Brain, which is where all of §48-§49 lives. The consumer was not changed by this slice."
  }
 }

@@ -2098,3 +2098,47 @@ deck" actually requires.
 
 Recorded rather than built: 48.A/48.C are Brain changes while the Brain lineage
 reconciliation is open, so each one raises what the Engineer lane must carry.
+
+---
+
+## 2026-09-27 — an attached document is now READ, not sampled to 8% (§49)
+
+Live on staging brain `docread-0927c` / `8d192c23`. **Staging-proven, READY FOR USER TEST.**
+
+Same deck, same question as the day before:
+
+| | before (8% sample) | now |
+| --- | --- | --- |
+| slide 12 | "a three card layout" | all three cards *and* the Topic section, verbatim |
+| deck size | "couldn't find content before slide 11 or after 29" | "this deck has **31** slides" |
+| charts | silent | *"This deck contains charts, which cannot be read as text."* |
+| a sampled document | claimed absence from the DOCUMENT | *"…in the retrieved excerpts from long-contract.txt"* |
+
+**The window was never the constraint, and I measured that rather than assumed it.** A
+marker at the START of the prompt — where a truncating window drops it — was recalled at
+8,099, 8,977 and 15,728 prompt tokens against the exact endpoint the Brain uses, against a
+reported 32,768. The product was spending ~5k of a proven 15.7k window.
+
+**Building it found three more defects, two of them mine:**
+
+- **Reading a document whole REFUSED the turn**, and it passed 3,482 tests. Zero passages
+  left to retrieve was read as "no evidence", so attaching a *small* document broke the
+  answer while a large one worked. Fixed by order, not by a flag.
+- **The chunk cap was enforced in lines**: 51,600 chars of single-line text became ONE
+  chunk of 51,600 against a 1,600 target. The embedder's context is 2048 tokens (~8k
+  chars), so that chunk's vector described only its beginning while claiming all of it.
+  There are now two caps — 1,600 as a granularity target, 8,000 as the measured
+  correctness boundary. My first attempt enforced 1,600 strictly and doubled every normal
+  document (31→61), churning citations for nothing; a control caught it.
+- **Chunk ids were unique per line**, so splitting within a line would have hit
+  `ON CONFLICT … DO NOTHING` and silently dropped most of a long-line document from the
+  durable index. Caught by reading the constraint before shipping.
+
+**What I refused to count as evidence:** the model said "12 passages" (looked like
+success), then "NONE" when asked to quote the coverage sentence. Both model-mediated and
+weak in both directions. The proof is a route-level test capturing the actual
+`ChatTurnRequest` — no model in the loop.
+
+Verified through the Brain's API in an isolated workspace that was created and then
+deleted; the 19-file library was never touched. The consumer UI path is **not** verified —
+the staging session expired, and the consumer was not changed by this slice.

@@ -2634,10 +2634,120 @@ therefore cost and latency, which is why it is a ruling rather than a fix.
 looks — the library row, beside the existing per-file messages. Closes 48.3
 properly rather than in one path.
 
-### Status
+### Status — SUPERSEDED, now BUILT and staging-proven
 
-**MEASURED, NOT FIXED.** Nothing in §48 is implemented. Recorded rather than
-built: 48.A/48.C are Brain changes and the Brain lineage reconciliation is open,
-so each one added now raises what the Engineer lane must carry — and 48.B is a
-ruling I should not make alone. The measurements above are complete enough to act
-on without repeating any of this.
+All three were implemented after the owner removed the ruling as a blocker
+("build test and publish, no limit"). See §49 for what building it exposed.
+
+## 49. §48 built — and three defects that only building it could find
+
+Live on staging brain `docread-0927c` / commit `8d192c23`. **Staging-proven /
+READY FOR USER TEST.** Not user-proven.
+
+### The before/after that matters
+
+Same deck, same question, measured on staging:
+
+| | before (8% sample) | now |
+| --- | --- | --- |
+| slide 12 | "a three card layout" | all three cards *and* the Topic section, verbatim |
+| deck size | "couldn't find any content for slides before 11 or after 29" | "this deck has **31** slides" |
+| charts | silent | *"Not everything in this file could be read: This deck contains charts, which cannot be read as text."* |
+| a sampled document | claimed absence from the DOCUMENT | *"no mention … in the retrieved excerpts from long-contract.txt"* |
+
+The chart count the model volunteered earlier — "6 of these slides contain
+charts" — was checked rather than believed: the extracted text holds exactly 6
+chart/graph markers, on slides 19 and 23–27. Grounded, not invented.
+
+### 🚨 The window was never the constraint, and that was measured
+
+The obvious explanation for sampling — "the context is too small" — is false. A
+marker placed at the START of the prompt, where a truncating window drops it, was
+recalled against the exact endpoint the Brain uses:
+
+```
+prompt_tokens =  8,099  -> recalled
+prompt_tokens =  8,977  -> recalled
+prompt_tokens = 15,728  -> recalled
+qwen2.context_length    =  32,768
+```
+
+The product was spending ~5k of a proven 15.7k window and sampling documents to
+8% for no reason present in the runtime.
+
+### 49.1 Reading a document whole REFUSED the turn
+
+My own regression, and it passed 3,482 tests. Reading attached documents whole
+leaves nothing to retrieve, so the retriever returned zero chunks — and
+`decideGrounding` reads zero chunks as "no evidence" and refused with
+`insufficient-relevance`. **Attaching a SMALL document broke the answer while a
+large one worked**, the exact inverse of the intent.
+
+Fixed by ordering, not by a flag: the read moved out of the `retrieveApproved`
+closure to *before* the decision, because inside the closure the count could not
+exist yet. `wholeDocumentsRead` only makes the fact expressible.
+
+### 49.2 The chunk cap was enforced in LINES, so one long line escaped it
+
+Found while building a fixture for the sampled path — a document the user had just
+attached produced zero evidence and was refused as "no relevant evidence".
+
+```
+51,600 chars, no newlines   -> 1 chunk of 51,600 chars   (target 1,600)
+51,600 chars, with newlines -> 31 chunks, largest 1,676
+```
+
+`slidingWindow` divides a LINE RANGE, so a block that is one enormous line yields
+one window covering that line. Real inputs shaped like that: minified JSON or JS,
+a one-paragraph contract, a CSV without breaks, and text extracted from a PDF with
+no hard wraps.
+
+Two silent consequences. `nomic-bert.context_length` is **2048 tokens (~8k
+chars)**, so such a chunk is TRUNCATED by the embedder — its vector describes only
+the beginning while the chunk claims to cover all of it, and retrieval scores it on
+text the vector never saw. And it exceeds any passage budget, so it is dropped and
+the turn refused.
+
+**Two caps now, doing two jobs.** My first attempt enforced `MAX_CHARS` (1,600)
+exactly and **doubled every normal document** (31 → 61 chunks on a measured
+fixture), churning every index and invalidating citations to buy nothing — an
+ordinary 60-line window has always measured ~1,676. `HARD_MAX_CHARS` (8,000) is
+where a chunk stops being describable by its own embedding: a correctness
+boundary, not a preference. Confirmed on real data after deploy — the deck stayed
+at 74 chunks and the contract at 27.
+
+### 49.3 Chunk ids were unique per LINE, not per chunk
+
+Caught before shipping by reading the constraint rather than assuming it.
+`${relPath}#${startLine}` was unique only because nothing ever produced two chunks
+from one line. The durable store keys on
+`(owner_scope, workspace_scope, index_id, index_version, chunk_key)` with
+`ON CONFLICT … DO NOTHING / DO UPDATE`, so identical keys would have **dropped or
+overwritten every piece after the first** — most of a long-line document missing
+from the durable index while memory still held it. The suffix is added only from
+the second chunk on a line, so every id that exists today is byte-identical.
+
+### What I refused to accept as evidence
+
+Asked how much of the document it had, the model replied "12 passages", which
+looked like the disclosure working. Asked to quote the coverage sentence verbatim,
+it replied "NONE". Both are model-mediated and therefore weak in both directions —
+"12" could equally have come from counting `Context from` blocks. So the proof is a
+route-level test that captures the actual `ChatTurnRequest`, with no model in the
+loop. Four of its five cases passed immediately; the fifth is how §49.2 was found.
+
+### Verification
+
+- brain **3496/3496**, consumer **1347/1347**, root `tsc -b` clean
+- **eleven** negative controls across §48–§49, each failing its own test, including
+  the completeness flag broken in BOTH directions and the chunk cap disabled
+- prompt assertions on the **outbound HTTP body**; route assertions on the captured
+  `ChatTurnRequest`
+- live on staging through the Brain's own API, in an **isolated workspace created
+  and then deleted** — the owner's 19-file library was never touched
+
+### Still not verified
+
+The consumer UI path. The owner's staging session expired (~12 h), so every live
+check above was made at the Brain, which is where all of §48–§49 lives. The
+consumer was not changed by this slice.
