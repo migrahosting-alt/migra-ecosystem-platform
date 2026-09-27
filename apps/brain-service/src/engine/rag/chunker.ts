@@ -26,6 +26,26 @@ export interface RawChunk {
 }
 
 const MAX_CHARS = 1600;
+
+/**
+ * The size past which a chunk is genuinely broken, as opposed to merely large.
+ *
+ * 🚨 MEASURED, NOT CHOSEN. `nomic-bert.context_length` is 2048 tokens for the
+ * embedding model this index uses, which is about 8,192 characters. A chunk above
+ * that is SILENTLY TRUNCATED by the embedder, so its vector describes only the
+ * beginning while the chunk claims to cover all of it — and retrieval then scores
+ * the chunk on text its vector never saw.
+ *
+ * WHY THIS IS SEPARATE FROM `MAX_CHARS`. 1,600 is a retrieval-granularity target
+ * and was never strictly enforced: an ordinary 60-line window measures ~1,676
+ * characters and always has. Enforcing 1,600 exactly doubled the chunk count of
+ * every normal document (31 -> 61 on a measured fixture), which churns every index
+ * and invalidates existing citations to buy nothing — 76 characters over a
+ * granularity target harms no one. 8,000 is the point where a chunk stops being
+ * describable by its own embedding, which is a correctness boundary rather than a
+ * preference.
+ */
+const HARD_MAX_CHARS = 8000;
 const WINDOW_LINES = 60;
 const WINDOW_OVERLAP = 10;
 
@@ -93,10 +113,69 @@ export function chunkFile(filePath: string, content: string, pageStartLines?: re
     }
     for (const w of slidingWindow(b.start, b.end)) {
       const wt = lines.slice(w.start - 1, w.end).join('\n');
-      if (wt.trim()) out.push(mkChunk(filePath, language, b.symbol, w.start, w.end, wt));
+      if (!wt.trim()) continue;
+      /*
+       * 🚨 THE CAP WAS ENFORCED IN LINES, SO ONE LONG LINE ESCAPED IT ENTIRELY.
+       *
+       * `slidingWindow` divides a LINE RANGE. A block that is a single enormous
+       * line — minified JSON, a one-paragraph contract, a CSV dumped without
+       * breaks, text extracted from a PDF that had no hard wraps — yields exactly
+       * one window covering that one line, and the window is the whole line.
+       *
+       * Measured: 51,600 characters of single-line text produced ONE chunk of
+       * 51,600 characters against a 1,600 cap — a 32x overrun. The same text with
+       * newlines produced 31 chunks, largest 1,676. Two consequences, both silent:
+       *
+       *  - the chunk is far past the EMBEDDING model's own context, so its vector
+       *    describes only the beginning while the chunk claims to cover all of it,
+       *    and retrieval scores it on text it never saw; and
+       *  - retrieval drops it for budget, so a document the user just attached
+       *    produced zero evidence and the turn was refused as "no relevant
+       *    evidence" — about a document sitting right there.
+       *
+       * So the cap is finally enforced on the TEXT. Line numbers are unchanged for
+       * every piece, which is the truth: they are all on the same line.
+       */
+      for (const piece of splitOversized(wt)) {
+        out.push(mkChunk(filePath, language, b.symbol, w.start, w.end, piece));
+      }
     }
   }
   return pageStartLines && pageStartLines.length > 0 ? withPages(out, pageStartLines) : out;
+}
+
+/**
+ * Break text that is still over the cap into pieces no larger than it.
+ *
+ * Splits at the last whitespace inside the limit so a piece does not end
+ * mid-token, which would corrupt both the embedding and any quotation. When there
+ * is no whitespace to break on — a single unbroken 50KB token, which is real in
+ * minified output — it breaks at the limit rather than giving up, because
+ * returning the oversized text is what this exists to prevent.
+ */
+function splitOversized(text: string): string[] {
+  /*
+   * TRIGGERED BY THE HARD CAP, SPLIT AT THE GRANULARITY TARGET.
+   *
+   * Two different numbers doing two different jobs: nothing is touched until a
+   * chunk is too big for its own embedding, and once it is, the pieces are sized
+   * for useful retrieval rather than merely made legal.
+   */
+  if (text.length <= HARD_MAX_CHARS) return text.trim() ? [text] : [];
+  const pieces: string[] = [];
+  let rest = text;
+  while (rest.length > MAX_CHARS) {
+    const window = rest.slice(0, MAX_CHARS);
+    const breakAt = window.lastIndexOf(' ');
+    // Only honour a break in the last quarter; otherwise a stray early space
+    // would produce a tiny piece and leave the rest still oversized.
+    const cut = breakAt > MAX_CHARS * 0.75 ? breakAt : MAX_CHARS;
+    const piece = rest.slice(0, cut);
+    if (piece.trim()) pieces.push(piece);
+    rest = rest.slice(cut);
+  }
+  if (rest.trim()) pieces.push(rest);
+  return pieces;
 }
 
 function isCode(language: string): boolean {

@@ -551,8 +551,28 @@ export class IndexService {
           chunks: raw.length,
           ms: this.now() - embedStarted,
         });
+        /*
+         * 🚨 THE ID MUST BE UNIQUE PER CHUNK, NOT PER LINE.
+         *
+         * `${relPath}#${startLine}` was unique only because nothing ever produced
+         * two chunks from one line. Enforcing the size cap on TEXT does exactly
+         * that — a 50KB single-line document now splits into pieces that all sit
+         * on the same line — and the durable store keys chunks on
+         * (owner, workspace, index, version, chunk_key) with ON CONFLICT DO
+         * NOTHING / DO UPDATE. Identical keys would therefore have DROPPED or
+         * OVERWRITTEN every piece after the first, losing most of the document
+         * from the durable index while memory kept it.
+         *
+         * The suffix is added only from the SECOND chunk on a line, so every id
+         * that exists today is byte-identical and no current index churns.
+         */
+        const seenOnLine = new Map<number, number>();
         const chunks: IndexedChunk[] = raw.map((c, i) => ({
-          id: `${f.relPath}#${c.startLine}`,
+          id: (() => {
+            const n = seenOnLine.get(c.startLine) ?? 0;
+            seenOnLine.set(c.startLine, n + 1);
+            return n === 0 ? `${f.relPath}#${c.startLine}` : `${f.relPath}#${c.startLine}:${n}`;
+          })(),
           workspaceId: scope.workspace,
           filePath: c.filePath,
           language: c.language,
