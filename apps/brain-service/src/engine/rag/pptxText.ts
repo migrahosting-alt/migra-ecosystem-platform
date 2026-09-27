@@ -45,6 +45,7 @@
  */
 
 import JSZip from 'jszip';
+import { parseChart, renderChart } from './chartData.js';
 
 export interface PptxExtraction {
   /** Slide-by-slide text, each slide headed with its own number. */
@@ -53,8 +54,10 @@ export interface PptxExtraction {
   slideCount: number;
   /** True when at least one slide carried speaker notes. */
   hasNotes: boolean;
-  /** True when the deck contains charts or embedded workbooks this does not read. */
+  /** True when a specific chart could NOT be read — not merely that charts exist. */
   hasUnreadCharts: boolean;
+  /** One entry per unreadable chart, naming its slide and the reason. */
+  unreadCharts: string[];
 }
 
 /** The file could not be read as a PowerPoint deck at all. */
@@ -209,6 +212,70 @@ async function notesForSlide(zip: JSZip, slidePath: string): Promise<string> {
   return textFromSlide(await part.async('string'));
 }
 
+
+/**
+ * The charts a slide shows, read from their data, in the order they appear on it.
+ *
+ * 🚨 RESOLVED THROUGH THE SLIDE'S OWN RELATIONSHIPS, and in the slide's own
+ * document order. `chart3.xml` is not the third slide's chart: the numbering is
+ * per-part, not per-slide, so pairing by number would attach one slide's figures
+ * to another — and a wrong number under a citation is worse than no number, since
+ * it reads as evidence.
+ *
+ * Only the slide's rels are followed, never the layout's or master's: a chart on a
+ * layout is template furniture and is not what a reader means by "the chart on
+ * slide 12".
+ */
+async function chartsForSlide(
+  zip: JSZip,
+  slidePath: string,
+  slideXml: string,
+): Promise<{ text: string[]; unread: string[]; consumed: string[] }> {
+  const name = slidePath.split('/').pop();
+  const rels = zip.file(`ppt/slides/_rels/${name}.rels`);
+  if (!rels) return { text: [], unread: [], consumed: [] };
+  const relsXml = await rels.async('string');
+
+  // rId -> chart part, from this slide's rels only.
+  const byId = new Map<string, string>();
+  for (const m of relsXml.matchAll(/Id="([^"]+)"[^>]*Target="([^"]*charts\/chart\d+\.xml)"/g)) {
+    byId.set(m[1]!, `ppt/${m[2]!.replace(/^\.\.\//, '')}`);
+  }
+  if (byId.size === 0) return { text: [], unread: [], consumed: [] };
+
+  // Document order comes from the slide body, not from the rels file, so two
+  // charts on one slide are reported top-to-bottom as the reader sees them.
+  const ordered: string[] = [];
+  for (const m of slideXml.matchAll(/<c:chart[^>]*r:id="([^"]+)"/g)) {
+    const part = byId.get(m[1]!);
+    if (part && !ordered.includes(part)) ordered.push(part);
+  }
+  for (const part of byId.values()) if (!ordered.includes(part)) ordered.push(part);
+
+  const text: string[] = [];
+  const unread: string[] = [];
+  for (const [i, part] of ordered.entries()) {
+    const file = zip.file(part);
+    if (!file) {
+      unread.push(`chart ${i + 1}: the chart part is missing from the package`);
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = parseChart(await file.async('string'));
+    } catch (cause) {
+      // A malformed chart must not fail the whole deck: 30 readable slides are
+      // worth more than an exception, and the caller is told what was lost.
+      unread.push(`chart ${i + 1}: could not be parsed`);
+      void cause;
+      continue;
+    }
+    if (parsed.ok) text.push(renderChart(parsed.chart, i + 1));
+    else unread.push(`chart ${i + 1}: ${parsed.reason}`);
+  }
+  return { text, unread, consumed: ordered };
+}
+
 /**
  * Extract readable text from a .pptx.
  *
@@ -229,9 +296,32 @@ export async function extractPptx(bytes: Buffer | Uint8Array): Promise<PptxExtra
     throw new PptxExtractionError('the package contains no slides');
   }
 
-  const hasUnreadCharts = Object.keys(zip.files).some((name) =>
-    /^ppt\/(charts\/chart\d+\.xml|embeddings\/)/.test(name),
-  );
+  /*
+   * 🚨 `hasUnreadCharts` NOW MEANS WHAT IT SAYS.
+   *
+   * It used to be "this package contains a chart part or an embedded workbook",
+   * which made every charted deck permanently unreadable-in-part even though the
+   * figures were sitting in those parts. It is now set only when a specific chart
+   * could not be read, and `unreadCharts` says which and why — because "five of
+   * six charts read, one references an external workbook" is an answer and "this
+   * deck contains charts" is not.
+   */
+  const unreadCharts: string[] = [];
+  /*
+   * 🚨 EVERY CHART PART MUST BE ACCOUNTED FOR, NOT JUST THE ONES I CAN FOLLOW.
+   *
+   * Charts are resolved through each slide's relationships, which is what makes a
+   * figure land on the right slide. But that means a chart part this reader cannot
+   * REACH — nested in a structure it does not traverse, or referenced from
+   * somewhere unexpected — would simply not appear, and the deck would report as
+   * read whole while a chart went unmentioned.
+   *
+   * The previous implementation scanned the package and flagged any chart part at
+   * all. That was imprecise (it condemned readable charts) but it was SAFE, and
+   * two existing tests were protecting exactly that safety. This keeps the
+   * precision and restores the safety net: anything left unvisited is reported.
+   */
+  const visitedCharts = new Set<string>();
 
   const blocks: string[] = [];
   let hasNotes = false;
@@ -239,23 +329,43 @@ export async function extractPptx(bytes: Buffer | Uint8Array): Promise<PptxExtra
   for (const [index, path] of slides.entries()) {
     const part = zip.file(path);
     if (!part) continue;
-    const body = textFromSlide(await part.async('string'));
+    const slideXml = await part.async('string');
+    const body = textFromSlide(slideXml);
     const notes = await notesForSlide(zip, path);
     if (notes) hasNotes = true;
+    const charts = await chartsForSlide(zip, path, slideXml);
+    for (const u of charts.unread) unreadCharts.push(`Slide ${index + 1}, ${u}`);
+    for (const part of charts.consumed) visitedCharts.add(part);
 
     // A slide with no text at all is still a slide the user can refer to by
     // number, so it is headed and left empty rather than skipped — skipping it
     // would silently renumber every slide after it.
     const lines = [`--- Slide ${index + 1} ---`];
     if (body) lines.push(body);
+    // Charts sit with their slide, so "the chart on slide 12" resolves, and after
+    // the body so prose context precedes the figures.
+    for (const c of charts.text) lines.push(c);
     if (notes) lines.push(`Speaker notes: ${notes}`);
     blocks.push(lines.join('\n'));
+  }
+
+  /*
+   * Chart parts nobody reached, and embedded workbooks that are not a chart's own
+   * data source. A workbook belonging to a chart that WAS read is already covered
+   * by the figures; one that belongs to nothing is content this reader never
+   * opened, and saying so is the difference between a limit and a silent gap.
+   */
+  for (const name of Object.keys(zip.files)) {
+    if (/^ppt\/charts\/chart\d+\.xml$/.test(name) && !visitedCharts.has(name)) {
+      unreadCharts.push(`${name}: present in the file but not reachable from any slide`);
+    }
   }
 
   return {
     text: blocks.join('\n\n').trim(),
     slideCount: slides.length,
     hasNotes,
-    hasUnreadCharts,
+    hasUnreadCharts: unreadCharts.length > 0,
+    unreadCharts,
   };
 }
