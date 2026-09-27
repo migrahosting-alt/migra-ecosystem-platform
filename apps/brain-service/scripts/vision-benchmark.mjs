@@ -76,24 +76,46 @@ async function askImage(model, pngPath, prompt, maxTokens) {
   return { answer: d.choices?.[0]?.message?.content ?? '', ms: Date.now() - began };
 }
 
-// Ground truth comes from the PDF the page was rasterised FROM, never from the raster.
-const truth = (await extractPdf(new Uint8Array(await readFile(`${DIR}/sample-text.pdf`)))).text;
+/*
+ * Every page in the corpus, paired raster-to-source.
+ *
+ * Ground truth comes from the PDF the raster was made FROM, never from a string in
+ * this file: the truth has to stay out of the harness author's hands, or the
+ * measurement rests on my bookkeeping instead of on the document.
+ *
+ * The corpus deliberately includes Haitian Creole with diacritics. A model that
+ * reads English operations prose perfectly has not been shown to read what this
+ * product exists for, and `contentWords` keeps accented letters distinct — so
+ * "sistem" does not match "sistèm" and dropping diacritics costs recall.
+ */
+const pageNames = (await readdir(DIR))
+  .filter((f) => f.startsWith('page-') && f.endsWith('.png'))
+  .map((f) => f.replace(/\.png$/, ''))
+  .sort();
 const countFiles = (await readdir(DIR)).filter((f) => f.startsWith('wide-')).sort();
 
 const report = {
   measuredAt: new Date().toISOString(), provider: BASE,
-  groundTruthChars: truth.length, countingImages: countFiles.length,
+  corpusPages: pageNames.length, countingImages: countFiles.length,
   bars: { TRANSCRIPTION_RECALL_BAR, TRANSCRIPTION_PRECISION_BAR, COUNTING_ACCURACY_BAR },
   models: {},
 };
 
 for (const { id, digest } of await visionModels()) {
-  const entry = { digest, transcription: null, counting: [], errors: [] };
-  try {
-    const t = await askImage(id, `${DIR}/page-1.png`,
-      'Transcribe every word of text in this image, exactly as written. Output only the text.', 700);
-    entry.transcription = { ...scoreTranscription({ expected: truth, answer: t.answer }), ms: t.ms };
-  } catch (e) { entry.errors.push(`transcription: ${e.message}`); }
+  const entry = { digest, pages: [], transcription: null, counting: [], errors: [] };
+  for (const page of pageNames) {
+    try {
+      const truth = (await extractPdf(new Uint8Array(await readFile(`${DIR}/${page}.pdf`)))).text;
+      const t = await askImage(id, `${DIR}/${page}.png`,
+        'Transcribe every word of text in this image, exactly as written, including accents. Output only the text.', 900);
+      entry.pages.push({ page, ...scoreTranscription({ expected: truth, answer: t.answer }), ms: t.ms });
+    } catch (e) { entry.errors.push(`${page}: ${e.message}`); }
+  }
+  // The weakest page, because a capability is only as good as the page it fails on:
+  // averaging would let a perfect English page hide an unreadable Creole one.
+  entry.transcription = entry.pages.length
+    ? entry.pages.reduce((worst, p) => (p.recall < worst.recall ? p : worst))
+    : null;
 
   for (const f of countFiles) {
     const expected = Number(f.replace(/\.png$/, '').split('-').pop());
@@ -104,7 +126,8 @@ for (const { id, digest } of await visionModels()) {
     } catch (e) { entry.errors.push(`${f}: ${e.message}`); }
   }
 
-  entry.transcriptionPassed = entry.transcription ? transcriptionPassed([entry.transcription]) : false;
+  // EVERY page must clear the bars, not the average — see above.
+  entry.transcriptionPassed = entry.pages.length > 0 && transcriptionPassed(entry.pages);
   entry.countingPassed = countingPassed(entry.counting);
   // Reported per range, because a flat percentage hides that a model can count
   // reliably up to some number and collapse past it — which is what was measured.
@@ -114,11 +137,12 @@ for (const { id, digest } of await visionModels()) {
   entry.countingByRange = { upTo10: `${exact(le)}/${le.length}`, above10: `${exact(gt)}/${gt.length}` };
   report.models[id] = entry;
 
-  const tr = entry.transcription;
   console.log(`\n== ${id}  digest=${(digest ?? '?').slice(0, 12)}`);
-  console.log(tr
-    ? `   transcription recall=${tr.recall.toFixed(2)} precision=${tr.precision.toFixed(2)} -> ${entry.transcriptionPassed ? 'PASS' : 'FAIL'}`
-    : '   transcription DID NOT RUN');
+  for (const p of entry.pages) {
+    console.log(`   ${p.page.padEnd(18)} recall=${p.recall.toFixed(2)} precision=${p.precision.toFixed(2)}`
+      + (p.missed.length ? `  missed: ${p.missed.slice(0, 6).join(', ')}` : ''));
+  }
+  console.log(`   transcription (worst page) -> ${entry.transcriptionPassed ? 'PASS' : 'FAIL'}`);
   console.log(`   counting ${exact(entry.counting)}/${entry.counting.length} -> ${entry.countingPassed ? 'PASS' : 'FAIL'}`
     + `   (<=10: ${entry.countingByRange.upTo10}, >10: ${entry.countingByRange.above10})`);
   if (entry.errors.length) console.log(`   errors: ${entry.errors[0]}`);

@@ -2181,3 +2181,42 @@ corpus for this product. Counting fails and should stay honestly unavailable.
 **Blocked, and not by engineering:** staging has no qualification signing key, and approval
 also needs a human approver through MigraAuth. That is a security control and was not
 worked around.
+
+---
+
+## 2026-09-27 — widening the vision corpus changed TWO verdicts (§51)
+
+§50 measured one English page of ~40 content words and flagged it as too thin. Widening it
+to four pages (~100 content words) — English ops prose, **Haitian Creole prose with
+diacritics**, **Creole with figures and currency**, and a **bilingual** page — changed the
+answer for two of the four models. Ground truth is `extractPdf` on the same PDF the raster
+came from, so the expected answer is never a string in the harness.
+
+| | run 1 | run 2 | run 3 |
+| --- | --- | --- | --- |
+| **qwen2.5vl:7b** worst page | 1.00 | 1.00 | 1.00 |
+| **minicpm-v:8b** worst page | **0.78 FAIL** | 0.83 PASS | 0.83 PASS |
+
+**The English-only corpus would have passed a poor Creole reader.** minicpm-v scored 1.00
+on the single English page — indistinguishable from the winner — and misses `sistèm`,
+`septanm`, `kliyan`, `Latibonit`, `sèvis` on Creole. Both of §50's PASS results were
+artefacts of a thin sample: counting passed at n=6 and failed at n=14; transcription passed
+minicpm on English and not on Creole. **The sample size was the finding, twice.**
+
+**A score sitting on a bar is not a result.** minicpm-v's verdict flipped across runs
+(0.78 vs 0.83, bar 0.80). ⚠️ Run 1 was not a clean replicate and runs 2–3 were identical,
+so I did *not* claim the provider is non-deterministic — only that minicpm-v sits within
+noise of its bar and is therefore **unqualifiable on this evidence**. `MINIMUM_QUALIFYING_RUNS = 3`
+and "judge the worst page, never the average" are now in the module.
+
+**Verdicts:** `qwen2.5vl:7b` = `vision.general` candidate (stable 1.00 across 3 runs);
+counting fails for every model; `llama3.2-vision:11b` cannot run at all; `llava` fails both.
+
+**Still missing before this is a qualification:** all four pages are machine-set Helvetica
+at 150 dpi. No photographed page, no real scan, no handwriting, **and no chart** — and
+"read the charts in a deck" is the gap that started this thread (§47–§49).
+
+**Blocked and deliberately not worked around:** approval needs a signing key plus a human
+approver. While tracing how the key is enforced the sandbox refused the read as a security
+weakening and was right about the direction. A self-signed approval would make the control
+decorative.

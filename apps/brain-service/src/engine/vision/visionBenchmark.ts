@@ -150,6 +150,39 @@ export interface SuiteResult {
  *  - counting: EXACT on at least 0.80 of images. Off-by-one is wrong — "how many
  *    invoices are overdue" has no partial credit.
  */
+/**
+ * 🚨 ONE RUN IS NOT A VERDICT, AND A SCORE THAT SITS ON A BAR IS NOT A RESULT.
+ *
+ * Measured 2026-09-27 over THREE runs of this suite against the same provider,
+ * same fixtures, same prompts, `temperature: 0`:
+ *
+ *   qwen2.5vl:7b    all four pages 1.00/1.00, counting 11/14 — IDENTICAL in 3/3
+ *   minicpm-v:8b    page-ht-figures  run 1: 0.78   runs 2 and 3: 0.83
+ *                   page-ht-prose    run 1: 0.91   runs 2 and 3: 0.86
+ *
+ * The 0.80 bar sits between 0.78 and 0.83, so minicpm-v's PASS/FAIL flipped
+ * between runs. Its counting was 7/14 in all three.
+ *
+ * ⚠️ WHAT THIS DOES *NOT* ESTABLISH. Run 1 was not a clean replicate: stale
+ * fixtures were removed after it and it also hit a missing-file error, so the
+ * difference cannot be attributed to provider non-determinism rather than to the
+ * changed fixture set. Runs 2 and 3 were byte-identical, which is evidence AGAINST
+ * broad randomness. The honest conclusion is narrower than "the provider is
+ * non-deterministic", and stating the wider version would be the kind of
+ * conclusion-past-the-evidence this module exists to avoid.
+ *
+ * WHAT IT DOES ESTABLISH. `minicpm-v:8b` scores WITHIN NOISE OF THE BAR on Creole
+ * pages, and at least one observation put it on the failing side. `qwen2.5vl:7b`
+ * is nowhere near its bar and did not move. A model that can land on either side
+ * of a threshold is neither passed nor failed — it is UNQUALIFIABLE on this
+ * evidence, and an unqualifiable capability stays unavailable, because a user
+ * meets one run and not a distribution.
+ *
+ * HOW TO APPLY: at least three runs, judged on the WORST observed page — never the
+ * average, which would let a perfect English page hide a failing Creole one.
+ */
+export const MINIMUM_QUALIFYING_RUNS = 3;
+
 export const TRANSCRIPTION_RECALL_BAR = 0.8;
 export const TRANSCRIPTION_PRECISION_BAR = 0.6;
 export const COUNTING_ACCURACY_BAR = 0.8;
