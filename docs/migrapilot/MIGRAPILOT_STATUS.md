@@ -2220,3 +2220,48 @@ at 150 dpi. No photographed page, no real scan, no handwriting, **and no chart**
 approver. While tracing how the key is enforced the sandbox refused the read as a security
 weakening and was right about the direction. A self-signed approval would make the control
 decorative.
+
+---
+
+## 2026-09-27 — the charts are READ, exactly (§52)
+
+Live on staging brain `charts-0927a` / `e88adfe8`. Closes the gap that started at §47.
+
+The product said *"This deck contains charts, which cannot be read as text."* The
+disclosure was honest and the claim underneath was false: a PPTX chart is not a picture —
+its series, categories and values sit in `ppt/charts/chartN.xml`, with the last computed
+numbers in `<c:numCache>`.
+
+| the real 31-slide deck | before | after |
+| --- | --- | --- |
+| `hasUnreadCharts` | true | **false** |
+| `fileText.complete` | false | **true** |
+| chart tables | 0 | **6** |
+
+**Not a vision problem.** Rasterising a slide returns an *approximation* of a number that
+is already exact, and would make chart reading depend on a GPU, a model qualification and
+an inference per request. Reading the XML is deterministic and needs **no signing key** —
+so it is real now rather than pending.
+
+**Verified live on real figures**, because the original deck is lorem-ipsum and confounded
+the first check (asked "were you able to read the charts" it said "I was unable to" — false;
+it had conflated *placeholder* with *unreadable*). A second deck with unguessable figures,
+and chart part numbers deliberately not matching slide numbers: Cap-Haïtien Q4 → **27.5m
+gourdes** (second series column, not 63.9); retention Q3 → **90.7%**; "were you able to read
+the charts?" → **"I was able to."**
+
+The retention answer is right *because* of the percent rule: the file stores `0.918`. Raw, it
+would have answered "0.907" — wrong, not differently formatted.
+
+🚨 **Not fixed: reasoning over the figures.** One answer was self-contradictory — "retention
+never fell", then "Q2 to Q3: 93.4% to 90.7% (decrease)". The cited numbers were right.
+Re-asked, two models answered correctly, ⚠️ but the prompt wording changed in the same step,
+so that is **not** evidence the reasoning tier fixes it. Established: intermittent model
+reasoning over correct data. Model/Engineer lane.
+
+🚨 **Two pre-existing tests caught a regression in my own change** — pairing via slide rels
+meant an unreachable chart part would silently vanish and the deck would claim to be read
+whole. Both properties kept: paired through rels, and anything unvisited is reported.
+
+brain 3518/3518; four negative controls; an independent pairing control (slides 23/24/25
+describe their own chart type and the XML detection agrees with all three).

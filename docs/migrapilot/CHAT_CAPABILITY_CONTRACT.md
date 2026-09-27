@@ -2943,3 +2943,107 @@ The owner sets a signing key in `/etc/migrapilot-staging/brain.env` (generated b
 them, never shared) and signs in via `migrapilot-qualify guided-approve`. The
 evidence above then supports approving **`vision.general` on `qwen2.5vl:7b`** with
 its corpus limits recorded, and rejecting counting.
+
+## 52. The charts are read — from their data, and it is exact
+
+Live on staging brain `charts-0927a` / commit `e88adfe8`. **Staging-proven / READY
+FOR USER TEST.**
+
+This closes the gap that started at §47: the product told a user *"This deck
+contains charts, which cannot be read as text."* The disclosure was honest and the
+claim underneath it was false. A PPTX chart is not a picture — its series,
+category labels and values live in `ppt/charts/chartN.xml`, with the last computed
+numbers in `<c:numCache>` beside the formula reference. The figures were in the
+file the whole time.
+
+| the real 31-slide deck | before | after |
+| --- | --- | --- |
+| `hasUnreadCharts` | true | **false** |
+| `fileText.complete` | false | **true** |
+| chart tables in the text | 0 | **6** |
+
+### Why not vision, given a vision model was on the table
+
+Rasterising a slide and asking a model to read a bar chart returns an
+*approximation* of a number that is already exact in the file, and it would make
+chart reading depend on a GPU, a model qualification, and an inference per
+request. Reading the XML is deterministic, exact, identical across runs, and needs
+no signing key — so it is real now rather than pending. "Revenue was 3.5", not
+"revenue was about 3.5".
+
+### Verified live, on a deck with real figures
+
+The original deck is a lorem-ipsum template, which confounded the first check: asked
+*"were you able to read the charts?"* the model said **"I was unable to"** — false,
+since it had just listed every value. It had conflated *placeholder values* with
+*unreadable*. So a second deck was built with figures nobody could guess, and with
+chart part numbers deliberately not matching slide numbers (`chart7.xml` on slide 2,
+`chart4.xml` on slide 3):
+
+| question | answer |
+| --- | --- |
+| Cap-Haïtien revenue in Q4 2026? | **27.5 million gourdes**, slide 2 cited — and it took the *second* series column, not 63.9 |
+| Customer retention in Q3 2026? | **90.7%**, slide 3 cited |
+| Were you able to read the charts? | **"I was able to read the charts."** |
+
+The retention answer is right *because* of the percent rule: the file stores
+`0.918` and the chart shows `91.8%`. Reporting the stored value would have answered
+"0.907" to "what was retention" — wrong, not merely differently formatted. That is
+the one number-format rule applied, because it is the one that changes meaning;
+thousands separators and currency are cosmetic and are left alone rather than
+half-emulated.
+
+### 🚨 What is NOT fixed: reasoning over the figures
+
+Asked *"did retention ever fall quarter over quarter?"*, one answer was
+self-contradictory — "retention never fell", followed by "Q2 to Q3: 93.4% to 90.7%
+(decrease)". The numbers it cited were correct and its conclusion contradicted
+them. A visibly incoherent answer is worse than a wrong one, and it is not
+something a board-facing product can ship with.
+
+Re-asked, two different models both answered correctly (`llama3.1:8b` and, with
+`needsReasoning`, `qwen3:8b`). ⚠️ **That is not evidence that the reasoning tier
+fixes it**: the prompt wording was changed in the same step, so the improvement
+cannot be attributed to routing. What it does establish is that the contradiction
+is **intermittent model reasoning over correct data**, not a data defect — the
+figures were right in every run and every model.
+
+This belongs to the model/Engineer lane, not the extraction layer. A real fix is
+either routing numeric-trend questions to a qualified reasoning model, or checking
+a numeric conclusion against the rows it cites — `verifyChatAnswer` already exists
+for quote fidelity and does not check arithmetic.
+
+### Honesty is now per chart, not per deck
+
+`hasUnreadCharts` used to be set by the mere PRESENCE of a chart part, condemning
+every charted deck while its figures sat unread in those parts. It is now set only
+when a specific chart could not be read, and `unreadCharts` names which and why —
+"five of six read, one references an external workbook" is an answer.
+
+Refusals that remain deliberate: a chart whose values live only in an external
+workbook, a chart type this does not understand (named, not guessed — a chart read
+as the wrong type gets its axes described backwards), and a missing data point,
+which stays a **gap** and never becomes 0. Charts skip periods, and a fabricated
+zero reads as a real low — the most damaging invention available, because it is
+numerically plausible.
+
+### 🚨 Two pre-existing tests caught a regression in this change
+
+Resolving charts through each slide's relationships is what puts a figure on the
+right slide. It also meant a chart part this reader could not *reach* would
+silently not appear, and the deck would report as read whole. The old package-wide
+scan was imprecise and **safe**, and two tests were protecting that safety. Both
+properties are kept: paired through the rels, and any chart part left unvisited is
+reported as present-but-unreachable.
+
+### Verification
+
+- brain **3518/3518**, root `tsc -b` clean
+- four negative controls, each failing its own tests: a data gap turned into zero,
+  percentages reported as stored, a cacheless chart claimed as read, pairing by
+  part number
+- an independent pairing control on the real deck: slides 23, 24 and 25 describe
+  their own chart type in prose ("column", "line", "line") and the type detected
+  from the XML agrees with all three. All six parts accounted for across 23–27
+- live through the Brain's API in isolated workspaces, created and then deleted;
+  the owner's 19-file library was never touched
