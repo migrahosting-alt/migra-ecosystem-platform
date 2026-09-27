@@ -82,6 +82,26 @@ export function resetAuthPort(): void {
  * the one place that can say so. It reports HOW LONG the session lived, which
  * is the fact that distinguishes "the TTL is wrong" from "something cut it
  * short" — the exact question that could not be answered before.
+ *
+ * ── 🚨 AND IT IS NOT REACHED FOR AN ORDINARY EXPIRY. READ THIS BEFORE TRUSTING
+ *    A `session_expired` LINE, OR ITS ABSENCE ──
+ *
+ * `@migrateck/auth-client`'s `readSession` returns **null** for a session past
+ * `expiresAt` (`session.ts`: `if (Date.now() > session.expiresAt) return null`).
+ * So by the time an expired session reaches this function it is already `null`,
+ * the first branch takes it, and NOTHING below runs.
+ *
+ * Measured on staging 2026-09-27: a session that had expired logged
+ * `session_absent`, never `session_expired`. The instrumentation was written to
+ * tell "the cookie vanished" from "the session was refused" and it cannot tell
+ * "expired" from "undecryptable" — which are the two cases an operator actually
+ * has to separate. That was MY defect, and it was documented as fixing the
+ * silence.
+ *
+ * This branch still fires for a session the port hands back WITH a past
+ * `expiresAt` (a port that does not pre-filter, and the in-process test doubles),
+ * so it is kept rather than deleted. It is simply not the signal to reason from
+ * in production. `getSession` below records what is actually knowable there.
  */
 const isLive = (session: AppSession | null): session is AppSession => {
   if (session === null) return false
@@ -128,18 +148,84 @@ export async function getSession(): Promise<AppSession | null> {
    * traffic, and logging every such request would bury the one line that matters
    * — a log nobody can read is the defect this whole module exists for.
    *
-   * Presence only. The cookie's value is never read, compared or recorded.
+   * ── 🚨 "cookie present, no session" WAS NOT SPECIFIC ENOUGH ──
+   *
+   * It lumped together an EXPIRED session and a REJECTED one, and those have
+   * opposite causes: the first is the TTL doing its job, the second is a rotated
+   * `APP_SESSION_SECRET` or a tampered cookie. Measured on staging 2026-09-27: a
+   * session that had simply expired logged exactly this line, and there was no way
+   * to tell which had happened — while `session_expired`, written for the job,
+   * never fires in production because the auth client returns null for an expired
+   * session before `isLive` ever sees it.
+   *
+   * The session cookie is `base64url(JSON).hmac` — SIGNED, not encrypted — so the
+   * payload's own timestamps are readable here without the secret, and the two
+   * cases can finally be separated.
+   *
+   * WHAT IS AND IS NOT DONE WITH THAT PAYLOAD. It is decoded for DIAGNOSIS ONLY
+   * and never trusted: the signature is not checked here, so nothing read from it
+   * may influence any decision — this function still returns null either way. Only
+   * DURATIONS are logged. No subject id, no email, no session id, no cookie value,
+   * not truncated and not hashed; an unsigned payload is attacker-controlled, and
+   * the one thing worse than an undiagnosable logout is a log that repeats
+   * whatever a forged cookie put in it.
    */
   try {
     const jar = await cookies()
     const name = readEnv('APP_SESSION_COOKIE_NAME') ?? 'migrapilot_consumer_session'
-    if (jar.get(name)) {
-      logAuthEvent('session_absent', { reason: 'cookie_present_but_no_session' })
-    }
+    const raw = jar.get(name)?.value
+    if (raw) logAuthEvent('session_absent', cookieDiagnosis(raw))
   } catch {
     /* No request scope — a unit test or a statically evaluated module. */
   }
   return null
+}
+
+/**
+ * Why a present cookie produced no session, from the cookie's own shape.
+ *
+ * Never throws: this runs on a path that is already failing, and a diagnostic that
+ * can break the request it is describing is worse than no diagnostic.
+ */
+/** Test seam: the classification, without a Next request scope. */
+export const cookieDiagnosisForTest = (raw: string): ReturnType<typeof cookieDiagnosis> =>
+  cookieDiagnosis(raw)
+
+function cookieDiagnosis(raw: string): { reason: string; livedSeconds?: number; remainingSeconds?: number } {
+  try {
+    const payload = raw.split('.')[0]
+    if (!payload) return { reason: 'cookie_malformed_no_payload' }
+    const decoded: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
+    if (typeof decoded !== 'object' || decoded === null) return { reason: 'cookie_payload_not_an_object' }
+
+    const { createdAt, expiresAt } = decoded as { createdAt?: unknown; expiresAt?: unknown }
+    if (typeof expiresAt !== 'number') return { reason: 'cookie_payload_has_no_expiry' }
+
+    const now = Date.now()
+    if (expiresAt <= now) {
+      /*
+       * The ordinary case, and the one that used to be indistinguishable. Both
+       * numbers are here because they answer different questions: `livedSeconds`
+       * says whether the TTL is what it should be, `remainingSeconds` (negative)
+       * says how long ago it lapsed — i.e. whether the person was away or the
+       * session died under their hands.
+       */
+      return {
+        reason: 'session_expired_before_read',
+        ...(typeof createdAt === 'number' ? { livedSeconds: secondsBetween(createdAt, expiresAt) } : {}),
+        remainingSeconds: secondsBetween(now, expiresAt),
+      }
+    }
+    /*
+     * Still in date and still refused. The payload is fine, so the SIGNATURE is
+     * not — a rotated `APP_SESSION_SECRET` (which invalidates every session at
+     * once, across all users) or a tampered cookie. Worth alerting on; an expiry
+     * is not.
+     */
+    return { reason: 'signature_rejected_while_unexpired', remainingSeconds: secondsBetween(now, expiresAt) }
+  } catch {
+    return { reason: 'cookie_unreadable' }
+  }
 }
 
 /**
