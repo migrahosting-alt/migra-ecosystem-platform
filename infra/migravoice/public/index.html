@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MigraVoice — Enterprise Cloud Phone System</title>
+  <meta name="description" content="MigraVoice — Managed cloud business phone system from $24.99/mo. Cloud PBX, IVR, softphone apps, call recording, CRM integrations, analytics, and business bundles with hosting and email.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="/site-config.js"></script>
+  <style>
+    :root {
+      --brand: #8b5cf6;
+      --brand-light: #a78bfa;
+      --brand-dark: #7c3aed;
+      --cyan: #06b6d4;
+      --bg-dark: #020617;
+      --bg-card: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --success: #10b981;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Nav */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(2,6,23,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+    }
+    .nav-inner {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .nav-logo {
+      font-size: 1.5rem; font-weight: 800;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .nav-links { display: flex; gap: 2rem; align-items: center; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: white; }
+    .nav-cta {
+      background: var(--brand); color: white; padding: 0.5rem 1.25rem;
+      border-radius: 8px; font-weight: 600; font-size: 0.875rem;
+      text-decoration: none; transition: all 0.2s;
+    }
+    .nav-cta:hover { background: var(--brand-dark); transform: translateY(-1px); }
+
+    /* Hero */
+    .hero {
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 7.25rem 2rem 3rem;
+      background: radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.15) 0%, transparent 60%),
+                  radial-gradient(ellipse at 80% 50%, rgba(6,182,212,0.08) 0%, transparent 50%);
+    }
+    .hero-content { max-width: 800px; width: 100%; }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background: var(--bg-card); border: 1px solid var(--border);
+      padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.8rem;
+      color: var(--brand-light); margin-bottom: 2rem;
+    }
+    .hero-badge .dot { width: 6px; height: 6px; background: var(--success); border-radius: 50%; }
+    .hero h1 {
+      font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 900;
+      line-height: 1.1; margin-bottom: 1.5rem;
+      background: linear-gradient(to right, #fff, #cbd5e1);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p { font-size: 1.2rem; color: var(--text-muted); max-width: 600px; margin: 0 auto 2.5rem; }
+    .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+      color: white; padding: 0.875rem 2rem; border-radius: 12px;
+      text-decoration: none; font-weight: 700; font-size: 1rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      transition: all 0.2s; border: none; cursor: pointer;
+      box-shadow: 0 4px 20px rgba(139,92,246,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(139,92,246,0.4); }
+    .btn-secondary {
+      background: var(--bg-card); border: 1px solid var(--border);
+      color: var(--text); padding: 0.875rem 2rem; border-radius: 12px;
+      text-decoration: none; font-weight: 600; font-size: 1rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      transition: all 0.2s; cursor: pointer;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+
+    .hero-stats {
+      display: flex; justify-content: center; gap: 3rem; margin-top: 2.75rem;
+      padding-top: 1.5rem; border-top: 1px solid var(--border);
+    }
+    .hero-stat h3 { font-size: 2rem; font-weight: 800; color: white; }
+    .hero-stat p { font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Sections */
+    section { padding: 4.5rem 2rem; }
+    .section-inner { max-width: 1200px; margin: 0 auto; }
+    .section-header { text-align: center; max-width: 600px; margin: 0 auto 3rem; }
+    .section-header h2 { font-size: 2.25rem; font-weight: 800; margin-bottom: 1rem; }
+    .section-header p { color: var(--text-muted); font-size: 1.1rem; }
+
+    #features { padding-top: 3rem; }
+
+    /* Features grid */
+    .features-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .feature-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 2rem; transition: all 0.3s;
+    }
+    .feature-card:hover { border-color: rgba(139,92,246,0.3); transform: translateY(-4px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+    .feature-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: linear-gradient(135deg, rgba(139,92,246,0.2), rgba(6,182,212,0.2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; margin-bottom: 1rem;
+    }
+    .feature-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .feature-card p { color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; }
+
+    /* Platform section */
+    .platform-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
+    .platform-text h2 { font-size: 2rem; font-weight: 800; margin-bottom: 1rem; }
+    .platform-text p { color: var(--text-muted); margin-bottom: 1.5rem; }
+    .platform-list { list-style: none; }
+    .platform-list li {
+      display: flex; align-items: flex-start; gap: 0.75rem;
+      padding: 0.5rem 0; color: var(--text-muted); font-size: 0.95rem;
+    }
+    .platform-list li::before { content: "✓"; color: var(--success); font-weight: 700; min-width: 20px; }
+    .platform-visual {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 2rem; position: relative; overflow: hidden;
+    }
+    .phone-mockup {
+      background: #111827; border-radius: 16px; padding: 1.5rem;
+      border: 2px solid rgba(255,255,255,0.1);
+    }
+    .phone-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .phone-header h4 { font-size: 0.9rem; font-weight: 600; }
+    .phone-header .status { font-size: 0.75rem; color: var(--success); }
+    .phone-contact { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
+    .phone-avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, var(--brand), var(--cyan)); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .phone-name h3 { font-size: 1rem; font-weight: 600; }
+    .phone-name p { font-size: 0.8rem; color: var(--text-dim); }
+    .phone-timer { text-align: center; font-size: 2rem; font-weight: 300; color: var(--text-muted); margin: 1rem 0; font-variant-numeric: tabular-nums; }
+    .phone-actions { display: flex; justify-content: center; gap: 1rem; }
+    .phone-btn { width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; transition: all 0.2s; }
+    .phone-btn.mute { background: rgba(255,255,255,0.1); color: white; }
+    .phone-btn.hold { background: rgba(255,255,255,0.1); color: white; }
+    .phone-btn.hangup { background: #ef4444; color: white; }
+    .phone-btn.transfer { background: rgba(255,255,255,0.1); color: white; }
+
+    /* Pricing */
+    #pricing { background: radial-gradient(ellipse at 50% 50%, rgba(139,92,246,0.05) 0%, transparent 60%); }
+    .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 960px; margin: 0 auto; }
+    .pricing-card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 2.5rem 2rem; text-align: center;
+      transition: all 0.3s; position: relative;
+    }
+    .pricing-card.featured { border-color: var(--brand); box-shadow: 0 0 40px rgba(139,92,246,0.15); }
+    .pricing-card.featured::before {
+      content: "Most Popular"; position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: var(--brand); color: white; font-size: 0.75rem; font-weight: 700;
+      padding: 0.25rem 1rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .pricing-card h3 { font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .pricing-price { font-size: 3rem; font-weight: 900; margin: 1rem 0; }
+    .pricing-price span { font-size: 1rem; font-weight: 400; color: var(--text-muted); }
+    .pricing-features { list-style: none; text-align: left; margin: 1.5rem 0; }
+    .pricing-features li { padding: 0.4rem 0; color: var(--text-muted); font-size: 0.9rem; display: flex; gap: 0.5rem; }
+    .pricing-features li::before { content: "✓"; color: var(--success); font-weight: 700; }
+
+    /* CTA */
+    .cta-section {
+      text-align: center; padding: 4.5rem 2rem;
+      background: linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.08) 100%);
+    }
+    .cta-section h2 { font-size: 2.5rem; font-weight: 900; margin-bottom: 1rem; }
+    .cta-section p { color: var(--text-muted); font-size: 1.1rem; max-width: 500px; margin: 0 auto 2rem; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border); padding: 3rem 2rem;
+      background: rgba(0,0,0,0.3);
+    }
+    .footer-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 2rem; }
+    .footer-brand { font-size: 1.2rem; font-weight: 800; background: linear-gradient(135deg, var(--brand), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .footer-links { display: flex; gap: 2rem; }
+    .footer-links a { color: var(--text-dim); text-decoration: none; font-size: 0.85rem; transition: color 0.2s; }
+    .footer-links a:hover { color: var(--brand-light); }
+    .footer-copy { color: var(--text-dim); font-size: 0.8rem; }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .hero { padding: 6rem 1.5rem 2.25rem; }
+      .platform-grid { grid-template-columns: 1fr; }
+      .hero-stats { flex-direction: column; gap: 1rem; }
+      .hero-actions { flex-direction: column; align-items: center; }
+      .pricing-grid { grid-template-columns: 1fr; max-width: 400px; }
+      section { padding: 3.5rem 1.5rem; }
+      #features { padding-top: 2.5rem; }
+      .section-header { margin-bottom: 2.5rem; }
+      .footer-inner { flex-direction: column; text-align: center; }
+      .footer-links { justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav>
+    <div class="nav-inner">
+      <div class="nav-logo" style="display:flex;align-items:center;gap:10px;"><img src="/brand/migra-logo-48.png" alt="MV" style="width:32px;height:32px;border-radius:6px;">MigraVoice</div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#enterprise">Enterprise</a>
+        <a href="#platform">Platform</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#bundles">Bundles</a>
+        <a href="/portal.html" data-site-link="clientPortal">Client Portal</a>
+        <a href="/portal/" data-site-link="adminPortal">Admin Portal</a>
+        <a href="/signup.html" data-site-link="signup" class="nav-cta">Sign Up Free</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        Enterprise PBX &bull; Multilingual IVR &bull; From $24.99/mo
+      </div>
+      <h1>Enterprise Voice, <em>Without the Bloat</em></h1>
+      <p>Cloud PBX, multilingual IVR, browser softphone, desk phone support, analytics, and admin controls in one managed platform for growing teams.</p>
+      <div class="hero-actions">
+        <a href="https://call.migrahosting.com" data-site-link="softphone" class="btn-primary">
+          Launch Softphone &rarr;
+        </a>
+        <a href="#pricing" class="btn-secondary">
+          View Plans
+        </a>
+      </div>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <h3>99.99%</h3>
+          <p>Platform Uptime</p>
+        </div>
+        <div class="hero-stat">
+          <h3>HD</h3>
+          <p>Voice Quality</p>
+        </div>
+        <div class="hero-stat">
+          <h3>50+</h3>
+          <p>Countries</p>
+        </div>
+        <div class="hero-stat">
+          <h3>24/7</h3>
+          <p>Platform Ops</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Built for Real Business Calling</h2>
+        <p>From frontline teams to supervisors and admins, MigraVoice combines the core PBX tools most businesses actually need in one platform.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">&#128222;</div>
+          <h3>Cloud PBX</h3>
+          <p>Full-featured PBX in the cloud. Extensions, ring groups, call parking, paging, conferencing, and more — no hardware to manage.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#127760;</div>
+          <h3>WebRTC Softphone</h3>
+          <p>Make and receive calls from any browser. No downloads, no plugins. Works on desktop, tablet, and mobile.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128241;</div>
+          <h3>Mobile App</h3>
+          <p>Native iOS and Android apps with push notifications for incoming calls, even when the app is closed.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128290;</div>
+          <h3>IVR & Auto-Attendant</h3>
+          <p>Multi-level interactive voice menus with multi-language support. Route callers efficiently to the right team.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128101;</div>
+          <h3>Call Center Queues</h3>
+          <p>ACD queues with real-time monitoring, agent status, SLA tracking, and supervisor dashboards.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128187;</div>
+          <h3>Desk Phone Support</h3>
+          <p>Auto-provisioning for Yealink, Polycom, and other SIP phones. Plug in and go — zero-touch deployment.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128200;</div>
+          <h3>Analytics & Reporting</h3>
+          <p>Real-time dashboards, call detail records, agent performance metrics, and exportable reports.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128274;</div>
+          <h3>Enterprise Security</h3>
+          <p>TLS encryption, SRTP media security, role-based access control, and full audit logging.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#128268;</div>
+          <h3>API & Integrations</h3>
+          <p>REST APIs for click-to-call, call control, CRM integration, and custom automation workflows.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Enterprise PBX -->
+  <section id="enterprise" style="background: radial-gradient(ellipse at 50% 50%, rgba(139,92,246,0.06) 0%, transparent 60%);">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Department-Ready by Default</h2>
+        <p>Queues, ring groups, multilingual menus, feature codes, and role-aware admin controls are built in from day one.</p>
+      </div>
+
+      <!-- Department Cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.25rem;margin-bottom:4rem;">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.75rem;transition:all 0.3s;" onmouseover="this.style.borderColor='rgba(249,115,22,0.4)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="font-size:1.5rem;margin-bottom:0.75rem;">&#128188;</div>
+          <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.25rem;">Executive</h3>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Extensions 100&ndash;103</div>
+          <p style="font-size:0.85rem;color:var(--text-muted);">CEO, CTO, COO, CFO — direct lines with priority routing and executive ring group.</p>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.75rem;transition:all 0.3s;" onmouseover="this.style.borderColor='rgba(139,92,246,0.4)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="font-size:1.5rem;margin-bottom:0.75rem;">&#128176;</div>
+          <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.25rem;">Sales</h3>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Extensions 200&ndash;203 &bull; Queue 900</div>
+          <p style="font-size:0.85rem;color:var(--text-muted);">Sales manager and representatives with ACD queue, ring group, and skills-based routing.</p>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.75rem;transition:all 0.3s;" onmouseover="this.style.borderColor='rgba(16,185,129,0.4)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="font-size:1.5rem;margin-bottom:0.75rem;">&#127919;</div>
+          <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.25rem;">Support</h3>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Extensions 300&ndash;303 &bull; Queue 901</div>
+          <p style="font-size:0.85rem;color:var(--text-muted);">Technical support team with queue failover, SLA tracking, and supervisor monitoring.</p>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.75rem;transition:all 0.3s;" onmouseover="this.style.borderColor='rgba(239,68,68,0.4)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="font-size:1.5rem;margin-bottom:0.75rem;">&#128179;</div>
+          <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.25rem;">Billing</h3>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Extensions 400&ndash;402 &bull; Queue 902</div>
+          <p style="font-size:0.85rem;color:var(--text-muted);">Billing and accounts team with dedicated queue and voicemail-to-email integration.</p>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:1.75rem;transition:all 0.3s;" onmouseover="this.style.borderColor='rgba(6,182,212,0.4)'" onmouseout="this.style.borderColor='var(--border)'">
+          <div style="font-size:1.5rem;margin-bottom:0.75rem;">&#128222;</div>
+          <h3 style="font-size:1rem;font-weight:700;margin-bottom:0.25rem;">Business Phone</h3>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Extensions 500&ndash;501 &bull; Queue 903</div>
+          <p style="font-size:0.85rem;color:var(--text-muted);">Partner and business development lines with custom caller ID and shared ring group.</p>
+        </div>
+      </div>
+
+      <!-- Feature Codes + IVR -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:2rem;">
+          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;">&#127932; Multi-Language IVR</h3>
+          <div style="display:flex;flex-direction:column;gap:0.6rem;">
+            <div style="display:flex;align-items:center;gap:0.75rem;font-size:0.9rem;color:var(--text-muted);">
+              <span style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:3px 10px;border-radius:20px;font-size:0.8rem;font-weight:600;">IVR 600</span>
+              Main Menu &mdash; Language Selection
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;font-size:0.9rem;color:var(--text-muted);">
+              <span style="background:rgba(6,182,212,0.15);color:var(--cyan);padding:3px 10px;border-radius:20px;font-size:0.8rem;font-weight:600;">IVR 610</span>
+              English Menu &mdash; Sales / Support / Billing
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;font-size:0.9rem;color:var(--text-muted);">
+              <span style="background:rgba(245,158,11,0.15);color:var(--warning);padding:3px 10px;border-radius:20px;font-size:0.8rem;font-weight:600;">IVR 620</span>
+              Espa&ntilde;ol Menu &mdash; Ventas / Soporte / Facturaci&oacute;n
+            </div>
+            <div style="display:flex;align-items:center;gap:0.75rem;font-size:0.9rem;color:var(--text-muted);">
+              <span style="background:rgba(16,185,129,0.15);color:var(--success);padding:3px 10px;border-radius:20px;font-size:0.8rem;font-weight:600;">IVR 630</span>
+              Krey&ograve;l Menu &mdash; Vant / Sip&ograve; / Bòdwo
+            </div>
+          </div>
+        </div>
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:2rem;">
+          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1.25rem;">&#9881;&#65039; Enterprise Feature Codes</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem 1.5rem;">
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">70-75</code> Call Parking
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">*8</code> Call Pickup
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">*78/*79</code> DND On/Off
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">*72/*73</code> Call Forward
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">*80-*83</code> Paging Zones
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">700</code> Conference
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(139,92,246,0.15);color:var(--brand-light);padding:2px 8px;border-radius:6px;font-size:0.8rem;">800-804</code> Ring Groups
+            </div>
+            <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;gap:0.5rem;">
+              <code style="background:rgba(16,185,129,0.15);color:var(--success);padding:2px 8px;border-radius:6px;font-size:0.8rem;">REC</code> Auto-Recording
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toll-free number callout -->
+      <div style="margin-top:2rem;text-align:center;padding:1.5rem;background:var(--bg-card);border:1px solid rgba(139,92,246,0.2);border-radius:12px;">
+        <div style="font-size:0.85rem;color:var(--text-muted);">Enterprise Main Number</div>
+        <div style="font-size:1.75rem;font-weight:800;background:linear-gradient(135deg,var(--brand),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0.5rem 0;">1-877-545-5428</div>
+        <div style="font-size:0.85rem;color:var(--text-dim);">Toll-Free &bull; Multi-Language IVR &bull; Department Routing &bull; 17 Extensions &bull; 4 Queues</div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- Platform -->
+  <section id="platform" style="background: radial-gradient(ellipse at 30% 50%, rgba(6,182,212,0.06) 0%, transparent 50%);">
+    <div class="section-inner">
+      <div class="platform-grid">
+        <div class="platform-text">
+          <h2>One Voice Stack, Every Device</h2>
+          <p>Use the same phone system across desk phones, browser softphones, and mobile endpoints without splitting users across separate tools.</p>
+          <ul class="platform-list">
+            <li>Yealink desk phones with auto-provisioning</li>
+            <li>Browser-based softphone — no installs needed</li>
+            <li>Native mobile apps for iOS and Android</li>
+            <li>Simultaneous ring across all devices</li>
+            <li>Seamless call transfer between devices</li>
+            <li>Unified voicemail across all endpoints</li>
+            <li>Real-time presence and team status</li>
+            <li>Toll-free and local numbers in 50+ countries</li>
+          </ul>
+          <div style="margin-top: 2rem;">
+            <a href="https://call.migrahosting.com" data-site-link="softphone" class="btn-primary">Try the Softphone</a>
+          </div>
+        </div>
+        <div class="platform-visual">
+          <div class="phone-mockup">
+            <div class="phone-header">
+              <h4>MigraVoice</h4>
+              <span class="status">&#9679; Connected</span>
+            </div>
+            <div class="phone-contact">
+              <div class="phone-avatar">JD</div>
+              <div class="phone-name">
+                <h3>John Doe</h3>
+                <p>+1 (877) 545-5428</p>
+              </div>
+            </div>
+            <div class="phone-timer" id="call-timer">02:34</div>
+            <div class="phone-actions">
+              <button class="phone-btn mute" title="Mute">&#128263;</button>
+              <button class="phone-btn hold" title="Hold">&#9208;</button>
+              <button class="phone-btn hangup" title="Hang Up">&#128308;</button>
+              <button class="phone-btn transfer" title="Transfer">&#128257;</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section id="pricing">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Clear Plans for Growing Teams</h2>
+        <p>These are monthly workspace plans, not typical per-user UCaaS licenses. Add users, numbers, recording, and international coverage as needed.</p>
+      </div>
+
+      <div style="text-align:center;max-width:760px;margin:0 auto 2rem;color:var(--text-dim);font-size:0.9rem;">
+        Each plan includes a user and number allowance. If you outgrow the included capacity, you scale with add-ons instead of replatforming.
+      </div>
+
+      <div style="text-align:center;max-width:760px;margin:0 auto 2rem;color:var(--text-dim);font-size:0.85rem;">
+        Larger multi-site, compliance-heavy, or high-volume deployments can be custom quoted beyond the published Enterprise tier.
+      </div>
+
+      <div style="text-align:center;max-width:760px;margin:0 auto 2rem;color:var(--text-dim);font-size:0.85rem;">
+        Enterprise deployments include guided rollout and require a one-time implementation fee starting at $1,500.
+      </div>
+
+      <!-- Billing Toggle -->
+      <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:2.5rem;">
+        <span id="lbl-monthly" style="font-size:0.9rem;font-weight:600;color:#fff;">Monthly</span>
+        <button id="billing-toggle" onclick="toggleBilling()" style="position:relative;width:52px;height:28px;border-radius:14px;border:none;background:rgba(139,92,246,0.4);cursor:pointer;transition:background 0.3s;">
+          <span id="billing-knob" style="position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;background:#fff;transition:transform 0.3s;"></span>
+        </button>
+        <span id="lbl-annual" style="font-size:0.9rem;font-weight:500;color:var(--text-muted);">Annual <span style="color:#10b981;font-size:0.75rem;font-weight:700;margin-left:4px;">Save ~17%</span></span>
+      </div>
+
+      <div class="pricing-grid" style="grid-template-columns:repeat(auto-fit,minmax(240px,1fr));max-width:1100px;">
+        <!-- Starter -->
+        <div class="pricing-card">
+          <h3>Starter</h3>
+          <div class="pricing-price"><span class="price-val" data-monthly="24.99" data-annual="20.99">$24.99</span><span>/mo</span></div>
+          <div class="plan-meta" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Up to 5 users &bull; 2 numbers</div>
+          <ul class="pricing-features">
+            <li>Cloud PBX with AI voicemail</li>
+            <li>Web &amp; mobile softphone</li>
+            <li>Smart call routing &amp; ring groups</li>
+            <li>Business SMS (100/mo)</li>
+            <li>Call history &amp; basic analytics</li>
+            <li>Standard support</li>
+          </ul>
+          <a href="/signup.html" data-site-link="signup" class="btn-secondary" style="width:100%;justify-content:center;">Start Free Trial</a>
+        </div>
+        <!-- Business (featured) -->
+        <div class="pricing-card featured">
+          <h3>Business <span style="font-size:0.65rem;background:var(--brand);color:#fff;padding:2px 8px;border-radius:10px;vertical-align:middle;margin-left:6px;">POPULAR</span></h3>
+          <div class="pricing-price"><span class="price-val" data-monthly="79.99" data-annual="66.99">$79.99</span><span>/mo</span></div>
+          <div class="plan-meta" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Up to 25 users &bull; 10 numbers</div>
+          <ul class="pricing-features">
+            <li>Everything in Starter, plus:</li>
+            <li>Multi-level IVR &amp; auto-attendant</li>
+            <li>Call recording &amp; AI summaries</li>
+            <li>Skills-based call queues</li>
+            <li>CRM integrations (Salesforce, HubSpot)</li>
+            <li>Advanced analytics &amp; dashboards</li>
+            <li>SMS (250/mo) &amp; conference bridges</li>
+            <li>Priority email &amp; chat support</li>
+          </ul>
+          <a href="/signup.html" data-site-link="signup" class="btn-primary" style="width:100%;justify-content:center;">Start Free Trial</a>
+        </div>
+        <!-- Professional -->
+        <div class="pricing-card">
+          <h3>Professional</h3>
+          <div class="pricing-price"><span class="price-val" data-monthly="179.99" data-annual="149.99">$179.99</span><span>/mo</span></div>
+          <div class="plan-meta" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Up to 75 users &bull; 30 numbers</div>
+          <ul class="pricing-features">
+            <li>Everything in Business, plus:</li>
+            <li>AI call transcription &amp; sentiment</li>
+            <li>Live monitoring &amp; whisper/barge</li>
+            <li>Autodialer &amp; power dialing</li>
+            <li>SIP trunking &amp; custom routing</li>
+            <li>E911 compliance management</li>
+            <li>Role-based access &amp; API access</li>
+            <li>Real-time wallboard &amp; SLA tracking</li>
+            <li>Phone + priority support</li>
+          </ul>
+          <a href="/signup.html" data-site-link="signup" class="btn-secondary" style="width:100%;justify-content:center;">Start Free Trial</a>
+        </div>
+        <!-- Enterprise -->
+        <div class="pricing-card">
+          <h3>Enterprise</h3>
+          <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--brand-light);margin-top:0.5rem;">Starting at</div>
+          <div class="pricing-price"><span class="price-val" data-monthly="349.99" data-annual="299.99">$349.99</span><span>/mo</span></div>
+          <div class="plan-meta" style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.75rem;">Sales-led rollout &bull; Multi-site &bull; 200 users &bull; 100 numbers</div>
+          <ul class="pricing-features">
+            <li>Everything in Professional, plus:</li>
+            <li>Dedicated SIP trunks</li>
+            <li>Custom integrations &amp; API priority</li>
+            <li>99.99% SLA guarantee</li>
+            <li>Number porting assistance</li>
+            <li>Custom IVR flow designer</li>
+            <li>24/7 priority phone support</li>
+            <li>Onboarding &amp; training included</li>
+            <li>HIPAA &amp; SOC 2 ready</li>
+          </ul>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin:-0.25rem 0 1rem;text-align:center;">Implementation fee starts at $1,500.</div>
+          <a href="mailto:sales@migrahosting.com" data-site-link="salesEmail" class="btn-secondary" style="width:100%;justify-content:center;">Talk to Sales</a>
+        </div>
+      </div>
+
+      <!-- Add-ons row -->
+      <div style="max-width:1100px;margin:3rem auto 0;">
+        <h3 style="text-align:center;font-size:1.3rem;font-weight:700;margin-bottom:1.5rem;color:var(--text);">Enhance Your Plan</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;">
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;text-align:center;">
+            <div style="font-size:1.5rem;margin-bottom:0.5rem;">&#10133;</div>
+            <div style="font-size:0.85rem;font-weight:600;">Extra Number</div>
+            <div style="font-size:1.25rem;font-weight:800;color:var(--brand-light);margin-top:0.5rem;">$3.99<span style="font-size:0.75rem;color:var(--text-dim);">/mo</span></div>
+          </div>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;text-align:center;">
+            <div style="font-size:1.5rem;margin-bottom:0.5rem;">&#128100;</div>
+            <div style="font-size:0.85rem;font-weight:600;">Extra User</div>
+            <div style="font-size:1.25rem;font-weight:800;color:var(--brand-light);margin-top:0.5rem;">$4.99<span style="font-size:0.75rem;color:var(--text-dim);">/mo</span></div>
+          </div>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;text-align:center;">
+            <div style="font-size:1.5rem;margin-bottom:0.5rem;">&#127381;</div>
+            <div style="font-size:0.85rem;font-weight:600;">Toll-Free Number</div>
+            <div style="font-size:1.25rem;font-weight:800;color:var(--brand-light);margin-top:0.5rem;">$9.99<span style="font-size:0.75rem;color:var(--text-dim);">/mo</span></div>
+          </div>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;text-align:center;">
+            <div style="font-size:1.5rem;margin-bottom:0.5rem;">&#127758;</div>
+            <div style="font-size:0.85rem;font-weight:600;">International</div>
+            <div style="font-size:1.25rem;font-weight:800;color:var(--brand-light);margin-top:0.5rem;">$12.99<span style="font-size:0.75rem;color:var(--text-dim);">/mo</span></div>
+          </div>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.25rem;text-align:center;">
+            <div style="font-size:1.5rem;margin-bottom:0.5rem;">&#127908;</div>
+            <div style="font-size:0.85rem;font-weight:600;">Call Recording</div>
+            <div style="font-size:1.25rem;font-weight:800;color:var(--brand-light);margin-top:0.5rem;">$9.99<span style="font-size:0.75rem;color:var(--text-dim);">/mo</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Bundles -->
+  <section id="bundles" style="background:radial-gradient(ellipse at 50% 0%, rgba(16,185,129,0.06) 0%, transparent 60%);">
+    <div class="section-inner">
+      <div class="section-header">
+        <h2>Save More with Bundles</h2>
+        <p>Combine hosting, email, domains, and voice in one operational stack with one bill and a lower blended monthly cost.</p>
+      </div>
+      <div class="pricing-grid" style="max-width:1100px;">
+        <!-- Business Starter Bundle -->
+        <div class="pricing-card" style="border-color:rgba(16,185,129,0.3);">
+          <div style="position:absolute;top:12px;right:-24px;transform:rotate(45deg);background:#10b981;color:#fff;font-size:0.65rem;font-weight:700;padding:2px 28px;letter-spacing:0.5px;">SAVE 12%</div>
+          <h3 style="color:#10b981;">Business Starter</h3>
+          <div class="pricing-price" style="color:#10b981;">$27.95<span>/mo</span></div>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:1rem;">Everything to launch your business online</div>
+          <div style="display:flex;flex-direction:column;gap:0.75rem;margin-bottom:1.5rem;">
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#9729;&#65039;</span><div><div style="font-size:0.85rem;font-weight:600;">CloudPod Starter Hosting</div><div style="font-size:0.7rem;color:var(--text-dim);">$4.49/mo value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#127760;</span><div><div style="font-size:0.85rem;font-weight:600;">.com Domain (1st year free)</div><div style="font-size:0.7rem;color:var(--text-dim);">$12.99/yr value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#128222;</span><div><div style="font-size:0.85rem;font-weight:600;">MigraVoice Starter</div><div style="font-size:0.7rem;color:var(--text-dim);">$24.99/mo value</div></div></div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1);padding:8px 12px;border-radius:8px;font-size:0.8rem;color:#10b981;margin-bottom:1rem;text-align:center;font-weight:600;">&#128176; Save $2.61/mo vs individual pricing</div>
+          <a href="https://www.migrahosting.com/checkout?bundle=bundle-starter" data-site-link="bundleStarterCheckout" class="btn-primary" style="width:100%;justify-content:center;background:linear-gradient(135deg,#10b981,#059669);">Get This Bundle</a>
+        </div>
+        <!-- Growth Bundle -->
+        <div class="pricing-card" style="border-color:rgba(16,185,129,0.3);">
+          <div style="position:absolute;top:12px;right:-24px;transform:rotate(45deg);background:#10b981;color:#fff;font-size:0.65rem;font-weight:700;padding:2px 28px;letter-spacing:0.5px;">SAVE 5%</div>
+          <h3 style="color:#10b981;">Growth Bundle</h3>
+          <div class="pricing-price" style="color:#10b981;">$84.99<span>/mo</span></div>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:1rem;">For scaling businesses that need more</div>
+          <div style="display:flex;flex-direction:column;gap:0.75rem;margin-bottom:1.5rem;">
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#9729;&#65039;</span><div><div style="font-size:0.85rem;font-weight:600;">CloudPod Premium Hosting</div><div style="font-size:0.7rem;color:var(--text-dim);">$9.99/mo value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#128231;</span><div><div style="font-size:0.85rem;font-weight:600;">MigraMail Pro Email</div><div style="font-size:0.7rem;color:var(--text-dim);">$4.99/mo value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#128222;</span><div><div style="font-size:0.85rem;font-weight:600;">MigraVoice Business</div><div style="font-size:0.7rem;color:var(--text-dim);">$79.99/mo value</div></div></div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1);padding:8px 12px;border-radius:8px;font-size:0.8rem;color:#10b981;margin-bottom:1rem;text-align:center;font-weight:600;">&#128176; Save $9.98/mo vs individual pricing</div>
+          <a href="https://www.migrahosting.com/checkout?bundle=bundle-growth" data-site-link="bundleGrowthCheckout" class="btn-primary" style="width:100%;justify-content:center;background:linear-gradient(135deg,#10b981,#059669);">Get This Bundle</a>
+        </div>
+        <!-- Enterprise Bundle -->
+        <div class="pricing-card" style="border-color:rgba(16,185,129,0.3);">
+          <div style="position:absolute;top:12px;right:-24px;transform:rotate(45deg);background:#10b981;color:#fff;font-size:0.65rem;font-weight:700;padding:2px 28px;letter-spacing:0.5px;">SAVE 4%</div>
+          <h3 style="color:#10b981;">Enterprise Bundle</h3>
+          <div class="pricing-price" style="color:#10b981;">$189.99<span>/mo</span></div>
+          <div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:1rem;">Complete business infrastructure</div>
+          <div style="display:flex;flex-direction:column;gap:0.75rem;margin-bottom:1.5rem;">
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#9729;&#65039;</span><div><div style="font-size:0.85rem;font-weight:600;">CloudPod Business Hosting</div><div style="font-size:0.7rem;color:var(--text-dim);">$14.99/mo value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#128231;</span><div><div style="font-size:0.85rem;font-weight:600;">MigraMail Business Email</div><div style="font-size:0.7rem;color:var(--text-dim);">$9.99/mo value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#127760;</span><div><div style="font-size:0.85rem;font-weight:600;">.com Domain (1st year free)</div><div style="font-size:0.7rem;color:var(--text-dim);">$12.99/yr value</div></div></div>
+            <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:1.1rem;">&#128222;</span><div><div style="font-size:0.85rem;font-weight:600;">MigraVoice Professional</div><div style="font-size:0.7rem;color:var(--text-dim);">$179.99/mo value</div></div></div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1);padding:8px 12px;border-radius:8px;font-size:0.8rem;color:#10b981;margin-bottom:1rem;text-align:center;font-weight:600;">&#128176; Save $16.06/mo vs individual pricing</div>
+          <a href="https://www.migrahosting.com/checkout?bundle=bundle-enterprise" data-site-link="bundleEnterpriseCheckout" class="btn-primary" style="width:100%;justify-content:center;background:linear-gradient(135deg,#10b981,#059669);">Get This Bundle</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <h2>Ready to Modernize Business Calling?</h2>
+    <p>Start with a live workspace, test the softphone, and move into queues, IVR, and admin controls without replacing your whole stack later.</p>
+    <div class="hero-actions">
+      <a href="/signup.html" data-site-link="signup" class="btn-primary">Start Free Trial &rarr;</a>
+      <a href="https://www.migrahosting.com/voice" data-site-link="migrahostingVoice" class="btn-secondary">View on MigraHosting</a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div>
+        <div class="footer-brand" style="display:flex;align-items:center;gap:10px;"><img src="/brand/migra-logo-48.png" alt="MV" style="width:28px;height:28px;border-radius:6px;">MigraVoice</div>
+        <p class="footer-copy" style="margin-top:0.5rem;">Managed cloud voice platform by MigraHosting</p>
+      </div>
+      <div class="footer-links">
+        <a href="#features">Features</a>
+        <a href="#enterprise">Enterprise</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#bundles">Bundles</a>
+        <a href="/portal.html" data-site-link="clientPortal">Portal</a>
+        <a href="/portal/" data-site-link="adminPortal">Admin</a>
+        <a href="https://call.migrahosting.com" data-site-link="softphone">Softphone</a>
+        <a href="https://www.migrahosting.com/voice" data-site-link="migrahostingVoice">MigraHosting</a>
+        <a href="mailto:support@migrahosting.com" data-site-link="supportEmail">Support</a>
+      </div>
+      <div class="footer-copy">&copy; 2026 MigraVoice by MigraHosting. All rights reserved.</div>
+    </div>
+  </footer>
+
+  <script>
+    if (window.applyMigraVoiceSiteConfig) {
+      window.applyMigraVoiceSiteConfig(document);
+    }
+  </script>
+
+  <!-- Billing toggle -->
+  <script>
+    let isAnnual = false;
+    function toggleBilling() {
+      isAnnual = !isAnnual;
+      document.getElementById('billing-knob').style.transform = isAnnual ? 'translateX(24px)' : 'translateX(0)';
+      document.getElementById('billing-toggle').style.background = isAnnual ? '#10b981' : 'rgba(139,92,246,0.4)';
+      document.getElementById('lbl-monthly').style.color = isAnnual ? 'var(--text-muted)' : '#fff';
+      document.getElementById('lbl-monthly').style.fontWeight = isAnnual ? '500' : '600';
+      document.getElementById('lbl-annual').style.color = isAnnual ? '#fff' : 'var(--text-muted)';
+      document.getElementById('lbl-annual').style.fontWeight = isAnnual ? '600' : '500';
+      document.querySelectorAll('.price-val').forEach(function(el) {
+        var price = isAnnual ? el.dataset.annual : el.dataset.monthly;
+        el.textContent = '$' + price;
+      });
+    }
+  </script>
+
+  <!-- Timer animation -->
+  <script>
+    const timer = document.getElementById('call-timer');
+    if (timer) {
+      let sec = 154;
+      setInterval(() => {
+        sec++;
+        const m = Math.floor(sec / 60).toString().padStart(2, '0');
+        const s = (sec % 60).toString().padStart(2, '0');
+        timer.textContent = m + ':' + s;
+      }, 1000);
+    }
+  </script>
+
+</body>
+</html>

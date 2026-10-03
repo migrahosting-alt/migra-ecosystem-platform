@@ -136,6 +136,11 @@
 !infra/nginx/
 !infra/nginx/**
 
+# MigraVoice site source + pre-retirement archive (Charter IV §11:
+# production source must exist in Git before anything is deleted)
+!infra/migravoice/
+!infra/migravoice/**
+
 # Allow MigraStacks enterprise WordPress plugins
 !migra-infra/
 !migra-infra/wordpress/

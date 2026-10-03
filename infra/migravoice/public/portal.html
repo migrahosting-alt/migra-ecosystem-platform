@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal — MigraVoice</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="/site-config.js"></script>
+  <style>
+    :root {
+      --brand: #8b5cf6;
+      --brand-light: #a78bfa;
+      --brand-dark: #7c3aed;
+      --cyan: #06b6d4;
+      --bg-dark: #020617;
+      --bg-surface: #0f172a;
+      --bg-card: rgba(15,23,42,0.8);
+      --border: rgba(255,255,255,0.08);
+      --border-hover: rgba(255,255,255,0.15);
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ---------- LOGIN SCREEN ---------- */
+    .login-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background: radial-gradient(ellipse at 30% 0%, rgba(139,92,246,0.12) 0%, transparent 60%),
+                  var(--bg-dark);
+    }
+    .login-box {
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .login-box h1 {
+      font-size: 2rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+    }
+    .login-box .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+    .login-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      backdrop-filter: blur(20px);
+      text-align: left;
+    }
+
+    /* ---------- SETUP SCREEN ---------- */
+    .setup-screen {
+      display: none;
+      min-height: 100vh;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background:
+        radial-gradient(ellipse at 25% 10%, rgba(139,92,246,0.18) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 80%, rgba(6,182,212,0.1) 0%, transparent 50%),
+        var(--bg-dark);
+    }
+    .setup-screen.active {
+      display: flex;
+    }
+    .setup-card {
+      width: 100%;
+      max-width: 720px;
+      background: rgba(15,23,42,0.88);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 2rem;
+      backdrop-filter: blur(24px);
+      box-shadow: 0 24px 80px rgba(2, 6, 23, 0.4);
+    }
+    .setup-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.8rem;
+      border-radius: 999px;
+      border: 1px solid rgba(139,92,246,0.25);
+      background: rgba(139,92,246,0.1);
+      color: var(--brand-light);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .setup-title {
+      font-size: 2rem;
+      font-weight: 900;
+      margin-top: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .setup-subtitle {
+      color: var(--text-muted);
+      font-size: 1rem;
+      max-width: 56ch;
+      line-height: 1.7;
+    }
+    .setup-progress {
+      margin-top: 1.5rem;
+      height: 10px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .setup-progress-bar {
+      height: 100%;
+      width: 12%;
+      background: linear-gradient(90deg, var(--brand), var(--cyan));
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+    .setup-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.9rem;
+      margin-top: 1.5rem;
+    }
+    .setup-pill {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0.95rem 1rem;
+      background: rgba(255,255,255,0.03);
+    }
+    .setup-pill-label {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+    .setup-pill-value {
+      margin-top: 0.4rem;
+      font-size: 0.96rem;
+      font-weight: 700;
+      color: white;
+    }
+    .setup-pill-value.pending {
+      color: var(--warning);
+    }
+    .setup-checklist {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+    .setup-step {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.9rem 1rem;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+    }
+    .setup-step-dot {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 800;
+      background: rgba(245,158,11,0.15);
+      color: var(--warning);
+      flex-shrink: 0;
+    }
+    .setup-step.done .setup-step-dot {
+      background: rgba(16,185,129,0.16);
+      color: #6ee7b7;
+    }
+    .setup-step-text {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .setup-step.done .setup-step-text {
+      color: white;
+    }
+    .setup-note {
+      margin-top: 1.5rem;
+      font-size: 0.88rem;
+      color: var(--text-dim);
+    }
+
+    /* ---------- APP SHELL ---------- */
+    .app { display: none; }
+    .app.active { display: flex; min-height: 100vh; }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      z-index: 50;
+    }
+    .sidebar-logo {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-logo h1 {
+      font-size: 1.25rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .sidebar-logo .tenant-name {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .sidebar-nav {
+      flex: 1;
+      padding: 0.75rem 0;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.65rem 1.5rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+    }
+    .nav-item:hover { color: white; background: rgba(255,255,255,0.04); }
+    .nav-item.active { color: white; background: rgba(139,92,246,0.15); border-right: 3px solid var(--brand); }
+    .nav-item .icon { font-size: 1.1rem; width: 22px; text-align: center; }
+    .sidebar-footer {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .user-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+    }
+    .user-details .user-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .user-details .user-role {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      text-transform: capitalize;
+    }
+    .btn-logout {
+      display: block;
+      width: 100%;
+      margin-top: 0.75rem;
+      padding: 0.5rem;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .btn-logout:hover { background: rgba(239, 68, 68, 0.2); }
+
+    /* Main content */
+    .main {
+      flex: 1;
+      margin-left: 240px;
+      padding: 2rem;
+      min-height: 100vh;
+    }
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2rem;
+    }
+    .page-header h2 {
+      font-size: 1.5rem;
+      font-weight: 800;
+    }
+    .page-header .desc {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-top: 0.25rem;
+    }
+
+    /* Cards */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      backdrop-filter: blur(10px);
+    }
+    .stat-card .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .stat-card .stat-value {
+      font-size: 1.75rem;
+      font-weight: 800;
+      margin-top: 0.25rem;
+    }
+    .stat-card .stat-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* Table */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+      margin-bottom: 1.5rem;
+    }
+    .panel-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .panel-header h3 {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      text-align: left;
+      padding: 0.75rem 1.25rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.75rem 1.25rem;
+      font-size: 0.875rem;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-success { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+    .badge-warning { background: rgba(245,158,11,0.15); color: #fcd34d; }
+    .badge-info { background: rgba(6,182,212,0.15); color: #67e8f9; }
+    .badge-purple { background: rgba(139,92,246,0.15); color: var(--brand-light); }
+
+    /* Buttons */
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .btn-primary {
+      background: var(--brand);
+      color: white;
+    }
+    .btn-primary:hover { background: var(--brand-dark); }
+    .btn-secondary {
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.1); }
+    .btn-danger {
+      background: rgba(239,68,68,0.15);
+      color: #fca5a5;
+    }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+    .form-group input, .form-group select {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: white;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group select:focus {
+      border-color: var(--brand);
+    }
+    .form-group input::placeholder { color: #475569; }
+    .form-group select { appearance: none; cursor: pointer; }
+    .form-group select option { background: var(--bg-surface); color: var(--text); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.75rem;
+      width: 100%;
+      max-width: 440px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      margin-top: 1.5rem;
+    }
+
+    /* Number search */
+    .number-search-form {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .number-search-form input, .number-search-form select {
+      padding: 0.5rem 0.85rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: white;
+      font-size: 0.85rem;
+      font-family: inherit;
+      outline: none;
+    }
+    .number-search-form input:focus, .number-search-form select:focus { border-color: var(--brand); }
+    .number-search-form select { appearance: none; cursor: pointer; }
+    .number-search-form select option { background: var(--bg-surface); }
+    .number-result {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .number-result:hover { background: rgba(255,255,255,0.02); }
+    .number-result .phone-num {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .number-result .phone-loc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Plan meter */
+    .usage-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 4px;
+      margin-top: 0.5rem;
+    }
+    .usage-bar {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--brand), var(--cyan));
+      transition: width 0.3s;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-dim);
+    }
+    .empty-state .icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .empty-state h4 { font-size: 1rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+
+    /* Alert / toast */
+    .toast {
+      position: fixed;
+      top: 1rem; right: 1rem;
+      padding: 0.75rem 1.25rem;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      z-index: 200;
+      display: none;
+      animation: slideIn 0.3s;
+    }
+    .toast.toast-success { background: rgba(16,185,129,0.9); color: white; }
+    .toast.toast-error { background: rgba(239,68,68,0.9); color: white; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* Loading spinner */
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Page sections (hidden by default) */
+    .page-section { display: none; }
+    .page-section.active { display: block; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { width: 60px; }
+      .sidebar .nav-item span, .sidebar-logo .tenant-name, .sidebar-footer .user-details, .sidebar-footer .btn-logout { display: none; }
+      .sidebar-logo h1 { font-size: 0.9rem; }
+      .main { margin-left: 60px; padding: 1rem; }
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+      .setup-card { padding: 1.5rem; }
+      .setup-title { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============== LOGIN SCREEN ============== -->
+<div class="login-screen" id="login-screen">
+  <div class="login-box">
+    <h1>MigraVoice</h1>
+    <p class="subtitle" data-site-text="clientPortal">Client Portal</p>
+    <div class="login-card">
+      <div class="error-msg" id="login-error" style="display:none; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#fca5a5; padding:0.75rem; border-radius:8px; margin-bottom:1rem; font-size:0.85rem;"></div>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="login-email" placeholder="you@company.com" required>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="login-password" placeholder="Your password" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%; padding:0.75rem; font-size:0.95rem; margin-top:0.5rem;" id="login-btn">Sign In</button>
+      </form>
+      <p style="text-align:center; margin-top:1.25rem; font-size:0.85rem; color:var(--text-muted);">
+        Don't have an account? <a href="/signup.html" data-site-link="signup" style="color:var(--brand-light); text-decoration:none;">Sign up</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ============== SETUP SCREEN ============== -->
+<div class="setup-screen" id="setup-screen">
+  <div class="setup-card">
+    <div class="setup-kicker">Live Setup In Progress</div>
+    <div class="setup-title" id="setup-title">Building your phone system</div>
+    <div class="setup-subtitle" id="setup-subtitle">
+      We're provisioning your extension, main number, and inbound routing. This usually finishes in under a minute.
+    </div>
+    <div class="setup-progress">
+      <div class="setup-progress-bar" id="setup-progress-bar"></div>
+    </div>
+    <div class="setup-grid">
+      <div class="setup-pill">
+        <div class="setup-pill-label">Main Extension</div>
+        <div class="setup-pill-value pending" id="setup-extension">Provisioning...</div>
+      </div>
+      <div class="setup-pill">
+        <div class="setup-pill-label">Main Number</div>
+        <div class="setup-pill-value pending" id="setup-number">Finding number...</div>
+      </div>
+      <div class="setup-pill">
+        <div class="setup-pill-label">Main Route</div>
+        <div class="setup-pill-value pending" id="setup-route">Configuring route...</div>
+      </div>
+    </div>
+    <div class="setup-checklist">
+      <div class="setup-step" id="setup-step-settings">
+        <div class="setup-step-dot">1</div>
+        <div class="setup-step-text">Workspace settings created</div>
+      </div>
+      <div class="setup-step" id="setup-step-extension">
+        <div class="setup-step-dot">2</div>
+        <div class="setup-step-text">Extension assigned</div>
+      </div>
+      <div class="setup-step" id="setup-step-number">
+        <div class="setup-step-dot">3</div>
+        <div class="setup-step-text">Phone number assigned</div>
+      </div>
+      <div class="setup-step" id="setup-step-routing">
+        <div class="setup-step-dot">4</div>
+        <div class="setup-step-text">Inbound routing activated</div>
+      </div>
+    </div>
+    <div class="setup-note" id="setup-note">
+      Provisioning your phone system. Your main number and live extension will appear automatically in a moment.
+    </div>
+  </div>
+</div>
+
+<!-- ============== APP SHELL ============== -->
+<div class="app" id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex;align-items:center;gap:10px;"><img src="/brand/migra-logo-48.png" alt="MV" style="width:36px;height:36px;border-radius:8px;"><h1>MigraVoice</h1></div>
+      <div class="tenant-name" id="sidebar-tenant"></div>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+        <span class="icon">📊</span><span>Dashboard</span>
+      </button>
+      <button class="nav-item" data-page="users" onclick="showPage('users')">
+        <span class="icon">👥</span><span>Users</span>
+      </button>
+      <button class="nav-item" data-page="numbers" onclick="showPage('numbers')">
+        <span class="icon">📞</span><span>Phone Numbers</span>
+      </button>
+      <button class="nav-item" data-page="plan" onclick="showPage('plan')">
+        <span class="icon">💎</span><span>Plan &amp; Billing</span>
+      </button>
+      <button class="nav-item" data-page="settings" onclick="showPage('settings')">
+        <span class="icon">⚙️</span><span>Settings</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar" id="sidebar-avatar">A</div>
+        <div class="user-details">
+          <div class="user-name" id="sidebar-name">Admin</div>
+          <div class="user-role" id="sidebar-role">admin</div>
+        </div>
+      </div>
+      <button class="btn-logout" onclick="handleLogout()">Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- ===== DASHBOARD ===== -->
+    <div class="page-section active" id="page-dashboard">
+      <div class="page-header">
+        <div>
+          <h2>Dashboard</h2>
+          <div class="desc">Overview of your MigraVoice account</div>
+        </div>
+        <a href="https://call.migrahosting.com" data-site-link="softphone" target="_blank" class="btn btn-primary">📞 Open Softphone</a>
+      </div>
+      <div class="stat-grid" id="dash-stats"></div>
+      <div class="panel">
+        <div class="panel-header"><h3>Recent Activity</h3></div>
+        <div style="padding:2rem; text-align:center; color:var(--text-dim);">
+          Activity feed coming soon
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== USERS ===== -->
+    <div class="page-section" id="page-users">
+      <div class="page-header">
+        <div>
+          <h2>Users</h2>
+          <div class="desc">Manage your team members</div>
+        </div>
+        <button class="btn btn-primary" onclick="openAddUserModal()">+ Add User</button>
+      </div>
+      <div class="panel">
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Email</th><th>Extension</th><th>Role</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody id="users-table"></tbody>
+        </table>
+        <div class="empty-state" id="users-empty" style="display:none;">
+          <div class="icon">👥</div>
+          <h4>No users yet</h4>
+          <p>Add your first team member to get started.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PHONE NUMBERS ===== -->
+    <div class="page-section" id="page-numbers">
+      <div class="page-header">
+        <div>
+          <h2>Phone Numbers</h2>
+          <div class="desc">Your provisioned DID numbers</div>
+        </div>
+        <button class="btn btn-primary" onclick="openSearchNumbersModal()">+ Get New Number</button>
+      </div>
+      <div class="panel">
+        <table>
+          <thead>
+            <tr><th>Number</th><th>Type</th><th>Location</th><th>Status</th><th>Monthly Cost</th></tr>
+          </thead>
+          <tbody id="numbers-table"></tbody>
+        </table>
+        <div class="empty-state" id="numbers-empty" style="display:none;">
+          <div class="icon">📞</div>
+          <h4>No phone numbers</h4>
+          <p>Search and purchase your first business phone number.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== PLAN & BILLING ===== -->
+    <div class="page-section" id="page-plan">
+      <div class="page-header">
+        <div>
+          <h2>Plan &amp; Billing</h2>
+          <div class="desc">Your subscription and usage</div>
+        </div>
+      </div>
+      <div class="stat-grid" id="plan-stats"></div>
+      <div class="panel">
+        <div class="panel-header"><h3>Usage</h3></div>
+        <div style="padding:1.25rem;" id="plan-usage"></div>
+      </div>
+    </div>
+
+    <!-- ===== SETTINGS ===== -->
+    <div class="page-section" id="page-settings">
+      <div class="page-header">
+        <div>
+          <h2>Account Settings</h2>
+          <div class="desc">Manage your company information</div>
+        </div>
+      </div>
+      <div class="panel" style="padding:1.5rem;">
+        <form id="settings-form" onsubmit="handleSaveSettings(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Company Name</label>
+              <input type="text" id="set-company" placeholder="Company name">
+            </div>
+            <div class="form-group">
+              <label>Phone</label>
+              <input type="tel" id="set-phone" placeholder="+1 555-0000">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Address</label>
+            <input type="text" id="set-address" placeholder="123 Main St, City, State">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Website</label>
+              <input type="url" id="set-website" placeholder="https://example.com">
+            </div>
+            <div class="form-group">
+              <label>Billing Email</label>
+              <input type="email" id="set-billing" placeholder="billing@company.com">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </form>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- ============== MODALS ============== -->
+
+<!-- Add User Modal -->
+<div class="modal-overlay" id="modal-add-user">
+  <div class="modal">
+    <h3>Add New User</h3>
+    <form id="add-user-form" onsubmit="handleAddUser(event)">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="au-name" placeholder="Jane Smith" required>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="au-email" placeholder="jane@company.com" required>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Extension</label>
+          <input type="text" id="au-extension" placeholder="205" required>
+        </div>
+        <div class="form-group">
+          <label>Role</label>
+          <select id="au-role">
+            <option value="user">User</option>
+            <option value="agent">Agent</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="au-password" placeholder="Min 8 characters" minlength="8" required>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-user')">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add User</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Search Numbers Modal -->
+<div class="modal-overlay" id="modal-search-numbers">
+  <div class="modal" style="max-width:560px;">
+    <h3>Get a New Phone Number</h3>
+    <div class="number-search-form">
+      <select id="ns-country" style="flex:0 0 100px;">
+        <option value="US">🇺🇸 US</option>
+        <option value="CA">🇨🇦 CA</option>
+        <option value="GB">🇬🇧 UK</option>
+      </select>
+      <input type="text" id="ns-area" placeholder="Area code (e.g. 305)" style="flex:1;">
+      <input type="text" id="ns-contains" placeholder="Contains..." style="flex:1;">
+      <button class="btn btn-primary" onclick="searchNumbers()">Search</button>
+    </div>
+    <div id="ns-results" style="max-height:300px; overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('modal-search-numbers')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ==================== STATE ====================
+let token = localStorage.getItem('mv_token') || '';
+let user = JSON.parse(localStorage.getItem('mv_user') || 'null');
+let currentPage = 'dashboard';
+let bootstrapPollTimer = null;
+
+const API = window.location.origin;
+
+// ==================== INIT ====================
+window.addEventListener('DOMContentLoaded', () => {
+  if (window.applyMigraVoiceSiteConfig) {
+    window.applyMigraVoiceSiteConfig(document);
+  }
+  if (token && user) {
+    void startBootstrapFlow();
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  stopBootstrapPolling();
+});
+
+// ==================== AUTH ====================
+async function handleLogin(e) {
+  e.preventDefault();
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const btn = document.getElementById('login-btn');
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Signing in...';
+
+  try {
+    const res = await apiFetch('/auth/login', 'POST', { email, password });
+    persistSession(res.session);
+    await startBootstrapFlow(res.bootstrap || null);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+function handleLogout() {
+  stopBootstrapPolling();
+  token = '';
+  user = null;
+  localStorage.removeItem('mv_token');
+  localStorage.removeItem('mv_user');
+  document.getElementById('app').classList.remove('active');
+  document.getElementById('setup-screen').classList.remove('active');
+  document.getElementById('login-screen').style.display = 'flex';
+}
+
+function enterApp() {
+  stopBootstrapPolling();
+  document.getElementById('setup-screen').classList.remove('active');
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').classList.add('active');
+  // Set sidebar user info
+  document.getElementById('sidebar-name').textContent = user.name || user.email;
+  document.getElementById('sidebar-role').textContent = user.role || 'user';
+  document.getElementById('sidebar-avatar').textContent = (user.name || user.email || 'U')[0].toUpperCase();
+  // Load dashboard
+  showPage('dashboard');
+}
+
+function persistSession(session) {
+  token = session.accessToken;
+  user = {
+    userId: session.userId,
+    email: session.email,
+    name: session.name,
+    tenantId: session.tenantId,
+    tenantName: session.tenantName || '',
+    role: session.role,
+    voiceExtension: session.voiceExtension || null,
+    plan: session.plan || 'starter',
+    maxUsers: session.maxUsers || 5,
+    maxNumbers: session.maxNumbers || 2,
+  };
+  localStorage.setItem('mv_token', token);
+  localStorage.setItem('mv_user', JSON.stringify(user));
+}
+
+function stopBootstrapPolling() {
+  if (bootstrapPollTimer) {
+    clearInterval(bootstrapPollTimer);
+    bootstrapPollTimer = null;
+  }
+}
+
+function getBootstrapCompletion(readiness) {
+  const checks = [
+    readiness?.settings,
+    readiness?.extension,
+    readiness?.number,
+    readiness?.routing,
+  ];
+  const done = checks.filter(Boolean).length;
+  return Math.max(12, Math.round((done / checks.length) * 100));
+}
+
+function markSetupStep(id, done) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('done', Boolean(done));
+}
+
+function renderBootstrapState(bootstrap) {
+  const readiness = bootstrap?.readiness || {};
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').classList.remove('active');
+  document.getElementById('setup-screen').classList.add('active');
+
+  document.getElementById('setup-title').textContent =
+    bootstrap?.status === 'ready'
+      ? 'Your phone system is ready'
+      : 'Building your phone system';
+  document.getElementById('setup-subtitle').textContent =
+    bootstrap?.status === 'ready'
+      ? 'Everything is live. We are loading your workspace now.'
+      : 'We are assigning your extension, main number, and inbound routing so you can start using MigraVoice right away.';
+  document.getElementById('setup-note').textContent =
+    bootstrap?.nextAction || 'Finishing the last steps of your setup.';
+  document.getElementById('setup-progress-bar').style.width = getBootstrapCompletion(readiness) + '%';
+
+  const extension = bootstrap?.workspace?.mainExtension;
+  const mainNumber = bootstrap?.workspace?.mainNumber;
+  const routeValue = bootstrap?.workspace?.destinationValue;
+
+  const extensionEl = document.getElementById('setup-extension');
+  extensionEl.textContent = readiness.extension ? extension : 'Provisioning...';
+  extensionEl.classList.toggle('pending', !readiness.extension);
+
+  const numberEl = document.getElementById('setup-number');
+  numberEl.textContent = readiness.number ? mainNumber : 'Finding number...';
+  numberEl.classList.toggle('pending', !readiness.number);
+
+  const routeEl = document.getElementById('setup-route');
+  routeEl.textContent = readiness.routing ? `Route to ${routeValue}` : 'Configuring route...';
+  routeEl.classList.toggle('pending', !readiness.routing);
+
+  markSetupStep('setup-step-settings', readiness.settings);
+  markSetupStep('setup-step-extension', readiness.extension);
+  markSetupStep('setup-step-number', readiness.number);
+  markSetupStep('setup-step-routing', readiness.routing);
+}
+
+async function fetchBootstrap() {
+  const data = await apiFetch('/auth/bootstrap');
+  return data.bootstrap || null;
+}
+
+async function startBootstrapFlow(initialBootstrap = null) {
+  let bootstrap = initialBootstrap;
+
+  if (!bootstrap) {
+    try {
+      bootstrap = await fetchBootstrap();
+    } catch (err) {
+      handleLogout();
+      showToast('Your session expired. Please sign in again.', 'error');
+      return;
+    }
+  }
+
+  if (bootstrap?.workspace?.mainExtension) {
+    user.voiceExtension = bootstrap.workspace.mainExtension;
+    localStorage.setItem('mv_user', JSON.stringify(user));
+  }
+
+  if (bootstrap?.status === 'ready' && bootstrap?.readiness?.ready) {
+    enterApp();
+    return;
+  }
+
+  renderBootstrapState(bootstrap);
+  stopBootstrapPolling();
+  bootstrapPollTimer = setInterval(async () => {
+    try {
+      const nextBootstrap = await fetchBootstrap();
+      renderBootstrapState(nextBootstrap);
+      if (nextBootstrap?.workspace?.mainExtension) {
+        user.voiceExtension = nextBootstrap.workspace.mainExtension;
+        localStorage.setItem('mv_user', JSON.stringify(user));
+      }
+      if (nextBootstrap?.status === 'ready' && nextBootstrap?.readiness?.ready) {
+        enterApp();
+      }
+    } catch (err) {
+      stopBootstrapPolling();
+      showToast('Setup check failed. Please refresh the portal.', 'error');
+    }
+  }, 4000);
+}
+
+// ==================== NAVIGATION ====================
+function showPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.page-section').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+  document.getElementById('page-' + page).classList.add('active');
+
+  // Load data for page
+  const loaders = {
+    dashboard: loadDashboard,
+    users: loadUsers,
+    numbers: loadNumbers,
+    plan: loadPlan,
+    settings: loadSettings,
+  };
+  if (loaders[page]) loaders[page]();
+}
+
+// ==================== API ====================
+async function apiFetch(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.message || 'Request failed');
+  return data;
+}
+
+// ==================== DASHBOARD ====================
+async function loadDashboard() {
+  try {
+    const dash = await apiFetch('/client/dashboard');
+    const t = dash.tenant || {};
+    document.getElementById('sidebar-tenant').textContent = t.name || '';
+    document.getElementById('dash-stats').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-label">Plan</div>
+        <div class="stat-value" style="font-size:1.25rem; text-transform:capitalize;">${t.plan || 'starter'}</div>
+        <div class="stat-sub">${t.status || 'active'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Users</div>
+        <div class="stat-value">${dash.userCount ?? 0}</div>
+        <div class="stat-sub">of ${t.maxusers || '∞'} allowed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Phone Numbers</div>
+        <div class="stat-value">${dash.numberCount ?? 0}</div>
+        <div class="stat-sub">of ${t.maxnumbers || '∞'} allowed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Extensions</div>
+        <div class="stat-value">${dash.extensionCount ?? dash.userCount ?? 0}</div>
+        <div class="stat-sub">active PBX extensions</div>
+      </div>
+    `;
+  } catch (err) {
+    showToast('Failed to load dashboard: ' + err.message, 'error');
+  }
+}
+
+// ==================== USERS ====================
+async function loadUsers() {
+  try {
+    const data = await apiFetch('/client/users');
+    const users = data.users || data || [];
+    const tbody = document.getElementById('users-table');
+    const empty = document.getElementById('users-empty');
+    if (users.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = users.map(u => `
+      <tr>
+        <td>${esc(u.name || u.displayName || '—')}</td>
+        <td>${esc(u.email || '—')}</td>
+        <td><code style="background:rgba(139,92,246,0.15);padding:2px 8px;border-radius:4px;color:var(--brand-light);">${esc(u.voiceExtension || u.extension || '—')}</code></td>
+        <td><span class="badge badge-${u.role === 'admin' ? 'purple' : 'info'}">${esc(u.role || 'user')}</span></td>
+        <td><span class="badge badge-success">Active</span></td>
+        <td>${user.role === 'admin' && u.id !== user.userId ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">Remove</button>` : ''}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    showToast('Failed to load users: ' + err.message, 'error');
+  }
+}
+
+function openAddUserModal() {
+  document.getElementById('add-user-form').reset();
+  openModal('modal-add-user');
+}
+
+async function handleAddUser(e) {
+  e.preventDefault();
+  try {
+    await apiFetch('/client/users', 'POST', {
+      name: document.getElementById('au-name').value,
+      email: document.getElementById('au-email').value,
+      voiceExtension: document.getElementById('au-extension').value,
+      role: document.getElementById('au-role').value,
+      password: document.getElementById('au-password').value,
+    });
+    closeModal('modal-add-user');
+    showToast('User added successfully', 'success');
+    loadUsers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteUser(id) {
+  if (!confirm('Remove this user?')) return;
+  try {
+    await apiFetch('/client/users/' + id, 'DELETE');
+    showToast('User removed', 'success');
+    loadUsers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ==================== NUMBERS ====================
+async function loadNumbers() {
+  try {
+    const data = await apiFetch('/client/numbers');
+    const nums = data.numbers || data || [];
+    const tbody = document.getElementById('numbers-table');
+    const empty = document.getElementById('numbers-empty');
+    if (nums.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = nums.map(n => `
+      <tr>
+        <td class="phone-num" style="font-family:monospace;font-weight:600;">${esc(n.e164Number || n.phoneNumber || '—')}</td>
+        <td><span class="badge badge-info">${esc(n.numberType || 'local')}</span></td>
+        <td>${esc([n.city, n.region, n.country].filter(Boolean).join(', ') || '—')}</td>
+        <td><span class="badge badge-${n.status === 'ASSIGNED' || n.status === 'active' ? 'success' : 'warning'}">${esc(n.status || 'active')}</span></td>
+        <td>${n.monthlyCostUsd ? '$' + Number(n.monthlyCostUsd).toFixed(2) : '—'}</td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    showToast('Failed to load numbers: ' + err.message, 'error');
+  }
+}
+
+function openSearchNumbersModal() {
+  document.getElementById('ns-results').innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:2rem;">Search for available numbers above</div>';
+  openModal('modal-search-numbers');
+}
+
+async function searchNumbers() {
+  const country = document.getElementById('ns-country').value;
+  const area = document.getElementById('ns-area').value;
+  const contains = document.getElementById('ns-contains').value;
+  const resultsEl = document.getElementById('ns-results');
+  resultsEl.innerHTML = '<div style="text-align:center;padding:1.5rem;"><span class="spinner"></span> Searching...</div>';
+
+  try {
+    const params = new URLSearchParams({ country_code: country });
+    if (area) params.set('area_code', area);
+    if (contains) params.set('contains', contains);
+    const data = await apiFetch('/client/numbers/search?' + params.toString());
+    const numbers = data.numbers || [];
+    if (numbers.length === 0) {
+      resultsEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:2rem;">No numbers found. Try different search criteria.</div>';
+      return;
+    }
+    resultsEl.innerHTML = numbers.map(n => `
+      <div class="number-result">
+        <div>
+          <div class="phone-num">${esc(n.phone_number || n.phoneNumber || n.e164)}</div>
+          <div class="phone-loc">${esc([n.locality || n.city, n.region, n.country_code].filter(Boolean).join(', '))}</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="purchaseNumber('${esc(n.phone_number || n.phoneNumber || n.e164)}')">Get Number</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    resultsEl.innerHTML = '<div style="color:var(--error);padding:1rem;">' + esc(err.message) + '</div>';
+  }
+}
+
+async function purchaseNumber(phoneNumber) {
+  if (!confirm('Purchase ' + phoneNumber + '?')) return;
+  try {
+    await apiFetch('/client/numbers/purchase', 'POST', { phoneNumber });
+    showToast('Number ' + phoneNumber + ' purchased!', 'success');
+    closeModal('modal-search-numbers');
+    loadNumbers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ==================== PLAN ====================
+async function loadPlan() {
+  try {
+    const data = await apiFetch('/client/plan');
+    const t = data.tenant || data;
+    const planNames = { starter: 'Starter', professional: 'Professional', enterprise: 'Enterprise' };
+    const planPrices = { starter: 29, professional: 79, enterprise: 199 };
+    const plan = t.plan || 'starter';
+    const maxU = t.maxusers || 5;
+    const maxN = t.maxnumbers || 2;
+    const usedU = data.usage?.users ?? data.userCount ?? 0;
+    const usedN = data.usage?.numbers ?? data.numberCount ?? 0;
+
+    document.getElementById('plan-stats').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-label">Current Plan</div>
+        <div class="stat-value" style="font-size:1.35rem;">${planNames[plan] || plan}</div>
+        <div class="stat-sub">$${planPrices[plan] || 0}/month</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Status</div>
+        <div class="stat-value" style="font-size:1.35rem; color:var(--success);">Active</div>
+        <div class="stat-sub">${t.status || 'active'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Max Users</div>
+        <div class="stat-value">${maxU}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Max Numbers</div>
+        <div class="stat-value">${maxN}</div>
+      </div>
+    `;
+
+    const pctU = Math.min(100, Math.round((usedU / maxU) * 100));
+    const pctN = Math.min(100, Math.round((usedN / maxN) * 100));
+    document.getElementById('plan-usage').innerHTML = `
+      <div style="margin-bottom:1.5rem;">
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:0.25rem;">
+          <span>Users</span><span>${usedU} / ${maxU}</span>
+        </div>
+        <div class="usage-bar-bg"><div class="usage-bar" style="width:${pctU}%;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:0.25rem;">
+          <span>Phone Numbers</span><span>${usedN} / ${maxN}</span>
+        </div>
+        <div class="usage-bar-bg"><div class="usage-bar" style="width:${pctN}%;"></div></div>
+      </div>
+    `;
+  } catch (err) {
+    showToast('Failed to load plan: ' + err.message, 'error');
+  }
+}
+
+// ==================== SETTINGS ====================
+async function loadSettings() {
+  try {
+    const data = await apiFetch('/client/dashboard');
+    const t = data.tenant || {};
+    document.getElementById('set-company').value = t.name || t.company || '';
+    document.getElementById('set-phone').value = t.phone || '';
+    document.getElementById('set-address').value = t.address || '';
+    document.getElementById('set-website').value = t.website || '';
+    document.getElementById('set-billing').value = t.billingemail || '';
+  } catch (err) {
+    showToast('Failed to load settings', 'error');
+  }
+}
+
+async function handleSaveSettings(e) {
+  e.preventDefault();
+  try {
+    await apiFetch('/client/account', 'PATCH', {
+      company: document.getElementById('set-company').value,
+      phone: document.getElementById('set-phone').value,
+      address: document.getElementById('set-address').value,
+      website: document.getElementById('set-website').value,
+      billingEmail: document.getElementById('set-billing').value,
+    });
+    showToast('Settings saved', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ==================== HELPERS ====================
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.className = 'toast toast-' + type;
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => {
+    if (e.target === el) el.classList.remove('open');
+  });
+});
+</script>
+</body>
+</html>

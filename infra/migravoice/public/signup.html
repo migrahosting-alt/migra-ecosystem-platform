@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up — MigraVoice</title>
+  <meta name="description" content="Create your MigraVoice account. Enterprise cloud phone system with VoIP, IVR, and WebRTC softphone.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="/site-config.js"></script>
+  <style>
+    :root {
+      --brand: #8b5cf6;
+      --brand-light: #a78bfa;
+      --brand-dark: #7c3aed;
+      --cyan: #06b6d4;
+      --bg-dark: #020617;
+      --bg-card: rgba(255,255,255,0.04);
+      --border: rgba(255,255,255,0.08);
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --success: #10b981;
+      --error: #ef4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background: radial-gradient(ellipse at 30% 0%, rgba(139,92,246,0.12) 0%, transparent 60%),
+                  radial-gradient(ellipse at 70% 100%, rgba(6,182,212,0.08) 0%, transparent 50%),
+                  var(--bg-dark);
+    }
+    .signup-container {
+      width: 100%;
+      max-width: 480px;
+    }
+    .logo-area {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .logo-area h1 {
+      font-size: 2rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .logo-area p {
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      font-size: 0.95rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      backdrop-filter: blur(20px);
+    }
+    .plan-selector {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .plan-option {
+      padding: 0.75rem 0.35rem;
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: transparent;
+      color: var(--text);
+    }
+    .plan-option:hover {
+      border-color: var(--brand-light);
+    }
+    .plan-option.active {
+      border-color: var(--brand);
+      background: rgba(139, 92, 246, 0.1);
+    }
+    .plan-option .plan-name {
+      font-weight: 700;
+      font-size: 0.85rem;
+      margin-bottom: 0.2rem;
+    }
+    .plan-option .plan-price {
+      font-size: 1.1rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--brand), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .plan-option .plan-desc {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: white;
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus {
+      border-color: var(--brand);
+    }
+    .form-group input::placeholder {
+      color: #475569;
+    }
+    .form-group select {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: white;
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group select:focus {
+      border-color: var(--brand);
+    }
+    .helper-copy {
+      margin-top: 0.4rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+    .btn-submit {
+      width: 100%;
+      padding: 0.875rem;
+      background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 0.5rem;
+    }
+    .btn-submit:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 25px rgba(139,92,246,0.3);
+    }
+    .btn-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .error-msg {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .success-msg {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+      padding: 1.5rem;
+      border-radius: 12px;
+      text-align: center;
+      display: none;
+    }
+    .success-msg h3 {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+    .success-msg p {
+      font-size: 0.9rem;
+      color: #a7f3d0;
+    }
+    .success-msg .status-line {
+      margin-top: 0.85rem;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+    }
+    .success-msg .btn-portal {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.75rem 2rem;
+      background: var(--brand);
+      color: white;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .success-msg .btn-portal:hover {
+      background: var(--brand-dark);
+    }
+    .footer-text {
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .footer-text a {
+      color: var(--brand-light);
+      text-decoration: none;
+    }
+    .footer-text a:hover {
+      text-decoration: underline;
+    }
+    .terms {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 1rem;
+    }
+    .terms a {
+      color: var(--brand-light);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="signup-container">
+    <div class="logo-area">
+      <h1>MigraVoice</h1>
+      <p>Create your business phone system in minutes</p>
+    </div>
+
+    <div class="card" id="signup-card">
+      <!-- Plan Selector -->
+      <div class="plan-selector">
+        <div class="plan-option active" data-plan="starter" onclick="selectPlan('starter')">
+          <div class="plan-name">Starter</div>
+          <div class="plan-price">$24.99</div>
+          <div class="plan-desc">5 users · 2 numbers</div>
+        </div>
+        <div class="plan-option" data-plan="business" onclick="selectPlan('business')">
+          <div class="plan-name">Business</div>
+          <div class="plan-price">$79.99</div>
+          <div class="plan-desc">25 users · 10 numbers</div>
+        </div>
+        <div class="plan-option" data-plan="professional" onclick="selectPlan('professional')">
+          <div class="plan-name">Professional</div>
+          <div class="plan-price">$179.99</div>
+          <div class="plan-desc">75 users · 30 numbers</div>
+        </div>
+        <div class="plan-option" data-plan="enterprise" onclick="selectPlan('enterprise')">
+          <div class="plan-name">Enterprise</div>
+          <div class="plan-price">$349+</div>
+          <div class="plan-desc">sales-led · 200 users</div>
+        </div>
+      </div>
+
+      <div class="error-msg" id="error-msg"></div>
+
+      <form id="signup-form" onsubmit="handleSignup(event)">
+        <div class="form-group">
+          <label>Company Name</label>
+          <input type="text" id="company" placeholder="Acme Corp" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>First Name</label>
+            <input type="text" id="firstName" placeholder="John" required>
+          </div>
+          <div class="form-group">
+            <label>Last Name</label>
+            <input type="text" id="lastName" placeholder="Doe" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Work Email</label>
+          <input type="email" id="email" placeholder="john@acme.com" required>
+        </div>
+
+        <div class="form-group">
+          <label>Mobile Phone</label>
+          <input type="tel" id="phone" placeholder="+1 (555) 123-4567">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Main Number Type</label>
+            <select id="numberType" onchange="handleNumberTypeChange()">
+              <option value="local">Local number</option>
+              <option value="toll_free">Toll-free number</option>
+            </select>
+            <div class="helper-copy">Pick the first public number we should activate during provisioning.</div>
+          </div>
+          <div class="form-group" id="area-code-group">
+            <label>Preferred Area Code</label>
+            <input type="text" id="areaCode" placeholder="305" inputmode="numeric" maxlength="3">
+            <div class="helper-copy">Used for local number search when available.</div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="password" placeholder="Min 8 characters" minlength="8" required>
+        </div>
+
+        <div class="form-group">
+          <label>Confirm Password</label>
+          <input type="password" id="confirmPassword" placeholder="Repeat password" minlength="8" required>
+        </div>
+
+        <div class="form-group" style="margin-top:0.5rem">
+          <label style="display:flex;align-items:flex-start;gap:0.5rem;cursor:pointer;font-size:0.8rem;color:var(--text-muted)">
+            <input type="checkbox" id="smsMarketingConsent" style="width:16px;height:16px;margin-top:2px;accent-color:var(--brand-light)">
+            <span>I agree to receive optional SMS and MMS marketing messages, updates, and offers from MigraVoice. Message frequency may vary. Message and data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of purchase. <a href="/sms-terms.html" data-site-link="smsTerms" target="_blank" style="color:var(--brand-light)">SMS Terms</a></span>
+          </label>
+        </div>
+
+        <button type="submit" class="btn-submit" id="submit-btn">
+          Continue to Secure Checkout
+        </button>
+
+        <div class="terms">
+          By signing up, you agree to our <a href="/sms-terms.html" data-site-link="smsTerms">Terms of Service</a> and <a href="/sms-terms.html" data-site-link="smsTerms">Privacy Policy</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="success-msg" id="success-msg">
+      <h3>🎉 Welcome to MigraVoice!</h3>
+      <p id="success-copy">Your account is live. We are taking you into the portal and finishing the phone system setup automatically.</p>
+      <div class="status-line" id="success-status">Preparing your workspace...</div>
+      <a href="/portal.html" data-site-link="clientPortal" class="btn-portal">Go to Portal →</a>
+      <br>
+      <a href="https://call.migrahosting.com" data-site-link="softphone" class="btn-portal" style="background: var(--cyan); margin-left: 0.5rem;">Open Softphone →</a>
+    </div>
+
+    <div class="footer-text">
+      Already have an account? <a href="/portal.html" data-site-link="clientPortal">Sign in</a>
+      <br><br>
+      <a href="/" data-site-link="home" style="color: var(--text-muted);">← Back to MigraVoice.com</a>
+    </div>
+  </div>
+
+  <script>
+    if (window.applyMigraVoiceSiteConfig) {
+      window.applyMigraVoiceSiteConfig(document);
+    }
+
+    let selectedPlan = 'starter';
+    let redirectTimer = null;
+
+    function selectPlan(plan) {
+      selectedPlan = plan;
+      document.querySelectorAll('.plan-option').forEach(el => {
+        el.classList.toggle('active', el.dataset.plan === plan);
+      });
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('error-msg').style.display = 'none';
+    }
+
+    function showSignupSuccess(message) {
+      document.getElementById('signup-card').style.display = 'none';
+      document.getElementById('success-msg').style.display = 'block';
+      document.getElementById('success-status').textContent = message;
+    }
+
+    function handleNumberTypeChange() {
+      const numberType = document.getElementById('numberType').value;
+      const areaCodeGroup = document.getElementById('area-code-group');
+      areaCodeGroup.style.display = numberType === 'toll_free' ? 'none' : 'block';
+    }
+
+    function schedulePortalRedirect(delayMs = 1800) {
+      if (redirectTimer) {
+        clearTimeout(redirectTimer);
+      }
+      redirectTimer = setTimeout(() => {
+        if (window.getMigraVoiceLink) {
+          window.location.href = window.getMigraVoiceLink('clientPortalWelcome', '/portal.html?welcome=1');
+          return;
+        }
+        window.location.href = '/portal.html?welcome=1';
+      }, delayMs);
+    }
+
+    function wait(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function finalizePaidSignup() {
+      const token = localStorage.getItem('mv_token') || localStorage.getItem('mv_portal_token');
+      if (!token) {
+        showError('Payment succeeded, but this browser no longer has your signup session. Sign in to finish provisioning.');
+        return;
+      }
+
+      hideError();
+      showSignupSuccess('Confirming your payment and provisioning your phone system...');
+
+      for (let attempt = 1; attempt <= 8; attempt += 1) {
+        document.getElementById('success-status').textContent = attempt === 1
+          ? 'MigraPay confirmed your checkout. Finishing your phone system setup now...'
+          : `Waiting for MigraPay subscription sync... attempt ${attempt} of 8`;
+
+        try {
+          const resp = await fetch('/auth/complete-signup', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({}),
+          });
+
+          const data = await resp.json().catch(() => ({}));
+          if (resp.ok) {
+            document.getElementById('success-copy').textContent = 'Your MigraVoice subscription is active and your workspace is ready.';
+            document.getElementById('success-status').textContent = data.bootstrap?.nextAction || 'Provisioning complete.';
+            schedulePortalRedirect(1400);
+            return;
+          }
+
+          if (resp.status === 409 && data.status === 'pending_payment_sync') {
+            await wait(1800);
+            continue;
+          }
+
+          throw new Error(data.error || data.message || 'We could not finish provisioning after payment.');
+        } catch (err) {
+          showError(err.message);
+          document.getElementById('signup-card').style.display = 'block';
+          document.getElementById('success-msg').style.display = 'none';
+          return;
+        }
+      }
+
+      showError('Payment succeeded, but MigraPay is still syncing the subscription. Wait a moment, then sign in to finish setup.');
+      document.getElementById('signup-card').style.display = 'block';
+      document.getElementById('success-msg').style.display = 'none';
+    }
+
+    async function handleSignup(e) {
+      e.preventDefault();
+      hideError();
+
+      const company = document.getElementById('company').value.trim();
+      const firstName = document.getElementById('firstName').value.trim();
+      const lastName = document.getElementById('lastName').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const phone = document.getElementById('phone').value.trim();
+      const numberType = document.getElementById('numberType').value;
+      const areaCode = document.getElementById('areaCode').value.trim();
+      const smsMarketingConsent = document.getElementById('smsMarketingConsent').checked;
+      const password = document.getElementById('password').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+
+      if (password !== confirmPassword) {
+        showError('Passwords do not match');
+        return;
+      }
+
+      if (password.length < 8) {
+        showError('Password must be at least 8 characters');
+        return;
+      }
+
+      if (smsMarketingConsent && !phone) {
+        showError('A mobile phone number is required if you want SMS marketing updates');
+        return;
+      }
+
+      if (numberType === 'local' && areaCode && !/^\d{3}$/.test(areaCode)) {
+        showError('Preferred area code must be 3 digits');
+        return;
+      }
+
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Preparing checkout...';
+
+      try {
+        const resp = await fetch('/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            companyName: company,
+            fullName: `${firstName} ${lastName}`,
+            email,
+            phone,
+            smsMarketingConsent,
+            password,
+            plan: selectedPlan,
+            billingInterval: 'month',
+            numberType,
+            areaCode,
+          }),
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          throw new Error(data.error || data.message || 'Registration failed');
+        }
+
+        // Store token for portal access
+        if (data.session?.accessToken) {
+          const portalUser = {
+            userId: data.session.userId,
+            id: data.session.userId,
+            email: data.session.email,
+            name: data.session.name,
+            tenantId: data.session.tenantId,
+            tenantName: data.session.tenantName || company,
+            role: data.session.role,
+            voiceExtension: data.session.voiceExtension || null,
+            plan: data.session.plan || selectedPlan,
+            maxUsers: data.session.maxUsers || 5,
+            maxNumbers: data.session.maxNumbers || 2,
+          };
+          localStorage.setItem('mv_token', data.session.accessToken);
+          localStorage.setItem('mv_portal_token', data.session.accessToken);
+          localStorage.setItem('mv_user', JSON.stringify(portalUser));
+          localStorage.setItem('mv_portal_user', JSON.stringify(portalUser));
+        }
+
+        if (data.checkout?.url) {
+          showSignupSuccess('Redirecting you to secure checkout. Provisioning will start automatically as soon as payment succeeds.');
+          window.location.href = data.checkout.url;
+          return;
+        }
+
+        const bootstrap = data.bootstrap || null;
+        showSignupSuccess(bootstrap?.nextAction || 'Your account is ready. Redirecting to the portal now.');
+        schedulePortalRedirect(1200);
+
+      } catch (err) {
+        showError(err.message);
+        btn.disabled = false;
+        btn.textContent = 'Continue to Secure Checkout';
+      }
+    }
+
+    handleNumberTypeChange();
+
+    const initialParams = new URLSearchParams(window.location.search);
+    if (initialParams.get('billing') === 'success') {
+      finalizePaidSignup();
+    }
+  </script>
+</body>
+</html>
