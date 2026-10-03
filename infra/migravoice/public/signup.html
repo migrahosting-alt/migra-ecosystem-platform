@@ -363,13 +363,13 @@
       <h3>🎉 Welcome to MigraVoice!</h3>
       <p id="success-copy">Your account is live. We are taking you into the portal and finishing the phone system setup automatically.</p>
       <div class="status-line" id="success-status">Preparing your workspace...</div>
-      <a href="/portal.html" data-site-link="clientPortal" class="btn-portal">Go to Portal →</a>
+      <a href="https://control.migrahosting.com/client/" data-site-link="clientPortal" class="btn-portal">Go to Portal →</a>
       <br>
       <a href="https://call.migrahosting.com" data-site-link="softphone" class="btn-portal" style="background: var(--cyan); margin-left: 0.5rem;">Open Softphone →</a>
     </div>
 
     <div class="footer-text">
-      Already have an account? <a href="/portal.html" data-site-link="clientPortal">Sign in</a>
+      Already have an account? <a href="https://control.migrahosting.com/client/" data-site-link="clientPortal">Sign in</a>
       <br><br>
       <a href="/" data-site-link="home" style="color: var(--text-muted);">← Back to MigraVoice.com</a>
     </div>
@@ -418,10 +418,10 @@
       }
       redirectTimer = setTimeout(() => {
         if (window.getMigraVoiceLink) {
-          window.location.href = window.getMigraVoiceLink('clientPortalWelcome', '/portal.html?welcome=1');
+          window.location.href = window.getMigraVoiceLink('clientPortalWelcome', 'https://control.migrahosting.com/client/?welcome=1');
           return;
         }
-        window.location.href = '/portal.html?welcome=1';
+        window.location.href = 'https://control.migrahosting.com/client/?welcome=1';
       }, delayMs);
     }
 

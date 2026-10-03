@@ -1,12 +1,11 @@
 (function initMigraVoiceSiteConfig() {
   const config = {
     links: {
-      adminPortal: '/portal/',
       bundleEnterpriseCheckout: 'https://www.migrahosting.com/checkout?bundle=bundle-enterprise',
       bundleGrowthCheckout: 'https://www.migrahosting.com/checkout?bundle=bundle-growth',
       bundleStarterCheckout: 'https://www.migrahosting.com/checkout?bundle=bundle-starter',
-      clientPortal: '/portal.html',
-      clientPortalWelcome: '/portal.html?welcome=1',
+      clientPortal: 'https://control.migrahosting.com/client/',
+      clientPortalWelcome: 'https://control.migrahosting.com/client/?welcome=1',
       home: '/',
       migrahostingVoice: 'https://www.migrahosting.com/voice',
       salesEmail: 'mailto:sales@migrahosting.com',
@@ -17,7 +16,6 @@
       supportEmail: 'mailto:support@migrahosting.com'
     },
     labels: {
-      adminPortal: 'Admin Portal',
       clientPortal: 'Client Portal'
     }
   };
