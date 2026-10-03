@@ -6,7 +6,7 @@ import { planNumberOrder, missingConfig } from "../../lib/modules/number-orderin
 import { ConsolePageShell } from "../../components/ConsolePageShell";
 import { FormShell, Field } from "../../components/FormShell";
 import { SectionCard } from "../../components/SectionCard";
-import { DataTable, StatusPill } from "../../components/DataTable";
+import { DataTable } from "../../components/DataTable";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +33,19 @@ const runSearch = async (formData: FormData) => {
   redirect(`/console/voice/new?${params.toString()}`);
 };
 
-const money = (amount: string | null, currency: string | null) =>
-  amount === null ? "—" : `${currency === "USD" || !currency ? "$" : `${currency} `}${amount}`;
+/**
+ * Renders a provider amount as money. Telnyx returns five decimal places
+ * ("1.00000"); showing that on a buy screen looks like a bug and makes two
+ * prices hard to compare at a glance. A non-numeric or absent amount stays an
+ * em dash, which reads as unknown rather than as zero.
+ */
+const money = (amount: string | null, currency: string | null) => {
+  if (amount === null) return "—";
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return "—";
+  const symbol = currency === "USD" || !currency ? "$" : `${currency} `;
+  return `${symbol}${n.toFixed(2)}`;
+};
 
 export default async function NewVoiceNumberPage({
   searchParams,
@@ -148,7 +159,7 @@ export default async function NewVoiceNumberPage({
             {outcome.detail}
           </p>
           <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-            This is <strong>not</strong> the same as &ldquo;no numbers are available&rdquo;. The
+            This is <strong>not</strong>{" "}the same as &ldquo;no numbers are available&rdquo;. The
             search did not complete, so availability in {areaCode || "this area code"} is unknown.
           </p>
         </SectionCard>
@@ -194,8 +205,17 @@ export default async function NewVoiceNumberPage({
                 { key: "upfront", header: "Upfront", render: (n) => money(n.upfrontCost, n.currency) },
                 {
                   key: "e911",
-                  header: "911",
-                  render: (n) => <StatusPill status={n.emergencyCapable ? "active" : "paused"} />,
+                  header: "911 capable",
+                  // Deliberately NOT a green "Active" pill. The provider is
+                  // telling us the number CAN carry emergency service; it says
+                  // nothing about whether an emergency address is registered
+                  // and validated. Showing "Active" here would claim 911 works
+                  // on a number that cannot dial it.
+                  render: (n) => (
+                    <span className={n.emergencyCapable ? "text-slate-200" : "text-amber-300"}>
+                      {n.emergencyCapable ? "Capable" : "Not capable"}
+                    </span>
+                  ),
                 },
                 {
                   key: "reservable",
@@ -216,6 +236,12 @@ export default async function NewVoiceNumberPage({
                 {outcome.plan.identityStamp.connectionId ?? "— none configured —"}
               </span>
               .
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+              <strong className="text-slate-300">911 capable</strong> means the provider can carry
+              emergency service on the number. It is{" "}
+              <strong className="text-slate-300">not</strong>{" "}the same as 911 being enabled: that needs a registered, validated emergency address,
+              which is enrolled separately after purchase. No number on this account has one today.
             </p>
             <p className="mt-2 text-[11px] leading-relaxed text-amber-300">
               Ordering is not wired yet. Nothing on this page buys a number — order it with the
