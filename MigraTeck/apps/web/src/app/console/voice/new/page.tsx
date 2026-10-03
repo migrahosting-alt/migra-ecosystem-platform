@@ -1,43 +1,36 @@
 import { redirect } from "next/navigation";
-import { randomUUID } from "node:crypto";
 
 import { getSession } from "../../lib/auth";
-import { panelExec, panelQuery } from "../../lib/db";
+import { panelQuery } from "../../lib/db";
 import { ConsolePageShell } from "../../components/ConsolePageShell";
 import { FormShell, Field } from "../../components/FormShell";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Number ordering is not connected.
+ *
+ * This action used to INSERT a `voice.number.purchase` row into
+ * `provisioning_tasks` and then redirect to the Voice list, which reads as a
+ * completed purchase. Nothing consumes that task type: a repo-wide search
+ * finds this INSERT and no reader, and `provisioning_tasks` holds zero rows
+ * estate-wide, so no operator has yet been misled by it.
+ *
+ * Refusing is the honest behaviour until ordering is wired to a provider.
+ * Queueing work that never runs is worse than declining it, because the
+ * operator walks away believing a number is on its way.
+ */
 async function createVoiceNumber(formData: FormData) {
   "use server";
 
-  const tenantId = String(formData.get("tenantId") || "").trim();
-  const areaCode = String(formData.get("areaCode") || "").trim();
-  const numberType = String(formData.get("numberType") || "local");
-  const provider = String(formData.get("provider") || "auto");
+  void formData;
 
-  if (!tenantId || !areaCode) {
-    redirect(`/console/voice/new?error=${encodeURIComponent("Client and area code are required")}`);
-  }
-  if (!/^\d{3}$/.test(areaCode) && numberType === "local") {
-    redirect(`/console/voice/new?error=${encodeURIComponent("Area code must be 3 digits")}`);
-  }
-
-  try {
-    // Queue the request via provisioning_tasks; a worker calls the upstream provider
-    // and then INSERTs into business_phone_numbers on success.
-    const trackingId = randomUUID();
-    await panelExec(
-      `INSERT INTO provisioning_tasks (id, "tenantId", "serviceInstanceId", type, status, "idempotencyKey", "createdAt")
-       VALUES ($1, $2, $3, 'voice.number.purchase', 'queued', $4, NOW())`,
-      [randomUUID(), tenantId, trackingId, randomUUID()],
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "create_failed";
-    redirect(`/console/voice/new?error=${encodeURIComponent(msg)}`);
-  }
-
-  redirect(`/console/voice`);
+  redirect(
+    `/console/voice/new?error=${encodeURIComponent(
+      "Number ordering is not connected yet. Nothing was purchased and nothing was queued. " +
+        "Order the number with the provider directly, then assign it to the client from the Voice module.",
+    )}`,
+  );
 }
 
 export default async function NewVoiceNumberPage({
@@ -58,12 +51,12 @@ export default async function NewVoiceNumberPage({
       <FormShell
         backHref="/console/voice"
         backLabel="Back to Voice"
-        title="Purchase a new phone number"
-        description="Queues a number-purchase request with the upstream voice provider (Twilio / Telnyx). The number appears in the Voice module once the purchase completes."
+        title="Add a phone number"
+        description="Ordering numbers from a provider is not connected yet. Buy the number with the provider directly, then assign it to a client from the Voice module."
         error={sp.error || null}
-        notice="Purchase typically completes within 30 seconds. If the area code is exhausted, the worker retries adjacent area codes."
+        notice="Submitting this form does not order anything. It is kept here so the fields are ready when ordering is connected."
         action={createVoiceNumber}
-        submitLabel="Purchase Number"
+        submitLabel="Add Number"
       >
         <Field
           label="Client"
