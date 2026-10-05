@@ -24,7 +24,6 @@ import Link from "next/link";
 import { Button, PasswordInput, Input, toBrandStyle } from "@migrateck/auth-ui";
 import { authFetch } from "@/lib/api";
 import { resolveAuthBrandTheme } from "@/lib/branding";
-import { useRegistryBrand } from "@/lib/useRegistryBrand";
 
 type SecurityFacts = {
   /**
@@ -82,26 +81,15 @@ function describeFailure(code: string | undefined, fallback: string | undefined)
 
 export default function PasswordPage() {
   /*
-   * ── THE PRODUCT CONTEXT FOLLOWS YOU INTO ACCOUNT SECURITY ────────────
+   * PARENT IDENTITY SURFACE.
    *
-   * Signing in to MigraPilot shows MigraPilot; opening "Manage password" from
-   * MigraPilot's settings used to drop you into a generic MigraAuth page
-   * mid-journey. Same account, same task, different identity on screen.
-   *
-   * The client id comes from the SESSION, which recorded it when a transaction
-   * was consumed — trusted server state, exactly like /login reads it from the
-   * transaction row. There is deliberately no `client_id` query parameter here:
-   * this page is reached by a plain link, and honouring a URL parameter would
-   * let anyone dress MigraAuth as any product.
-   *
-   * Null — signing in at MigraAuth directly — resolves to MigraAuth's own
-   * brand, which is the honest answer rather than a missing one.
+   * The session's product client is retained only for functional
+   * re-authentication routing after a credential change. It does not control
+   * the branding of this parent MigraTeck security surface.
    */
   const [productClientId, setProductClientId] = useState<string | null>(null);
-  const hardcodedBrand = useMemo(() => resolveAuthBrandTheme(productClientId), [productClientId]);
-  const brand = useRegistryBrand(productClientId, hardcodedBrand);
+  const brand = useMemo(() => resolveAuthBrandTheme("migrateck_web"), []);
   const brandStyle = useMemo(() => toBrandStyle(brand), [brand]);
-  const isProductContext = brand.productKey !== "migraauth";
 
   const [facts, setFacts] = useState<SecurityFacts | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -282,12 +270,8 @@ export default function PasswordPage() {
                   {facts === null
                     ? "Password"
                     : isChange
-                      ? isProductContext
-                        ? `Change your password for ${brand.productName}`
-                        : "Change your password"
-                      : isProductContext
-                        ? `Set a password for ${brand.productName}`
-                        : "Set a password"}
+                      ? "Change your MigraTeck password"
+                      : "Set your MigraTeck password"}
                 </h1>
                 {/*
                   Says "loading" only while it IS loading. Once the request has
@@ -306,11 +290,9 @@ export default function PasswordPage() {
                     */}
                     {loading
                       ? "Loading your account security settings…"
-                      : isProductContext
-                        ? "This password is managed securely by MigraAuth and works with your MigraTeck account."
-                        : isChange
-                          ? "Choose a new password for signing in to your MigraTeck account."
-                          : "Add a password so you can sign in without a connected account."}
+                      : isChange
+                        ? "Choose a new password for signing in to your MigraTeck account."
+                        : "Add a password so you can sign in to your MigraTeck account without a connected provider."}
                   </p>
                 ) : null}
               </div>
@@ -468,11 +450,9 @@ export default function PasswordPage() {
                 surface, where it would only say MigraAuth is secured by
                 MigraAuth. Same rule and same wording as the sign-in footer.
               */}
-              {isProductContext ? (
-                <p className="text-center text-[11px] leading-4 tracking-wide text-white/35">
-                  Secured by MigraAuth
-                </p>
-              ) : null}
+              <p className="text-center text-[11px] leading-4 tracking-wide text-white/35">
+                MigraTeck Identity &amp; Security · powered by MigraAuth
+              </p>
 
               <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-4 text-sm">
                 <Link href="/sessions" className="text-white/50 transition hover:text-white/80">

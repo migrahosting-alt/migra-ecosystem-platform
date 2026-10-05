@@ -98,11 +98,16 @@ export async function socialRoutes(app: FastifyInstance): Promise<void> {
       const resolved = resolveConfiguredProvider(slug);
       if (!resolved) {
         /*
-         * "Not configured" and "not a provider" are the same answer on purpose.
-         * Distinguishing them tells an unauthenticated caller which providers a
-         * deployment has credentials for, which is inventory it has no use for.
+         * A provider failure during an authorization transaction must return to
+         * that transaction's login surface, never to the generic post-login
+         * destination (/sessions). Otherwise a failed child-product sign-in
+         * becomes a parent-account page and loses the flow that needs recovery.
          */
-        return bounce(reply, returnTo, {
+        const failureReturnTo = txn
+          ? `${config.webUrl.replace(/\/+$/, "")}/login?txn=${encodeURIComponent(txn)}`
+          : returnTo;
+
+        return bounce(reply, failureReturnTo, {
           auth_error: describeProvider(slug) ? "provider_unavailable" : "unknown_provider",
         });
       }

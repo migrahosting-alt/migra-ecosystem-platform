@@ -76,6 +76,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const authError = searchParams.get("auth_error");
 
   const urlClientId = searchParams.get("client_id");
   /*
@@ -331,6 +332,14 @@ function LoginForm() {
                     : "Use your MigraTeck account to continue.")}
               </p>
             </div>
+
+            {authError ? (
+              <div className="mb-4 rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm leading-5 text-amber-100">
+                {authError === "provider_unavailable"
+                  ? "That sign-in provider is temporarily unavailable. Use your MigraTeck email and password, or choose another available sign-in method."
+                  : "That external sign-in attempt could not be completed. You can continue with your MigraTeck account instead."}
+              </div>
+            ) : null}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-4">
