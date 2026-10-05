@@ -48,14 +48,19 @@ async function fetchPlatformAuthority(accessToken: string): Promise<PlatformAuth
     cache: "no-store",
   });
 
-  // Most normal customer identities are not platform principals. That is not an
-  // authentication failure and must not break their session bootstrap.
-  if (response.status === 401 || response.status === 403) {
+  // Most normal customer identities are not platform principals. MigraAuth
+  // deliberately returns 404 for this protected admin surface when the caller
+  // has no platform authority, so 404 is an expected "not a platform
+  // principal" result too. Operator enrichment must never break ordinary login.
+  if (response.status === 401 || response.status === 403 || response.status === 404) {
     return null;
   }
 
   if (!response.ok) {
-    throw new Error("Failed to resolve platform authority");
+    console.warn("MigraAuth platform-authority enrichment unavailable", {
+      status: response.status,
+    });
+    return null;
   }
 
   return response.json() as Promise<PlatformAuthorityResponse>;
