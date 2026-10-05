@@ -400,7 +400,7 @@ enum SupportTier {
 
 model User {
   id                       String                   @id @default(cuid())
-  authUserId               String?
+  authUserId               String?                  @unique
   name                     String?
   email                    String?                  @unique
   emailNormalized          String?
@@ -465,6 +465,7 @@ model User {
 
 model Organization {
   id                            String                             @id @default(cuid())
+  authOrganizationId            String?                            @unique
   name                          String
   slug                          String                             @unique
   isMigraHostingClient          Boolean                            @default(false)

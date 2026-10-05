@@ -4,6 +4,7 @@ import { registerDownloadRoutes } from "./modules/downloads.js";
 import { registerProductRoutes } from "./modules/products.js";
 import { registerBillingRoutes } from "./modules/billing.js";
 import { registerBillingAdminRoutes } from "./modules/billing-admin.js";
+import { registerDeveloperRoutes } from "./modules/developer.js";
 
 export async function registerV1Routes(app: FastifyInstance): Promise<void> {
   await app.register(async (instance) => {
@@ -12,6 +13,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     await registerDownloadRoutes(instance);
     await registerBillingRoutes(instance);
     await registerBillingAdminRoutes(instance);
+    await registerDeveloperRoutes(instance);
   }, {
     prefix: "/v1",
   });

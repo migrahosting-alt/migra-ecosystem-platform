@@ -170,10 +170,10 @@ export async function registerBillingRoutes(
       productFamily: body.productFamily,
       planCode: body.planCode,
       billingInterval: body.billingInterval,
-      seatCount: body.seatCount,
+      ...(body.seatCount !== undefined ? { seatCount: body.seatCount } : {}),
       successUrl: body.successUrl,
       cancelUrl: body.cancelUrl,
-      trialDays: body.trialDays,
+      ...(body.trialDays !== undefined ? { trialDays: body.trialDays } : {}),
     });
   });
 

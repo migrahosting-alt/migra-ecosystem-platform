@@ -3,7 +3,18 @@ import type { FastifyRequest } from "fastify";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export function requiresCsrf(request: FastifyRequest): boolean {
-  return !SAFE_METHODS.has(request.method.toUpperCase());
+  if (SAFE_METHODS.has(request.method.toUpperCase())) {
+    return false;
+  }
+
+  // Bearer-authenticated API mutations are not ambient browser authority, so
+  // they are not vulnerable to cookie-based CSRF. Browser/cookie mutations
+  // still require the same-origin CSRF contract below.
+  if (request.headers.authorization?.startsWith("Bearer ")) {
+    return false;
+  }
+
+  return true;
 }
 
 export function hasValidCsrfToken(request: FastifyRequest): boolean {

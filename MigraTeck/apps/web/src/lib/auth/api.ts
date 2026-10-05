@@ -145,7 +145,7 @@ export async function fetchPlatformApi<T = unknown>(
   options: RequestInit = {},
 ): Promise<{ data: T; ok: true } | { error: string; status: number; ok: false }> {
   const token = await getAccessToken();
-  const baseUrl = process.env.MIGRATECK_API_URL ?? "http://localhost:4000";
+  const baseUrl = process.env.MIGRATECK_PLATFORM_API_URL ?? process.env.MIGRATECK_API_URL ?? "http://127.0.0.1:4010";
   const headers = new Headers(options.headers);
   if (!headers.has("Content-Type") && options.body !== undefined) {
     headers.set("Content-Type", "application/json");

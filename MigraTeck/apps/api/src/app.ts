@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { hasValidCsrfToken, requiresCsrf } from "./lib/csrf.js";
 import { enforceRateLimit } from "./lib/rate-limit.js";
 import { registerV1Routes } from "./routes/v1/index.js";
+import { getDb } from "./lib/db.js";
 
 function logError(message: string, extra?: Record<string, unknown>): void {
   console.error(
@@ -46,10 +47,41 @@ export async function buildApiApp(): Promise<FastifyInstance> {
   });
 
   app.get("/health", async () => ({
-    service: "migrateck-api-gateway",
+    service: "migrateck-platform-api",
     status: "ok",
     version: "0.1.0",
   }));
+
+  app.get("/ready", async (_request, reply) => {
+    try {
+      await getDb().query("SELECT 1");
+      const authUrl = (
+        process.env.MIGRAAUTH_API_URL ??
+        process.env.MIGRAAUTH_BASE_URL ??
+        "http://127.0.0.1:4120"
+      ).replace(/\/+$/, "");
+      const auth = await fetch(authUrl + "/health", {
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!auth.ok) {
+        throw new Error("MigraAuth dependency is not ready");
+      }
+
+      return {
+        service: "migrateck-platform-api",
+        status: "ready",
+        dependencies: {
+          database: "ready",
+          migraauth: "ready",
+        },
+      };
+    } catch {
+      return reply.code(503).send({
+        service: "migrateck-platform-api",
+        status: "not_ready",
+      });
+    }
+  });
 
   await registerV1Routes(app);
 
