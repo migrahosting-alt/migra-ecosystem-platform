@@ -35,6 +35,8 @@ export const PLATFORM_PERMISSIONS = [
   "platform.self.read",
   /** Read account records: listing, searching, viewing one. */
   "platform.users.read",
+  /** Create a new internal identity invitation. Does not grant platform authority. */
+  "platform.users.create",
   /** Lock, unlock or disable an account. Changes whether someone can sign in. */
   "platform.users.suspend",
   /**
@@ -90,6 +92,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
   OPERATOR: [
     "platform.self.read",
     "platform.users.read",
+    "platform.users.create",
     "platform.users.suspend",
     "platform.users.mfa_reset",
     "platform.clients.read",

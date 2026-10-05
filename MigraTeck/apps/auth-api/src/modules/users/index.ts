@@ -66,6 +66,33 @@ export async function createUser(
   });
 }
 
+export async function createInvitedUser(
+  identifier: ParsedIdentifier,
+  displayName?: string,
+): Promise<{ user: User; identifier: UserIdentifier }> {
+  return db.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        ...buildUserIdentityPatch(identifier),
+        displayName: displayName ?? null,
+        status: "PENDING",
+      },
+    });
+
+    const createdIdentifier = await tx.userIdentifier.create({
+      data: {
+        userId: user.id,
+        kind: identifier.kind,
+        normalizedValue: identifier.normalized,
+        displayValue: identifier.display,
+        isPrimary: true,
+      },
+    });
+
+    return { user, identifier: createdIdentifier };
+  });
+}
+
 export async function findIdentifierByParsedValue(
   identifier: ParsedIdentifier,
 ): Promise<UserIdentifier | null> {

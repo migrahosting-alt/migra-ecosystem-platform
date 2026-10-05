@@ -25,6 +25,7 @@ export async function sendVerificationEmail(
   to: string,
   tokenOrCode: string,
   returnTo?: string,
+  _brand?: unknown,
 ): Promise<void> {
   const isCode = /^\d{6}$/.test(tokenOrCode);
   const verifyUrl = new URL("/verify-email", config.webUrl);
@@ -65,10 +66,40 @@ export async function sendVerificationEmail(
   });
 }
 
+export async function sendInternalInviteEmail(
+  to: string,
+  token: string,
+  displayName?: string,
+): Promise<void> {
+  const setupUrl = new URL("/reset-password", config.webUrl);
+  setupUrl.searchParams.set("token", token);
+  setupUrl.searchParams.set("client_id", "migrapanel_web");
+  setupUrl.searchParams.set("invite", "1");
+
+  await getTransporter().sendMail({
+    from: config.emailFrom,
+    to,
+    subject: "You were invited to MigraTeck",
+    text: `You were invited to the MigraTeck organization. Set up your account: ${setupUrl.toString()}\n\nThis link expires in 30 minutes.`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;">
+        <h2 style="color:#1e40af;">Welcome to MigraTeck</h2>
+        <p>${displayName ? `Hello ${displayName}, ` : ""}an authorized MigraTeck operator created an internal account for you.</p>
+        <p>Use the button below to choose your own password and activate the identity. No platform authority is granted until an authorized owner delegates it separately.</p>
+        <a href="${setupUrl.toString()}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">
+          Set up account
+        </a>
+        <p style="color:#6b7280;font-size:13px;margin-top:24px;">This link expires in 30 minutes. If you were not expecting this invitation, do not use it.</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendPasswordResetEmail(
   to: string,
   token: string,
   clientId?: string,
+  _brand?: unknown,
 ): Promise<void> {
   const resetUrl = new URL("/reset-password", config.webUrl);
   resetUrl.searchParams.set("token", token);

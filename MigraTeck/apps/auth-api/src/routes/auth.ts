@@ -1438,6 +1438,19 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
 
     await changePassword(userId, body.password);
+
+    const resetUser = await findUserById(userId);
+    if (resetUser?.status === "PENDING" && resetUser.email) {
+      await markEmailVerified(userId);
+      await logAuditEvent({
+        actorUserId: userId,
+        eventType: "INTERNAL_USER_INVITE_ACCEPTED",
+        eventData: { activated_via: "password_setup" },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+    }
+
     await revokeAllUserSessions(userId);
 
     await logAuditEvent({

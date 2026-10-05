@@ -14,8 +14,18 @@ import {
   platformRoleRevokeSchema,
 } from "../lib/schemas.js";
 import { db } from "../lib/db.js";
-import { findUserById, lockUser, unlockUser, disableUser } from "../modules/users/index.js";
+import {
+  createInvitedUser,
+  createPasswordResetToken,
+  findIdentifierByParsedValue,
+  findUserById,
+  lockUser,
+  unlockUser,
+  disableUser,
+} from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
+import { parseIdentifier } from "../lib/identifier.js";
+import { sendInternalInviteEmail } from "../lib/email.js";
 import { hasTotpEnabled, disableTotp } from "../modules/mfa/index.js";
 import { listUserSessions } from "../modules/sessions/index.js";
 import { requirePermission, getClientIp } from "../middleware/session.js";
@@ -241,6 +251,97 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       via_bootstrap: authority.viaBootstrap,
     });
   });
+
+  // ── POST /v1/admin/users/invite ─────────────────────────────────────
+  app.post<{ Body: { email?: string; display_name?: string } }>(
+    "/v1/admin/users/invite",
+    { preHandler: requirePermission("platform.users.create") },
+    async (request, reply) => {
+      const actor = request.authUser!;
+      const ip = getClientIp(request);
+      const ua = request.headers["user-agent"];
+
+      const email = String(request.body?.email ?? "").trim();
+      const displayName = String(request.body?.display_name ?? "").trim();
+
+      let parsed;
+      try {
+        parsed = parseIdentifier(email);
+      } catch (error) {
+        return reply.code(400).send({
+          error: {
+            code: "invalid_email",
+            message: error instanceof Error ? error.message : "Enter a valid email address.",
+          },
+        });
+      }
+
+      if (parsed.kind !== "EMAIL") {
+        return reply.code(400).send({
+          error: { code: "email_required", message: "Internal invitations require an email address." },
+        });
+      }
+
+      const existingIdentifier = await findIdentifierByParsedValue(parsed);
+      if (existingIdentifier) {
+        return reply.code(409).send({
+          error: {
+            code: "identifier_taken",
+            message: "An account with this email already exists. Add or delegate access to the existing identity instead.",
+          },
+        });
+      }
+
+      const created = await createInvitedUser(parsed, displayName || undefined);
+      const token = await createPasswordResetToken(created.user.id, ip, ua);
+
+      try {
+        await sendInternalInviteEmail(parsed.normalized, token, displayName || undefined);
+      } catch (error) {
+        await logAuditEvent({
+          actorUserId: actor.id,
+          targetUserId: created.user.id,
+          eventType: "INTERNAL_USER_INVITE_DELIVERY_FAILED",
+          eventData: {
+            email: parsed.normalized,
+            reason: error instanceof Error ? error.message : String(error),
+          },
+          ipAddress: ip,
+          userAgent: ua,
+        });
+
+        return reply.code(502).send({
+          error: {
+            code: "invite_delivery_failed",
+            message: "The identity was created but the invitation email could not be delivered. Retry invitation delivery before granting authority.",
+          },
+          user_id: created.user.id,
+        });
+      }
+
+      await logAuditEvent({
+        actorUserId: actor.id,
+        targetUserId: created.user.id,
+        eventType: "INTERNAL_USER_INVITED",
+        eventData: {
+          email: parsed.normalized,
+          display_name: displayName || null,
+        },
+        ipAddress: ip,
+        userAgent: ua,
+      });
+
+      return reply.code(201).send({
+        invited: true,
+        user: {
+          id: created.user.id,
+          email: created.user.email,
+          display_name: created.user.displayName,
+          status: created.user.status,
+        },
+      });
+    },
+  );
 
   // ── GET /v1/admin/users ───────────────────────────────────────────
   app.get("/v1/admin/users", { preHandler: requirePermission("platform.users.read") }, async (request, reply) => {
