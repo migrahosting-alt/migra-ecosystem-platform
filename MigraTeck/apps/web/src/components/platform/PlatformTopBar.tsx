@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
+import { useState } from "react";
+import { Code2, CreditCard, Search, ShieldCheck } from "lucide-react";
 import { LogoutButton } from "@/components/auth/LogoutButton";
 import type { PlatformOrganization } from "@/lib/platform";
 
@@ -20,107 +21,98 @@ export function PlatformTopBar({ activeOrgId, organizations, session }: Platform
   const [switchPending, setSwitchPending] = useState(false);
 
   async function handleSwitchOrg(nextOrgId: string) {
-    if (!nextOrgId || nextOrgId === activeOrgId) {
-      return;
-    }
+    if (!nextOrgId || nextOrgId === activeOrgId) return;
 
     setSwitchPending(true);
     try {
       const response = await fetch("/api/platform/session/org", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orgId: nextOrgId }),
       });
 
-      if (response.ok) {
-        window.location.reload();
-      }
+      if (response.ok) window.location.reload();
     } finally {
       setSwitchPending(false);
     }
   }
 
   return (
-    <header className="border-b border-slate-200/80 bg-white/88 px-6 py-4 backdrop-blur-xl">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-          <div>
+    <header className="border-b border-slate-200/80 bg-white/92 px-6 py-3.5 backdrop-blur-xl">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <div className="min-w-[175px]">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-              MigraTeck control plane
+              MigraTeck Platform
             </p>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900">
-                {session.activeOrgName ?? "No active organization"}
+            <div className="mt-1 flex items-center gap-2">
+              <span className="truncate text-sm font-semibold text-slate-900">
+                {session.activeOrgName ?? "Platform context"}
               </span>
               {session.activeOrgRole ? (
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                   {session.activeOrgRole}
                 </span>
               ) : null}
-              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
                 Production
               </span>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="sr-only" htmlFor="platform-org-switcher">
-              Switch organization
-            </label>
-            <select
-              id="platform-org-switcher"
-              value={activeOrgId ?? ""}
-              disabled={switchPending || organizations.length === 0}
-              onChange={(event) => void handleSwitchOrg(event.target.value)}
-              className="min-w-[220px] rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 disabled:opacity-60"
-            >
-              {organizations.length === 0 ? <option value="">No organizations</option> : null}
-              {organizations.map((organization) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-white hover:text-slate-900"
-            >
-              Command
-            </button>
+          <div className="relative hidden min-w-0 max-w-xl flex-1 lg:block">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              aria-label="Search MigraTeck platform"
+              placeholder="Search organizations, API access, billing, events..."
+              className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-500/10"
+            />
           </div>
+
+          <select
+            id="platform-org-switcher"
+            value={activeOrgId ?? ""}
+            disabled={switchPending || organizations.length === 0}
+            onChange={(event) => void handleSwitchOrg(event.target.value)}
+            className="hidden min-w-[190px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 disabled:opacity-50 2xl:block"
+          >
+            {organizations.length === 0 ? <option value="">No organization selected</option> : null}
+            {organizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.name}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <nav className="hidden items-center gap-1 lg:flex">
             <Link
-              href="/platform/organizations"
-              className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+              href="/platform/developers"
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
             >
-              New org
+              <Code2 size={16} /> Developers
             </Link>
             <Link
-              href="/platform/billing"
-              className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+              href="/platform/commerce"
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
             >
-              Billing
+              <CreditCard size={16} /> Commerce
             </Link>
             <Link
-              href="/builder/sites"
-              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+              href="/platform/trust"
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
             >
-              Builder
+              <ShieldCheck size={16} /> Trust
             </Link>
-          </div>
+          </nav>
 
-          <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2">
+          <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900">
+              <p className="max-w-[180px] truncate text-sm font-semibold text-slate-900">
                 {session.displayName ?? session.email}
               </p>
-              <p className="truncate text-xs text-slate-500">{session.email}</p>
+              <p className="max-w-[180px] truncate text-xs text-slate-500">{session.email}</p>
             </div>
             <LogoutButton />
           </div>
