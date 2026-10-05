@@ -88,11 +88,13 @@ const clients = [
       "https://migrapanel.com/auth/callback",
       "https://panel.migrateck.com/auth/callback",
       "http://localhost:3002/auth/callback",
+      "http://localhost:3210/auth/callback",
     ],
     postLogoutRedirectUris: [
       "https://migrapanel.com",
       "https://panel.migrateck.com",
       "http://localhost:3002",
+      "http://localhost:3210",
     ],
     allowedScopes: ["openid", "profile", "email", "offline_access", "orgs:read"],
   },
