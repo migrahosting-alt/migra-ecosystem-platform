@@ -9,27 +9,31 @@ export const dynamic = "force-dynamic";
 const capabilities = [
   {
     title: "API Keys",
-    state: "Core exists",
-    description: "Hashed mk_ keys, scopes, expiry, revocation, last-used tracking, and audit logging already exist in the shared platform code.",
+    state: "Connected",
+    description: "Create, scope, expire, audit, and revoke organization-level machine credentials through the live Platform API.",
     icon: KeyRound,
+    href: "/platform/developers/api-keys",
   },
   {
     title: "OAuth Applications",
-    state: "Live foundation",
-    description: "MigraAuth already owns OAuth clients, PKCE, scopes, redirect URIs, branding, ownership, and post-login return contracts.",
+    state: "Connected",
+    description: "Register and manage MigraAuth OAuth clients, PKCE, redirect boundaries, scopes, confidential secrets, and lifecycle state.",
     icon: Boxes,
+    href: "/platform/developers/oauth",
   },
   {
     title: "Webhooks & Events",
     state: "Contract needed",
     description: "This becomes the canonical outbound event layer: signed endpoints, subscriptions, delivery history, retries, replay, and dead-letter handling.",
     icon: Webhook,
+    href: null,
   },
   {
     title: "API & Usage",
     state: "Metering exists",
     description: "Usage aggregation already exists in the commercial layer. Developer request visibility and rate-limit telemetry are the next integration.",
     icon: Activity,
+    href: "/platform/usage",
   },
 ];
 
@@ -77,8 +81,8 @@ export default async function DeveloperPlatformPage() {
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
         {capabilities.map((capability) => {
           const Icon = capability.icon;
-          return (
-            <article key={capability.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          const content = (
+            <>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600">
@@ -89,8 +93,23 @@ export default async function DeveloperPlatformPage() {
                     <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">{capability.state}</p>
                   </div>
                 </div>
+                {capability.href ? <ArrowRight size={16} className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600" /> : null}
               </div>
               <p className="mt-4 text-sm leading-6 text-slate-600">{capability.description}</p>
+            </>
+          );
+
+          return capability.href ? (
+            <Link
+              key={capability.title}
+              href={capability.href}
+              className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+            >
+              {content}
+            </Link>
+          ) : (
+            <article key={capability.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              {content}
             </article>
           );
         })}

@@ -51,8 +51,8 @@ const platformNav: PlatformNavGroup[] = [
     heading: "Developers",
     items: [
       { href: "/platform/developers", label: "Developer Platform", icon: Code2 },
-      { href: "/platform/developers/api-keys", label: "API Keys", icon: KeyRound, planned: true },
-      { href: "/platform/developers/oauth", label: "OAuth Apps", icon: Boxes, planned: true },
+      { href: "/platform/developers/api-keys", label: "API Keys", icon: KeyRound },
+      { href: "/platform/developers/oauth", label: "OAuth Apps", icon: Boxes },
       { href: "/platform/developers/webhooks", label: "Webhooks & Events", icon: Webhook, planned: true },
       { href: "/platform/usage", label: "API & Usage", icon: Activity },
     ],
