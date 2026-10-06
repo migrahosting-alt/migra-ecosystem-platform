@@ -7,6 +7,10 @@ import {
   revokeApiKey,
 } from "../../../lib/api-keys.js";
 import { requireOrganizationPrincipal } from "../../../lib/migraauth.js";
+import {
+  getDeveloperUsageSnapshot,
+  type UsageWindow,
+} from "../../../lib/api-usage.js";
 
 const createKeySchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -16,6 +20,10 @@ const createKeySchema = z.object({
 
 const keyParamsSchema = z.object({
   keyId: z.string().min(1),
+});
+
+const usageQuerySchema = z.object({
+  window: z.enum(["24h", "7d", "30d"]).default("24h"),
 });
 
 export async function registerDeveloperRoutes(app: FastifyInstance): Promise<void> {
@@ -67,6 +75,23 @@ export async function registerDeveloperRoutes(app: FastifyInstance): Promise<voi
         keyId,
         request,
       }),
+    };
+  });
+
+  app.get("/developer/usage", async (request) => {
+    const principal = await requireOrganizationPrincipal(request);
+    const query = usageQuerySchema.parse(request.query);
+    return {
+      organization: {
+        id: principal.membership.id,
+        name: principal.membership.name,
+        slug: principal.membership.slug,
+        role: principal.membership.role,
+      },
+      ...(await getDeveloperUsageSnapshot(
+        principal.platformOrgId,
+        query.window as UsageWindow,
+      )),
     };
   });
 }

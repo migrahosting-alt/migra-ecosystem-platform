@@ -221,6 +221,7 @@ export async function validateApiKey(rawKey: string) {
     id: key.id as string,
     orgId: key.orgId as string,
     name: key.name as string,
+    publicKeyId: publicKeyId as string,
     scopes: (key.scopes ?? []) as string[],
   };
 }

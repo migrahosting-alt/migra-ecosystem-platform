@@ -1,62 +1,71 @@
+import Link from "next/link";
 import { requirePermission } from "@migrateck/auth-client";
-import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
-import { PlatformStatCard } from "@/components/platform/PlatformStatCard";
+import {
+  Activity,
+  ArrowRight,
+  Gauge,
+  KeyRound,
+  ShieldCheck,
+} from "lucide-react";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
-import { getCommercialSnapshot } from "@/lib/platform/commercial";
+import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
+import { ApiUsageWorkspace } from "./ApiUsageWorkspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function UsagePage() {
+export default async function ApiUsagePage() {
   ensureAuthClientInitialized();
-  const session = await requirePermission("platform.read");
-  const orgName = session.activeOrgName ?? "My Organization";
-  const commercial = await getCommercialSnapshot(session.activeOrgId);
-  const billingState = commercial.dunningState === "unknown"
-    ? "Not attached"
-    : commercial.dunningState.replace(/_/g, " ");
+  await requirePermission("platform.read");
 
   return (
-    <div className="p-6 lg:p-8">
-      <PlatformPageHeader eyebrow="Consumption and limits" title="Usage" description={`Shared usage and metering signals for ${orgName}.`} />
+    <div className="p-5 sm:p-6 lg:p-8">
+      <PlatformPageHeader
+        eyebrow="Developers / API observability"
+        title="API & Usage"
+        description="Operate MigraTeck machine access from request evidence: credential attribution, success rate, latency, route behavior, rate limits, and quota state."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/platform/developers/api-keys"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              <KeyRound size={14} /> API keys
+            </Link>
+            <Link
+              href="/platform/commerce/usage"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              Billable usage <ArrowRight size={14} />
+            </Link>
+          </div>
+        }
+      />
 
-      <div className="mb-8 grid gap-4 md:grid-cols-3">
-        <PlatformStatCard label="Usage signals" value={String(commercial.usageSummary.length)} detail="Distinct usage meters currently visible for the active organization." />
-        <PlatformStatCard label="Subscriptions" value={String(commercial.subscriptions.length)} detail="Usage rolls up against the active commercial subscriptions and entitlements." />
-        <PlatformStatCard label="Billing state" value={billingState} detail="Usage is visible even when no billable events have been recorded yet." />
+      <div className="mb-6 grid gap-4 md:grid-cols-3">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <Activity size={19} className="text-blue-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Credential-attributed traffic</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            API-key requests are measured by key, route, status, and latency so operators can see which machine credential generated the traffic.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <ShieldCheck size={19} className="text-emerald-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Sanitized evidence</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Telemetry records route patterns and request IDs—not raw API secrets or query strings that may contain sensitive values.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <Gauge size={19} className="text-violet-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Operational limits</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Per-key throttling is shown separately from commercial usage quotas so rate control and billing remain distinct responsibilities.
+          </p>
+        </article>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">Usage history</h2>
-        {commercial.usageSummary.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center">
-            <p className="text-sm text-slate-500">No usage data yet.</p>
-            <p className="mt-1 text-xs text-slate-400">Usage charts will appear here when the active organization starts generating billable events.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100 text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Product</th>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Meter</th>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Quantity</th>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Events</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {commercial.usageSummary.map((entry) => (
-                  <tr key={`${entry.productFamily}:${entry.meterName}`}>
-                    <td className="px-6 py-4 font-medium text-slate-900">{entry.productFamily}</td>
-                    <td className="px-6 py-4 text-slate-600">{entry.meterName}</td>
-                    <td className="px-6 py-4 text-slate-600">{entry.totalQuantity}</td>
-                    <td className="px-6 py-4 text-slate-600">{entry.eventCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <ApiUsageWorkspace />
     </div>
   );
 }

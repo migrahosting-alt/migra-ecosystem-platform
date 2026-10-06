@@ -30,8 +30,8 @@ const capabilities = [
   },
   {
     title: "API & Usage",
-    state: "Metering exists",
-    description: "Usage aggregation already exists in the commercial layer. Developer request visibility and rate-limit telemetry are the next integration.",
+    state: "Connected",
+    description: "Inspect credential-attributed requests, success rate, latency, route behavior, throttling, machine-key activity, and product quota boundaries.",
     icon: Activity,
     href: "/platform/usage",
   },

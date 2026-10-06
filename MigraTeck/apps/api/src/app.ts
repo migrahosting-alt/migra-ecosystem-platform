@@ -3,6 +3,8 @@ import { hasValidCsrfToken, requiresCsrf } from "./lib/csrf.js";
 import { enforceRateLimit } from "./lib/rate-limit.js";
 import { registerV1Routes } from "./routes/v1/index.js";
 import { getDb } from "./lib/db.js";
+import { attachApiKeyPrincipal } from "./lib/machine-auth.js";
+import { recordApiRequestUsage } from "./lib/api-usage.js";
 
 function logError(message: string, extra?: Record<string, unknown>): void {
   console.error(
@@ -24,13 +26,24 @@ export async function buildApiApp(): Promise<FastifyInstance> {
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    const key = request.ip ?? "unknown";
-    const { allowed, resetAt } = enforceRateLimit({
-      key,
-      limit: 120,
+    request.apiRequestStartedAt = Date.now();
+
+    const principal = await attachApiKeyPrincipal(request);
+    const rateLimit = principal
+      ? Number(process.env.API_KEY_RATE_LIMIT_PER_MINUTE ?? 600)
+      : Number(process.env.API_IP_RATE_LIMIT_PER_MINUTE ?? 120);
+    const rateKey = principal
+      ? "api-key:" + principal.id
+      : "ip:" + (request.ip ?? "unknown");
+
+    const { allowed, resetAt, remaining, limit } = enforceRateLimit({
+      key: rateKey,
+      limit: rateLimit,
       windowMs: 60_000,
     });
 
+    reply.header("X-RateLimit-Limit", String(limit));
+    reply.header("X-RateLimit-Remaining", String(remaining));
     reply.header("X-RateLimit-Reset", String(resetAt));
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
@@ -43,6 +56,20 @@ export async function buildApiApp(): Promise<FastifyInstance> {
     if (requiresCsrf(request) && !hasValidCsrfToken(request)) {
       reply.code(403);
       throw new Error("Missing or invalid CSRF token");
+    }
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    if (!request.apiKeyPrincipal) return;
+    try {
+      await recordApiRequestUsage(request, reply.statusCode);
+    } catch (error) {
+      logError("api.usage_record_failed", {
+        requestId: request.id,
+        method: request.method,
+        path: request.routeOptions?.url ?? request.url.split("?")[0],
+        message: error instanceof Error ? error.message : "Unknown usage recording error",
+      });
     }
   });
 

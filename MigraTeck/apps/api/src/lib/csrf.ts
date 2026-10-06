@@ -14,6 +14,11 @@ export function requiresCsrf(request: FastifyRequest): boolean {
     return false;
   }
 
+  const apiKey = request.headers["x-api-key"];
+  if (typeof apiKey === "string" && apiKey.trim()) {
+    return false;
+  }
+
   return true;
 }
 

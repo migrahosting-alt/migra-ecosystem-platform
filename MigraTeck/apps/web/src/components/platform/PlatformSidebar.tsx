@@ -63,7 +63,7 @@ const platformNav: PlatformNavGroup[] = [
       { href: "/platform/commerce", label: "Commerce Overview", icon: BadgeDollarSign },
       { href: "/platform/billing", label: "MigraPay & Billing", icon: CreditCard },
       { href: "/platform/commerce/catalog", label: "Catalog & Entitlements", icon: Boxes, planned: true },
-      { href: "/platform/usage", label: "Usage & Metering", icon: ChartNoAxesCombined },
+      { href: "/platform/commerce/usage", label: "Usage & Metering", icon: ChartNoAxesCombined },
     ],
   },
   {
