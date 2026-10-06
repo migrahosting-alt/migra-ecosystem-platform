@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 import { getDb } from "./db.js";
+import { publishPlatformEvent } from "./platform-events.js";
 import {
   hashCanonicalPayload,
   verifyProvisioningEnvelope,
@@ -28,13 +30,16 @@ function nextBackoffDate(attempts: number): Date {
   return new Date(Date.now() + seconds * 1000);
 }
 
+type QueryExecutor = Pick<PoolClient, "query">;
+
 async function appendEvent(
   jobId: string,
   status: string,
   message: string,
   metadata?: Record<string, unknown>,
+  database: QueryExecutor = getDb(),
 ): Promise<void> {
-  await getDb().query(
+  await database.query(
     'INSERT INTO "ProvisioningJobEvent" (id,"jobId",status,message,metadata,"createdAt") VALUES ($1,$2,$3::"ProvisioningJobStatus",$4,$5::jsonb,NOW())',
     [
       randomUUID(),
@@ -46,14 +51,17 @@ async function appendEvent(
   );
 }
 
-async function writeAudit(input: {
-  actorId?: string | null;
-  orgId?: string | null;
-  action: string;
-  entityId: string;
-  metadata?: Record<string, unknown>;
-}): Promise<void> {
-  await getDb().query(
+async function writeAudit(
+  input: {
+    actorId?: string | null;
+    orgId?: string | null;
+    action: string;
+    entityId: string;
+    metadata?: Record<string, unknown>;
+  },
+  database: QueryExecutor = getDb(),
+): Promise<void> {
+  await database.query(
     'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",metadata,"createdAt") VALUES ($1,$2,$3,$4,\'provisioning_job\',$5,$6::jsonb,NOW())',
     [
       randomUUID(),
@@ -66,55 +74,110 @@ async function writeAudit(input: {
   );
 }
 
+function publicFailureCode(message: string): string {
+  const normalized = message.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9._-]{0,79}$/.test(normalized)
+    ? normalized
+    : "provisioning_failure";
+}
+
 async function markDead(
   job: ProvisioningJobRecord,
   message: string,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
-  await getDb().query(
-    'UPDATE "ProvisioningJob" SET status=\'DEAD\'::"ProvisioningJobStatus","lastError"=$2,"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"finishedAt"=NOW(),"updatedAt"=NOW() WHERE id=$1',
-    [job.id, message],
-  );
-  await appendEvent(job.id, "DEAD", message, metadata);
-  await writeAudit({
-    actorId: job.createdByActorId,
-    orgId: job.orgId,
-    action: "PROVISIONING_JOB_DEAD_LETTERED",
-    entityId: job.id,
-    metadata: {
-      reason: message,
-      attempts: job.attempts,
-      maxAttempts: job.maxAttempts,
-      ...(metadata ?? {}),
-    },
-  });
+  const client = await getDb().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      'UPDATE "ProvisioningJob" SET status=\'DEAD\'::"ProvisioningJobStatus","lastError"=$2,"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"finishedAt"=NOW(),"updatedAt"=NOW() WHERE id=$1',
+      [job.id, message],
+    );
+    await appendEvent(job.id, "DEAD", message, metadata, client);
+    await writeAudit(
+      {
+        actorId: job.createdByActorId,
+        orgId: job.orgId,
+        action: "PROVISIONING_JOB_DEAD_LETTERED",
+        entityId: job.id,
+        metadata: {
+          reason: message,
+          attempts: job.attempts,
+          maxAttempts: job.maxAttempts,
+          ...(metadata ?? {}),
+        },
+      },
+      client,
+    );
+    await publishPlatformEvent(client, {
+      eventType: "provisioning.job_dead",
+      source: "migrateck-provisioning-worker",
+      orgId: job.orgId,
+      actorId: job.createdByActorId,
+      entityType: "provisioning_job",
+      entityId: job.id,
+      payload: {
+        job_id: job.id,
+        source: job.source,
+        type: job.type,
+        attempts: job.attempts,
+        max_attempts: job.maxAttempts,
+        reason_code: publicFailureCode(message),
+      },
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function markSucceeded(
   job: ProvisioningJobRecord,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
-  await getDb().query(
-    'UPDATE "ProvisioningJob" SET status=\'SUCCEEDED\'::"ProvisioningJobStatus","lastError"=NULL,"lastErrorAt"=NULL,"finishedAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE id=$1',
-    [job.id],
-  );
-  await appendEvent(job.id, "SUCCEEDED", "succeeded", {
-    workerId: job.lockedBy,
-    ...(metadata ?? {}),
-  });
-  await writeAudit({
-    actorId: job.createdByActorId,
-    orgId: job.orgId,
-    action: "PROVISIONING_JOB_SUCCEEDED",
-    entityId: job.id,
-    metadata: {
-      source: job.source,
-      type: job.type,
-      attempts: job.attempts,
-      workerId: job.lockedBy,
-      ...(metadata ?? {}),
-    },
-  });
+  const client = await getDb().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      'UPDATE "ProvisioningJob" SET status=\'SUCCEEDED\'::"ProvisioningJobStatus","lastError"=NULL,"lastErrorAt"=NULL,"finishedAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE id=$1',
+      [job.id],
+    );
+    await appendEvent(
+      job.id,
+      "SUCCEEDED",
+      "succeeded",
+      {
+        workerId: job.lockedBy,
+        ...(metadata ?? {}),
+      },
+      client,
+    );
+    await writeAudit(
+      {
+        actorId: job.createdByActorId,
+        orgId: job.orgId,
+        action: "PROVISIONING_JOB_SUCCEEDED",
+        entityId: job.id,
+        metadata: {
+          source: job.source,
+          type: job.type,
+          attempts: job.attempts,
+          workerId: job.lockedBy,
+          ...(metadata ?? {}),
+        },
+      },
+      client,
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function scheduleRetry(
@@ -122,27 +185,63 @@ async function scheduleRetry(
   result: Extract<ProvisioningExecutionResult, { kind: "RETRYABLE_FAILURE" }>,
 ): Promise<void> {
   const notBefore = nextBackoffDate(job.attempts);
-  await getDb().query(
-    'UPDATE "ProvisioningJob" SET status=\'PENDING\'::"ProvisioningJobStatus","notBefore"=$2,"lastError"=$3,"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE id=$1',
-    [job.id, notBefore, result.message],
-  );
-  await appendEvent(job.id, "PENDING", "retry_scheduled", {
-    nextRunAt: notBefore.toISOString(),
-    reason: result.message,
-    ...(result.metadata ?? {}),
-  });
-  await writeAudit({
-    actorId: job.createdByActorId,
-    orgId: job.orgId,
-    action: "PROVISIONING_JOB_RETRY_SCHEDULED",
-    entityId: job.id,
-    metadata: {
-      attempts: job.attempts,
-      maxAttempts: job.maxAttempts,
-      nextRunAt: notBefore.toISOString(),
-      reason: result.message,
-    },
-  });
+  const client = await getDb().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      'UPDATE "ProvisioningJob" SET status=\'PENDING\'::"ProvisioningJobStatus","notBefore"=$2,"lastError"=$3,"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE id=$1',
+      [job.id, notBefore, result.message],
+    );
+    await appendEvent(
+      job.id,
+      "PENDING",
+      "retry_scheduled",
+      {
+        nextRunAt: notBefore.toISOString(),
+        reason: result.message,
+        ...(result.metadata ?? {}),
+      },
+      client,
+    );
+    await writeAudit(
+      {
+        actorId: job.createdByActorId,
+        orgId: job.orgId,
+        action: "PROVISIONING_JOB_RETRY_SCHEDULED",
+        entityId: job.id,
+        metadata: {
+          attempts: job.attempts,
+          maxAttempts: job.maxAttempts,
+          nextRunAt: notBefore.toISOString(),
+          reason: result.message,
+        },
+      },
+      client,
+    );
+    await publishPlatformEvent(client, {
+      eventType: "provisioning.job_failed",
+      source: "migrateck-provisioning-worker",
+      orgId: job.orgId,
+      actorId: job.createdByActorId,
+      entityType: "provisioning_job",
+      entityId: job.id,
+      payload: {
+        job_id: job.id,
+        source: job.source,
+        type: job.type,
+        attempt: job.attempts,
+        max_attempts: job.maxAttempts,
+        next_run_at: notBefore.toISOString(),
+        reason_code: publicFailureCode(result.message),
+      },
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function platformProvisioningPaused(): Promise<boolean> {

@@ -82,7 +82,15 @@ test("only active Platform API producers are marked live in the webhook catalog"
     .map((entry) => entry.event)
     .sort();
 
-  assert.deepEqual(live, ["api_key.created", "api_key.revoked"]);
+  assert.deepEqual(live, [
+    "api_key.created",
+    "api_key.revoked",
+    "entitlement.granted",
+    "entitlement.revoked",
+    "provisioning.job_dead",
+    "provisioning.job_failed",
+    "webhook.endpoint_disabled",
+  ]);
   assert.equal(
     WEBHOOK_EVENT_CATALOG.find((entry) => entry.event === "incident.created")?.readiness,
     "contract",

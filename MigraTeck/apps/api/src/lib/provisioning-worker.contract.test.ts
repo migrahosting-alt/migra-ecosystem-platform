@@ -163,6 +163,15 @@ test("queue engine uses atomic claims, stale-lock recovery, and payload tamper d
   assert.match(engine, /payload_hash_mismatch/);
   assert.match(engine, /verifyProvisioningEnvelope/);
   assert.match(engine, /PROVISIONING_JOB_RETRY_SCHEDULED/);
+  assert.match(engine, /publishPlatformEvent/);
+  assert.match(engine, /provisioning\.job_failed/);
+  assert.match(engine, /provisioning\.job_dead/);
+  assert.match(engine, /reason_code: publicFailureCode/);
+  assert.match(
+    engine,
+    /\^\[a-z0-9\]\[a-z0-9\._-\]\{0,79\}\$/,
+    "public webhook failure codes must reject arbitrary internal error text",
+  );
 });
 
 test("worker closes its database pool on graceful stop and exposes runtime readiness", () => {

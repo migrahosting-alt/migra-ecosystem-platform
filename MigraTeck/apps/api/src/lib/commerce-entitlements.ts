@@ -12,6 +12,7 @@ import {
   hashCanonicalPayload,
   signProvisioningEnvelope,
 } from "./provisioning-crypto.js";
+import { publishPlatformEvent } from "./platform-events.js";
 
 const ACTIVE_LIKE = new Set<EntitlementStatus>([
   "ACTIVE",
@@ -720,6 +721,30 @@ export async function mutateOrganizationEntitlement(input: {
         }),
       ],
     );
+
+    if (becomingAllowed || becomingRestricted) {
+      const entitlement = updated.rows[0] as {
+        startsAt?: Date | string | null;
+        endsAt?: Date | string | null;
+      };
+      await publishPlatformEvent(client, {
+        eventType: becomingAllowed ? "entitlement.granted" : "entitlement.revoked",
+        source: "migrateck-platform-api",
+        orgId: input.orgId,
+        actorId: input.actorId,
+        entityType: "org_entitlement",
+        entityId: entitlementId,
+        payload: {
+          product: input.product,
+          previous_status: previousStatus,
+          status: input.newStatus,
+          starts_at: entitlement.startsAt ?? null,
+          ends_at: entitlement.endsAt ?? null,
+          transition_id: transitionId,
+          provisioning_job_ids: queued.map((job) => job.jobId),
+        },
+      });
+    }
 
     await client.query("COMMIT");
     return {

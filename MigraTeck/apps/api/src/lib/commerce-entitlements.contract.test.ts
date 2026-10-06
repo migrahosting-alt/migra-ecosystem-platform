@@ -163,6 +163,10 @@ test("entitlement mutation contract is concurrency-safe, billing-aware, atomic, 
 
   assert.match(source, /ORG_ENTITLEMENT_MANUAL_UPDATE/);
   assert.match(source, /billingOverrideAcknowledged/);
+  assert.match(source, /publishPlatformEvent/);
+  assert.match(source, /entitlement\.granted/);
+  assert.match(source, /entitlement\.revoked/);
+  assert.match(source, /await publishPlatformEvent\(client/);
   assert.match(source, /await client\.query\("COMMIT"\)/);
   assert.match(source, /await client\.query\("ROLLBACK"\)/);
 });

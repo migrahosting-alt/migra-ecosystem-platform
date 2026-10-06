@@ -10,6 +10,7 @@ import https from "node:https";
 import net from "node:net";
 import type { FastifyRequest } from "fastify";
 import { getDb } from "./db.js";
+import { publishPlatformEvent } from "./platform-events.js";
 
 const SECRET_PREFIX = "enc:v1";
 const MAX_ATTEMPTS = 5;
@@ -29,8 +30,8 @@ export const WEBHOOK_EVENT_CATALOG: readonly WebhookEventCatalogItem[] = [
   { event: "api_key.revoked", category: "Developer", readiness: "live", description: "An organization API key was revoked." },
   { event: "incident.created", category: "Operations", readiness: "contract", description: "A VPS incident was opened or reopened." },
   { event: "incident.resolved", category: "Operations", readiness: "contract", description: "A VPS incident was resolved." },
-  { event: "provisioning.job_failed", category: "Provisioning", readiness: "contract", description: "A provisioning execution failed." },
-  { event: "provisioning.job_dead", category: "Provisioning", readiness: "contract", description: "A provisioning execution exhausted retries." },
+  { event: "provisioning.job_failed", category: "Provisioning", readiness: "live", description: "A provisioning execution failed and was scheduled for retry." },
+  { event: "provisioning.job_dead", category: "Provisioning", readiness: "live", description: "A provisioning execution entered dead letter after a terminal failure or exhausted retries." },
   { event: "billing.payment_failed", category: "Commerce", readiness: "contract", description: "A payment attempt failed." },
   { event: "billing.invoice_overdue", category: "Commerce", readiness: "contract", description: "An invoice became overdue." },
   { event: "billing.subscription_created", category: "Commerce", readiness: "contract", description: "A subscription was created." },
@@ -40,11 +41,11 @@ export const WEBHOOK_EVENT_CATALOG: readonly WebhookEventCatalogItem[] = [
   { event: "security.suspicious_login", category: "Security", readiness: "contract", description: "A suspicious sign-in was detected." },
   { event: "usage.quota_exceeded", category: "Usage", readiness: "contract", description: "An organization exceeded a usage quota." },
   { event: "system.health_degraded", category: "System", readiness: "contract", description: "A platform service entered degraded health." },
-  { event: "entitlement.granted", category: "Entitlements", readiness: "contract", description: "A product entitlement was granted." },
-  { event: "entitlement.revoked", category: "Entitlements", readiness: "contract", description: "A product entitlement was revoked." },
+  { event: "entitlement.granted", category: "Entitlements", readiness: "live", description: "An organization crossed from restricted into allowed product access." },
+  { event: "entitlement.revoked", category: "Entitlements", readiness: "live", description: "An organization crossed from allowed into restricted product access." },
   { event: "builder.site_published", category: "Products", readiness: "contract", description: "A Builder site was published." },
   { event: "org.created", category: "Organization", readiness: "contract", description: "An organization was created." },
-  { event: "webhook.endpoint_disabled", category: "Webhooks", readiness: "contract", description: "A webhook endpoint was circuit-broken after repeated failures." },
+  { event: "webhook.endpoint_disabled", category: "Webhooks", readiness: "live", description: "A webhook endpoint was circuit-broken after repeated failures." },
 ] as const;
 
 function getEncryptionKey(): Buffer {
@@ -616,15 +617,31 @@ async function recordDeliveryFailure(delivery: ClaimedDelivery, result: { status
       'UPDATE "WebhookDelivery" SET status=$1::"WebhookDeliveryStatus",attempts=$2,"lastAttemptAt"=NOW(),"nextRetryAt"=$3,"httpStatus"=$4,"responseBody"=$5,duration=$6,"updatedAt"=NOW() WHERE id=$7',
       [final ? "FAILED" : "PENDING", nextAttempt, nextRetryAt, result.status, result.body.slice(0, 1000), result.duration, delivery.id],
     );
-    const endpoint = await client.query<{ failCount: number }>(
-      'UPDATE "OrgWebhookEndpoint" SET "failCount"="failCount"+1,"updatedAt"=NOW() WHERE id=$1 RETURNING "failCount"',
+    const endpoint = await client.query<{ failCount: number; orgId: string }>(
+      'UPDATE "OrgWebhookEndpoint" SET "failCount"="failCount"+1,"updatedAt"=NOW() WHERE id=$1 RETURNING "failCount","orgId"',
       [delivery.endpointId],
     );
-    if ((endpoint.rows[0]?.failCount ?? 0) >= 20) {
-      await client.query(
-        'UPDATE "OrgWebhookEndpoint" SET status=\'DISABLED\',"updatedAt"=NOW() WHERE id=$1',
+    const endpointState = endpoint.rows[0];
+    if ((endpointState?.failCount ?? 0) >= 20) {
+      const disabled = await client.query<{ orgId: string }>(
+        'UPDATE "OrgWebhookEndpoint" SET status=\'DISABLED\',"updatedAt"=NOW() WHERE id=$1 AND status<>\'DISABLED\' RETURNING "orgId"',
         [delivery.endpointId],
       );
+      const disabledEndpoint = disabled.rows[0];
+      if (disabledEndpoint) {
+        await publishPlatformEvent(client, {
+          eventType: "webhook.endpoint_disabled",
+          source: "migrateck-webhook-worker",
+          orgId: disabledEndpoint.orgId,
+          entityType: "webhook_endpoint",
+          entityId: delivery.endpointId,
+          payload: {
+            endpoint_id: delivery.endpointId,
+            consecutive_failures: endpointState?.failCount ?? 20,
+            cause: "delivery_failure_threshold",
+          },
+        });
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
