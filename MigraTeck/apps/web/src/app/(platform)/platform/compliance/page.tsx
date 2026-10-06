@@ -23,9 +23,9 @@ export default async function CompliancePage() {
   return (
     <div className="p-6 lg:p-8">
       <PlatformPageHeader
-        eyebrow="Governance and policy"
-        title="Compliance"
-        description="Review policy posture, organization governance, and audit trail for your account."
+        eyebrow="Trust / Evidence and governance"
+        title="Compliance & Audit"
+        description="Review governed platform evidence, trace operator and access changes, export bounded evidence sets, and hand remediation to the control plane that owns the corrective action."
       />
 
       <div className="mb-8 grid gap-4 md:grid-cols-3">
@@ -40,9 +40,9 @@ export default async function CompliancePage() {
           detail={hasOrganization ? "An active organization exists for governance." : "Create an organization before compliance workflows can be attached."}
         />
         <PlatformStatCard
-          label="Access review"
-          value={session.permissions.includes("orgs.manage") ? "Owner-visible" : "Limited"}
-          detail="Owner-level access is required for governance and review workflows."
+          label="Audit authority"
+          value="MigraAuth"
+          detail="Global evidence access is enforced by platform.audit.read; ordinary organization membership does not widen this scope."
         />
       </div>
 
