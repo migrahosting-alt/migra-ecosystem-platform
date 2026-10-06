@@ -143,12 +143,40 @@ type CatalogPayload = {
     effectiveEntitlementAuthority: string | null;
     tables: Record<string, { present: boolean; rows: number | null }>;
   };
+  provisioning: {
+    summary: Array<{
+      status: string;
+      count: number;
+      oldest: string | null;
+      newest: string | null;
+    }>;
+    deadJobs: Array<{
+      id: string;
+      orgId: string;
+      orgName: string | null;
+      orgSlug: string | null;
+      source: string;
+      type: string;
+      status: string;
+      attempts: number;
+      maxAttempts: number;
+      lastError: string | null;
+      lastErrorAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
   metrics: {
     catalogProducts: number;
     catalogPlans: number;
     catalogPrices: number;
     liveBindings: number;
     effectiveEntitlements: number;
+    provisioningPending: number;
+    provisioningRunning: number;
+    provisioningSucceeded: number;
+    provisioningFailed: number;
+    provisioningDead: number;
   };
   mutationReadiness: {
     bindings: boolean;
@@ -584,6 +612,59 @@ export function CatalogEntitlementsWorkspace() {
         <MetricCard label="Price components" value={catalog.metrics.catalogPrices} detail="lookup-key definitions" />
         <MetricCard label="Live bindings" value={catalog.metrics.liveBindings} detail="Stripe price mappings" />
         <MetricCard label="Access rows" value={catalog.metrics.effectiveEntitlements} detail="effective entitlements" />
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-start sm:justify-between sm:px-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-600">Provisioning health</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Queue & dead-letter evidence</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+              Current worker health is separated from historical failures. DEAD jobs are evidence to investigate, not candidates for blind replay.
+            </p>
+          </div>
+          <div className={"inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold " + (catalog.mutationReadiness.worker.ready ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")}>
+            <span className={"h-2 w-2 rounded-full " + (catalog.mutationReadiness.worker.ready ? "bg-emerald-500" : "bg-rose-500")} />
+            {catalog.mutationReadiness.worker.ready ? "Worker healthy" : "Worker unavailable"}
+          </div>
+        </div>
+
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6 xl:grid-cols-5">
+          <MetricCard label="Pending" value={catalog.metrics.provisioningPending} detail="waiting for worker" />
+          <MetricCard label="Running" value={catalog.metrics.provisioningRunning} detail="currently executing" />
+          <MetricCard label="Succeeded" value={catalog.metrics.provisioningSucceeded} detail="completed jobs" />
+          <MetricCard label="Failed" value={catalog.metrics.provisioningFailed} detail="retryable failures" />
+          <MetricCard label="Dead letters" value={catalog.metrics.provisioningDead} detail="terminal historical failures" />
+        </div>
+
+        {catalog.provisioning.deadJobs.length === 0 ? (
+          <div className="border-t border-slate-100 px-5 py-5 text-sm text-slate-500 sm:px-6">
+            No dead-letter provisioning jobs are recorded.
+          </div>
+        ) : (
+          <div className="border-t border-slate-100">
+            <div className="max-h-[26rem] divide-y divide-slate-100 overflow-y-auto">
+              {catalog.provisioning.deadJobs.map((job) => (
+                <article key={job.id} className="grid gap-3 px-5 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-rose-700">DEAD</span>
+                      <span className="text-xs font-semibold text-slate-900">{job.orgName ?? job.orgSlug ?? job.orgId}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">{job.source}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">{job.type}</span>
+                    </div>
+                    <p className="mt-2 break-words text-xs leading-5 text-rose-700">{job.lastError ?? "No terminal error text recorded."}</p>
+                    <code className="mt-1 block truncate text-[10px] text-slate-400">{job.id}</code>
+                  </div>
+                  <div className="text-xs text-slate-500 lg:text-right">
+                    <p><span className="font-semibold text-slate-700">{job.attempts}</span> / {job.maxAttempts} attempts</p>
+                    <p className="mt-1">{formatDate(job.lastErrorAt ?? job.updatedAt)}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="grid gap-6 2xl:grid-cols-[1.12fr_0.88fr]">

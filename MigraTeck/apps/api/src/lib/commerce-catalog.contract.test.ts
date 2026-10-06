@@ -80,6 +80,25 @@ test("global Stripe binding mutation is catalog-manage only and audited", () => 
   assert.match(model, /INSERT INTO "AuditLog"/);
 });
 
+test("catalog snapshot exposes global provisioning health and dead-letter evidence", () => {
+  const model = repoFile("apps/api/src/lib/commerce-catalog.ts");
+  const workspace = repoFile(
+    "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+  );
+
+  assert.match(model, /ProvisioningJobStatus/);
+  assert.match(model, /deadProvisioningJobs/);
+  assert.match(model, /provisioningPending/);
+  assert.match(model, /provisioningRunning/);
+  assert.match(model, /provisioningSucceeded/);
+  assert.match(model, /provisioningDead/);
+
+  assert.match(workspace, /Queue & dead-letter evidence/);
+  assert.match(workspace, /Worker healthy/);
+  assert.match(workspace, /blind replay/);
+  assert.doesNotMatch(workspace, /Retry all dead/i);
+});
+
 test("manual entitlement mutation is permission-gated and transition-preflighted", () => {
   assert.match(
     routes,

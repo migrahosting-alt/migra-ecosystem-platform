@@ -106,15 +106,40 @@ async function tableReadiness() {
 
 export async function getCommerceCatalogSnapshot() {
   const db = getDb();
-  const [bindings, entitlementSummary, readiness] = await Promise.all([
-    db.query(
-      'SELECT id,provider::text AS provider,"externalPriceId",product::text AS product,"statusOnActive"::text AS "statusOnActive",notes,"createdAt","updatedAt" FROM "BillingEntitlementBinding" ORDER BY product,"createdAt"',
-    ),
-    db.query(
-      'SELECT product::text AS product,status::text AS status,count(*)::int AS count FROM "OrgEntitlement" GROUP BY product,status ORDER BY product,status',
-    ),
-    tableReadiness(),
-  ]);
+  const [bindings, entitlementSummary, provisioningSummary, deadProvisioningJobs, readiness] =
+    await Promise.all([
+      db.query(
+        'SELECT id,provider::text AS provider,"externalPriceId",product::text AS product,"statusOnActive"::text AS "statusOnActive",notes,"createdAt","updatedAt" FROM "BillingEntitlementBinding" ORDER BY product,"createdAt"',
+      ),
+      db.query(
+        'SELECT product::text AS product,status::text AS status,count(*)::int AS count FROM "OrgEntitlement" GROUP BY product,status ORDER BY product,status',
+      ),
+      db.query(
+        'SELECT status::text AS status,count(*)::int AS count,min("createdAt") AS oldest,max("updatedAt") AS newest FROM "ProvisioningJob" GROUP BY status ORDER BY status',
+      ),
+      db.query(
+        `SELECT
+           j.id,
+           j."orgId",
+           o.name AS "orgName",
+           o.slug AS "orgSlug",
+           j.source::text AS source,
+           j.type::text AS type,
+           j.status::text AS status,
+           j.attempts,
+           j."maxAttempts",
+           j."lastError",
+           j."lastErrorAt",
+           j."createdAt",
+           j."updatedAt"
+         FROM "ProvisioningJob" j
+         LEFT JOIN "Organization" o ON o.id=j."orgId"
+         WHERE j.status='DEAD'::"ProvisioningJobStatus"
+         ORDER BY COALESCE(j."lastErrorAt",j."updatedAt") DESC
+         LIMIT 50`,
+      ),
+      tableReadiness(),
+    ]);
 
   const catalog = serializeCatalog();
   const bindingCoverage = PRODUCT_KEYS.map((product) => ({
@@ -128,11 +153,20 @@ export async function getCommerceCatalogSnapshot() {
       .reduce((sum, row) => sum + Number(row.count ?? 0), 0),
   }));
 
+  const provisioningCount = (status: string) =>
+    Number(
+      provisioningSummary.rows.find((row) => row.status === status)?.count ?? 0,
+    );
+
   return {
     catalog,
     bindings: bindings.rows,
     bindingCoverage,
     entitlementSummary: entitlementSummary.rows,
+    provisioning: {
+      summary: provisioningSummary.rows,
+      deadJobs: deadProvisioningJobs.rows,
+    },
     readiness,
     metrics: {
       catalogProducts: catalog.length,
@@ -143,6 +177,11 @@ export async function getCommerceCatalogSnapshot() {
         (sum, row) => sum + Number(row.count ?? 0),
         0,
       ),
+      provisioningPending: provisioningCount("PENDING"),
+      provisioningRunning: provisioningCount("RUNNING"),
+      provisioningSucceeded: provisioningCount("SUCCEEDED"),
+      provisioningFailed: provisioningCount("FAILED"),
+      provisioningDead: provisioningCount("DEAD"),
     },
   };
 }
