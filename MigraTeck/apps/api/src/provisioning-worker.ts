@@ -1,4 +1,6 @@
 import { hostname } from "node:os";
+import { dirname } from "node:path";
+import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { closeDb } from "./lib/db.js";
 import {
   processProvisioningBatch,
@@ -19,6 +21,33 @@ function batchSize(): number {
   return Number.isFinite(parsed) && parsed > 0
     ? Math.min(Math.floor(parsed), 100)
     : 25;
+}
+
+function heartbeatFile(): string {
+  return (
+    process.env.PROVISIONING_WORKER_HEARTBEAT_FILE ??
+    "/run/migrateck-provisioning/heartbeat.json"
+  );
+}
+
+async function writeHeartbeat(id: string): Promise<void> {
+  const path = heartbeatFile();
+  const temporary = path + ".tmp";
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(
+    temporary,
+    JSON.stringify({
+      workerId: id,
+      pid: process.pid,
+      lastSeenAt: new Date().toISOString(),
+    }) + "\n",
+    { mode: 0o644 },
+  );
+  await rename(temporary, path);
+}
+
+async function removeHeartbeat(): Promise<void> {
+  await unlink(heartbeatFile()).catch(() => undefined);
 }
 
 async function main(): Promise<void> {
@@ -44,6 +73,7 @@ async function main(): Promise<void> {
   process.once("SIGINT", () => stop("SIGINT"));
 
   const recovered = await recoverStaleProvisioningJobs();
+  await writeHeartbeat(id);
   console.log("[migrateck-provisioning-worker] started", {
     workerId: id,
     recovered,
@@ -55,6 +85,7 @@ async function main(): Promise<void> {
     const started = Date.now();
     try {
       const processed = await processProvisioningBatch(id, batchSize());
+      await writeHeartbeat(id);
       if (processed > 0) {
         console.log("[migrateck-provisioning-worker] batch processed", {
           workerId: id,
@@ -84,6 +115,7 @@ async function main(): Promise<void> {
     });
   }
 
+  await removeHeartbeat();
   await closeDb();
   console.log("[migrateck-provisioning-worker] stopped", { workerId: id });
 }

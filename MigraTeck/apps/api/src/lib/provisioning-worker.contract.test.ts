@@ -165,9 +165,14 @@ test("queue engine uses atomic claims, stale-lock recovery, and payload tamper d
   assert.match(engine, /PROVISIONING_JOB_RETRY_SCHEDULED/);
 });
 
-test("worker closes its database pool on graceful stop", () => {
+test("worker closes its database pool on graceful stop and exposes runtime readiness", () => {
   const worker = repoFile("apps/api/src/provisioning-worker.ts");
+  const unit = repoFile("deploy/migrateck-provisioning-worker.service");
   assert.match(worker, /SIGTERM/);
   assert.match(worker, /SIGINT/);
   assert.match(worker, /await closeDb\(\)/);
+  assert.match(worker, /heartbeat\.json/);
+  assert.match(worker, /await writeHeartbeat\(id\)/);
+  assert.match(worker, /await removeHeartbeat\(\)/);
+  assert.match(unit, /RuntimeDirectory=migrateck-provisioning/);
 });
