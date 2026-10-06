@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { requireOrganizationPrincipal } from "../../../lib/migraauth.js";
 import {
   createBillingContext,
   type BillingContext,
@@ -58,11 +59,23 @@ let _billingCtx: BillingContext | null = null;
 function getBillingCtx(): BillingContext {
   if (!_billingCtx) {
     const stripeKey = process.env.STRIPE_SECRET_KEY;
-    if (!stripeKey) throw new Error("STRIPE_SECRET_KEY is not configured");
-    // db is injected by the consuming app — placeholder until wired
+    if (!stripeKey) {
+      throw Object.assign(new Error("Billing processor is not configured"), {
+        statusCode: 503,
+      });
+    }
+
+    const billingDb = (globalThis as any).__billingDb;
+    if (!billingDb) {
+      throw Object.assign(
+        new Error("Billing runtime database adapter is not initialized"),
+        { statusCode: 503 },
+      );
+    }
+
     _billingCtx = createBillingContext({
       stripeSecretKey: stripeKey,
-      db: (globalThis as any).__billingDb,
+      db: billingDb,
     });
   }
   return _billingCtx;
@@ -70,18 +83,24 @@ function getBillingCtx(): BillingContext {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-function requireOrgId(request: FastifyRequest): string {
-  const orgId =
-    (request.headers["x-org-id"] as string | undefined) ??
-    ((request.query as Record<string, unknown>)?.orgId as string | undefined);
-  if (!orgId) throw Object.assign(new Error("Missing x-org-id header"), { statusCode: 400 });
-  return orgId;
+async function requireBillingOrganization(request: FastifyRequest) {
+  return requireOrganizationPrincipal(request, ["OWNER", "ADMIN"]);
 }
 
-function requireUserId(request: FastifyRequest): string {
-  const userId = request.headers["x-user-id"] as string | undefined;
-  if (!userId) throw Object.assign(new Error("Missing x-user-id header"), { statusCode: 400 });
-  return userId;
+function assertOrgOwnedResource(
+  resource: unknown,
+  orgId: string,
+  resourceName: string,
+): asserts resource is { orgId: string } {
+  if (
+    !resource ||
+    typeof resource !== "object" ||
+    (resource as { orgId?: string }).orgId !== orgId
+  ) {
+    throw Object.assign(new Error(resourceName + " not found"), {
+      statusCode: 404,
+    });
+  }
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────
@@ -113,7 +132,7 @@ export async function registerBillingRoutes(
   // ── Billing Account ────────────────────────────────────────────
 
   app.get("/billing/account", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const account = await getBillingAccount(ctx, orgId);
     if (!account)
@@ -124,7 +143,7 @@ export async function registerBillingRoutes(
   });
 
   app.put("/billing/account", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const body = updateBillingAccountSchema.parse(request.body);
     return updateBillingAccount(ctx, orgId, body);
@@ -133,7 +152,7 @@ export async function registerBillingRoutes(
   // ── Payment Methods ────────────────────────────────────────────
 
   app.get("/billing/payment-methods", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     return getPaymentMethods(ctx, orgId);
   });
@@ -141,7 +160,7 @@ export async function registerBillingRoutes(
   // ── Portal Session ─────────────────────────────────────────────
 
   app.post("/billing/portal-session", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const body = createPortalSessionSchema.parse(request.body);
     return createPortalSession(ctx, orgId, body.returnUrl);
@@ -150,18 +169,19 @@ export async function registerBillingRoutes(
   // ── Checkout Session ───────────────────────────────────────────
 
   app.post("/billing/checkout/session", async (request) => {
-    const orgId = requireOrgId(request);
+    const principal = await requireBillingOrganization(request);
+    const orgId = principal.platformOrgId;
     const ctx = getBillingCtx();
     const body = createCheckoutSessionSchema.parse(request.body);
 
-    // We need org metadata for Stripe Customer creation
-    const orgName =
-      (request.headers["x-org-name"] as string | undefined) ?? orgId;
-    const billingEmail = request.headers["x-billing-email"] as string | undefined;
-    if (!billingEmail)
-      throw Object.assign(new Error("Missing x-billing-email header"), {
-        statusCode: 400,
-      });
+    const orgName = principal.membership.name;
+    const billingEmail = principal.authUser.email;
+    if (!billingEmail) {
+      throw Object.assign(
+        new Error("The authenticated account does not have a billing email"),
+        { statusCode: 400 },
+      );
+    }
 
     return createCheckoutSession(ctx, {
       orgId,
@@ -180,7 +200,7 @@ export async function registerBillingRoutes(
   // ── Subscriptions ──────────────────────────────────────────────
 
   app.get("/billing/subscriptions", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     return getSubscriptions(ctx, orgId);
   });
@@ -188,12 +208,10 @@ export async function registerBillingRoutes(
   app.get<{ Params: { subscriptionId: string } }>(
     "/billing/subscriptions/:subscriptionId",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
       const sub = await getSubscription(ctx, request.params.subscriptionId);
-      if (!sub)
-        throw Object.assign(new Error("Subscription not found"), {
-          statusCode: 404,
-        });
+      assertOrgOwnedResource(sub, orgId, "Subscription");
       return sub;
     },
   );
@@ -201,7 +219,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { subscriptionId: string } }>(
     "/billing/subscriptions/:subscriptionId/change-plan",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const subscription = await getSubscription(ctx, request.params.subscriptionId);
+      assertOrgOwnedResource(subscription, orgId, "Subscription");
       const body = changePlanSchema.parse(request.body);
       return changePlan(ctx, {
         subscriptionId: request.params.subscriptionId,
@@ -215,7 +236,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { subscriptionId: string } }>(
     "/billing/subscriptions/:subscriptionId/change-seats",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const subscription = await getSubscription(ctx, request.params.subscriptionId);
+      assertOrgOwnedResource(subscription, orgId, "Subscription");
       const body = changeSeatsSchema.parse(request.body);
       return changeSeats(ctx, {
         subscriptionId: request.params.subscriptionId,
@@ -228,7 +252,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { subscriptionId: string } }>(
     "/billing/subscriptions/:subscriptionId/pause",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const subscription = await getSubscription(ctx, request.params.subscriptionId);
+      assertOrgOwnedResource(subscription, orgId, "Subscription");
       return pauseSubscription(
         ctx,
         request.params.subscriptionId,
@@ -240,7 +267,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { subscriptionId: string } }>(
     "/billing/subscriptions/:subscriptionId/resume",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const subscription = await getSubscription(ctx, request.params.subscriptionId);
+      assertOrgOwnedResource(subscription, orgId, "Subscription");
       return resumeSubscription(
         ctx,
         request.params.subscriptionId,
@@ -252,7 +282,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { subscriptionId: string } }>(
     "/billing/subscriptions/:subscriptionId/cancel",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const subscription = await getSubscription(ctx, request.params.subscriptionId);
+      assertOrgOwnedResource(subscription, orgId, "Subscription");
       const body = z
         .object({ immediate: z.boolean().optional() })
         .parse(request.body);
@@ -267,7 +300,7 @@ export async function registerBillingRoutes(
   // ── Entitlements ───────────────────────────────────────────────
 
   app.get("/billing/entitlements", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     return getOrgEntitlements(ctx, orgId);
   });
@@ -275,7 +308,7 @@ export async function registerBillingRoutes(
   // ── Dunning ────────────────────────────────────────────────────
 
   app.get("/billing/dunning", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const state = await getDunningState(ctx, orgId);
     return { orgId, dunningState: state };
@@ -284,7 +317,7 @@ export async function registerBillingRoutes(
   // ── Invoices ───────────────────────────────────────────────────
 
   app.get("/billing/invoices", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const query = z
       .object({
@@ -298,12 +331,10 @@ export async function registerBillingRoutes(
   app.get<{ Params: { invoiceId: string } }>(
     "/billing/invoices/:invoiceId",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
       const invoice = await getInvoice(ctx, request.params.invoiceId);
-      if (!invoice)
-        throw Object.assign(new Error("Invoice not found"), {
-          statusCode: 404,
-        });
+      assertOrgOwnedResource(invoice, orgId, "Invoice");
       return invoice;
     },
   );
@@ -311,7 +342,7 @@ export async function registerBillingRoutes(
   // ── Usage ──────────────────────────────────────────────────────
 
   app.post("/billing/usage", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const body = recordUsageSchema.parse(request.body);
     return recordUsage(ctx, {
@@ -327,7 +358,7 @@ export async function registerBillingRoutes(
   });
 
   app.get("/billing/usage/summary", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const query = usageSummaryQuerySchema.parse(request.query);
     return getUsageSummary(ctx, orgId, {
@@ -340,13 +371,13 @@ export async function registerBillingRoutes(
   // ── Tax ────────────────────────────────────────────────────────
 
   app.get("/billing/tax", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     return getTaxInfo(ctx, orgId);
   });
 
   app.put("/billing/tax", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const body = z
       .object({
@@ -365,7 +396,7 @@ export async function registerBillingRoutes(
   // ── Quotes ─────────────────────────────────────────────────────
 
   app.get("/billing/quotes", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     return getQuotes(ctx, orgId);
   });
@@ -373,16 +404,16 @@ export async function registerBillingRoutes(
   app.get<{ Params: { quoteId: string } }>(
     "/billing/quotes/:quoteId",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
       const quote = await getQuote(ctx, request.params.quoteId);
-      if (!quote)
-        throw Object.assign(new Error("Quote not found"), { statusCode: 404 });
+      assertOrgOwnedResource(quote, orgId, "Quote");
       return quote;
     },
   );
 
   app.post("/billing/quotes", async (request) => {
-    const orgId = requireOrgId(request);
+    const { platformOrgId: orgId } = await requireBillingOrganization(request);
     const ctx = getBillingCtx();
     const body = createQuoteSchema.parse(request.body);
     return createQuote(ctx, { orgId, ...body });
@@ -391,7 +422,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { quoteId: string } }>(
     "/billing/quotes/:quoteId/finalize",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const quote = await getQuote(ctx, request.params.quoteId);
+      assertOrgOwnedResource(quote, orgId, "Quote");
       return finalizeQuote(ctx, request.params.quoteId);
     },
   );
@@ -399,7 +433,10 @@ export async function registerBillingRoutes(
   app.post<{ Params: { quoteId: string } }>(
     "/billing/quotes/:quoteId/accept",
     async (request) => {
+      const { platformOrgId: orgId } = await requireBillingOrganization(request);
       const ctx = getBillingCtx();
+      const quote = await getQuote(ctx, request.params.quoteId);
+      assertOrgOwnedResource(quote, orgId, "Quote");
       return acceptQuote(ctx, request.params.quoteId);
     },
   );
