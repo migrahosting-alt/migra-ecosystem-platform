@@ -265,7 +265,7 @@ export function CommerceUsageWorkspace() {
       return;
     }
 
-    const timer = window.setTimeout(async () => {
+    const timer = globalThis.setTimeout(async () => {
       setOrgSearching(true);
       try {
         const response = await fetch(
@@ -284,7 +284,7 @@ export function CommerceUsageWorkspace() {
       }
     }, 280);
 
-    return () => window.clearTimeout(timer);
+    return () => globalThis.clearTimeout(timer);
   }, [orgQuery]);
 
   const meterCards = useMemo(() => {
