@@ -23,10 +23,10 @@ const capabilities = [
   },
   {
     title: "Webhooks & Events",
-    state: "Contract needed",
-    description: "This becomes the canonical outbound event layer: signed endpoints, subscriptions, delivery history, retries, replay, and dead-letter handling.",
+    state: "Connected",
+    description: "Register signed HTTPS endpoints, subscribe to real platform events, inspect retry evidence, test delivery, rotate secrets, and replay failed deliveries.",
     icon: Webhook,
-    href: null,
+    href: "/platform/developers/webhooks",
   },
   {
     title: "API & Usage",

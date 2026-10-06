@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { dispatchWebhookEvent } from "@/lib/webhooks";
 
 // ─── Typed Event Definitions ────────────────────────────────────────────
 
@@ -129,6 +130,27 @@ export async function emitPlatformEvent(input: EmitEventInput) {
   if (input.payload !== undefined) data.payload = input.payload;
 
   const event = await prisma.platformEvent.create({ data: data as Parameters<typeof prisma.platformEvent.create>[0]["data"] });
+
+  // The platform event row is the source of truth. Once it exists, enqueue
+  // subscribed outbound webhooks from that exact persisted event rather than
+  // asking every producer to remember a second delivery call.
+  if (event.orgId) {
+    void dispatchWebhookEvent({
+      orgId: event.orgId,
+      eventType: event.eventType,
+      payload: {
+        event_id: event.id,
+        source: event.source,
+        actor_id: event.actorId,
+        entity_type: event.entityType,
+        entity_id: event.entityId,
+        created_at: event.createdAt.toISOString(),
+        data: event.payload,
+      },
+    }).catch((err) => {
+      console.error("[platform-events] webhook enqueue failed for " + event.eventType + ":", err);
+    });
+  }
 
   // Fire in-process handlers (non-blocking)
   for (const [pattern, handlerSet] of handlers.entries()) {

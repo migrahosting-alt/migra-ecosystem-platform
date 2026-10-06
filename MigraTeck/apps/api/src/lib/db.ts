@@ -26,3 +26,11 @@ export function getDb(): pg.Pool {
   }
   return pool;
 }
+
+export async function closeDb(): Promise<void> {
+  const active = pool;
+  pool = null;
+  if (active) {
+    await active.end();
+  }
+}

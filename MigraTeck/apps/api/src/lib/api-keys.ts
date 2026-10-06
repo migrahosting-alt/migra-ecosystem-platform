@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { getDb } from "./db.js";
+import { publishPlatformEvent } from "./platform-events.js";
 
 const KEY_PREFIX = "mk_live";
 const DEFAULT_SCOPES = ["platform:read"] as const;
@@ -97,6 +98,21 @@ export async function createApiKey(input: {
       ],
     );
 
+    await publishPlatformEvent(client, {
+      eventType: "api_key.created",
+      source: "migrateck-platform-api",
+      orgId: input.platformOrgId,
+      actorId: input.platformUserId,
+      entityType: "api_key",
+      entityId: id,
+      payload: {
+        name: input.name,
+        public_key_id: publicKeyId,
+        scopes,
+        expires_at: input.expiresAt?.toISOString() ?? null,
+      },
+    });
+
     await client.query("COMMIT");
 
     return {
@@ -142,6 +158,20 @@ export async function revokeApiKey(input: {
         JSON.stringify({ publicKeyId: revoked.rows[0].publicKeyId }),
       ],
     );
+
+    await publishPlatformEvent(client, {
+      eventType: "api_key.revoked",
+      source: "migrateck-platform-api",
+      orgId: input.platformOrgId,
+      actorId: input.platformUserId,
+      entityType: "api_key",
+      entityId: input.keyId,
+      payload: {
+        public_key_id: revoked.rows[0].publicKeyId,
+        name: revoked.rows[0].name,
+        scopes: revoked.rows[0].scopes,
+      },
+    });
 
     await client.query("COMMIT");
     return revoked.rows[0];
