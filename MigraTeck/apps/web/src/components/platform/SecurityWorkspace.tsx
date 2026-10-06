@@ -15,9 +15,26 @@ type Session = {
   current: boolean;
 };
 
+type SecurityPosture = {
+  product_client_id: string | null;
+  mfa_enabled: boolean;
+  recovery_codes_stale: boolean;
+  has_password: boolean;
+  password_updated_at: string | null;
+  email_verified: boolean;
+  linked_providers: string[];
+  sign_in_methods: number;
+  can_unlink_a_provider: boolean;
+};
+
 type MfaStep = "idle" | "enrolling" | "verifying" | "enrolled";
 
 export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: string | number }) {
+  /* ── Account posture ── */
+  const [securityPosture, setSecurityPosture] = useState<SecurityPosture | null>(null);
+  const [postureLoading, setPostureLoading] = useState(true);
+  const [postureError, setPostureError] = useState<string | null>(null);
+
   /* ── Sessions ── */
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -37,15 +54,45 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
   } | null>(null);
   const [verifyCode, setVerifyCode] = useState("");
   const [disablePassword, setDisablePassword] = useState("");
+  const [disableCode, setDisableCode] = useState("");
   const [disablePending, setDisablePending] = useState(false);
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [recoveryPending, setRecoveryPending] = useState(false);
+  const [replacementRecoveryCodes, setReplacementRecoveryCodes] = useState<string[] | null>(null);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
 
-  /* ── Password reset ── */
+  /* ── Password recovery ── */
   const [resetPending, setResetPending] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    loadSessions();
+    void loadSecurityPosture();
+    void loadSessions();
   }, []);
+
+  async function loadSecurityPosture() {
+    setPostureLoading(true);
+    setPostureError(null);
+
+    try {
+      const res = await fetch("/api/platform/security/status", { cache: "no-store" });
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setPostureError(body?.error ?? "Failed to load account security posture.");
+        return;
+      }
+
+      const posture = body as SecurityPosture;
+      setSecurityPosture(posture);
+      setMfaStep(posture.mfa_enabled ? "enrolled" : "idle");
+    } catch {
+      setPostureError("Unable to reach the account security service.");
+    } finally {
+      setPostureLoading(false);
+    }
+  }
 
   async function loadSessions() {
     setSessionsLoading(true);
@@ -125,6 +172,7 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
       }
       setMfaStep("enrolled");
       setMfaMessage("MFA is now active on your account.");
+      await loadSecurityPosture();
     } catch {
       setMfaError("Unable to verify code.");
     }
@@ -134,24 +182,70 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
     e.preventDefault();
     setDisablePending(true);
     setMfaError(null);
+
     try {
+      const proof = {
+        ...(disablePassword.trim() ? { password: disablePassword } : {}),
+        ...(disableCode.trim() ? { code: disableCode.trim() } : {}),
+      };
       const res = await fetch("/api/platform/security/mfa/disable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: disablePassword }),
+        body: JSON.stringify(proof),
       });
       const body = await res.json();
       if (!res.ok) {
         setMfaError(body?.error ?? "Failed to disable MFA.");
         return;
       }
+
       setMfaStep("idle");
       setMfaMessage("MFA has been disabled.");
       setDisablePassword("");
+      setDisableCode("");
+      await loadSecurityPosture();
     } catch {
       setMfaError("Unable to disable MFA.");
     } finally {
       setDisablePending(false);
+    }
+  }
+
+  async function replaceRecoveryCodes(e: React.FormEvent) {
+    e.preventDefault();
+    setRecoveryPending(true);
+    setRecoveryMessage(null);
+    setMfaError(null);
+
+    try {
+      const proof = {
+        ...(recoveryPassword.trim() ? { password: recoveryPassword } : {}),
+        ...(recoveryCode.trim() ? { code: recoveryCode.trim() } : {}),
+      };
+      const res = await fetch("/api/platform/security/mfa/recovery-codes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proof),
+      });
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setRecoveryMessage(body?.error ?? "Unable to replace recovery codes.");
+        return;
+      }
+
+      setReplacementRecoveryCodes(Array.isArray(body?.recovery_codes) ? body.recovery_codes : []);
+      setRecoveryMessage(
+        body?.message ??
+          "Recovery codes replaced. Save the new set now; it cannot be displayed again.",
+      );
+      setRecoveryPassword("");
+      setRecoveryCode("");
+      await loadSecurityPosture();
+    } catch {
+      setRecoveryMessage("Unable to reach the recovery-code service.");
+    } finally {
+      setRecoveryPending(false);
     }
   }
 
@@ -180,27 +274,42 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
     const activityAt = session.last_seen_at ?? session.created_at;
     return Date.now() - new Date(activityAt).getTime() > 1000 * 60 * 60 * 24 * 14;
   });
+  const mfaEnabled = securityPosture?.mfa_enabled ?? mfaStep === "enrolled";
   const mfaStatus =
-    mfaStep === "enrolled"
+    postureLoading
       ? {
-          label: "Protected",
-          detail: "TOTP is active for this operator session.",
-          tone: "emerald",
+          label: "Checking",
+          detail: "Reading the account's MFA state from MigraAuth.",
+          tone: "slate",
         }
-      : mfaStep === "verifying" || mfaStep === "enrolling"
+      : mfaEnabled
         ? {
-            label: "Enrollment active",
-            detail: "Authenticator setup is in progress and waiting for verification.",
-            tone: "amber",
+            label: "Protected",
+            detail: securityPosture?.recovery_codes_stale
+              ? "TOTP is active, but the stored recovery codes are stale and should be replaced."
+              : "TOTP is active on this MigraAuth account.",
+            tone: securityPosture?.recovery_codes_stale ? "amber" : "emerald",
           }
-        : {
-            label: "Available",
-            detail: "TOTP can be enrolled from this workspace when stronger access controls are required.",
-            tone: "slate",
-          };
+        : mfaStep === "verifying" || mfaStep === "enrolling"
+          ? {
+              label: "Enrollment active",
+              detail: "Authenticator setup is in progress and waiting for verification.",
+              tone: "amber",
+            }
+          : {
+              label: "Not enabled",
+              detail: "This account does not currently have TOTP multi-factor authentication enabled.",
+              tone: "slate",
+            };
 
   return (
     <div className="space-y-6">
+      {postureError ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Account security posture could not be refreshed: {postureError}
+        </div>
+      ) : null}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
@@ -246,8 +355,12 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
             {mfaStatus.tone === "emerald"
               ? "Authenticator confirmed"
               : mfaStatus.tone === "amber"
-                ? "Verification pending"
-                : "Setup available"}
+                ? securityPosture?.recovery_codes_stale
+                  ? "Recovery codes need replacement"
+                  : "Verification pending"
+                : postureLoading
+                  ? "Reading account state"
+                  : "Setup available"}
           </div>
         </div>
 
@@ -359,7 +472,7 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
           </div>
         )}
 
-        {mfaStep === "idle" && (
+        {mfaStep === "idle" && !postureLoading && securityPosture?.mfa_enabled === false && (
           <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
@@ -438,55 +551,251 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
               <p className="text-sm font-semibold text-emerald-800">MFA is active</p>
-              <p className="mt-1 text-sm text-emerald-700">TOTP-based multi-factor authentication is enabled on your account.</p>
+              <p className="mt-1 text-sm text-emerald-700">
+                TOTP-based multi-factor authentication is enabled on this account.
+              </p>
             </div>
 
-            <form onSubmit={disableMfa} className="flex items-end gap-3">
-              <div className="flex-1">
-                <label htmlFor="disable-pw" className="block text-sm font-medium text-slate-700 mb-1">
-                  Password to disable MFA
-                </label>
-                <input
-                  id="disable-pw"
-                  type="password"
-                  value={disablePassword}
-                  onChange={(e) => setDisablePassword(e.target.value)}
-                  className="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  placeholder="Enter your password"
-                />
+            {securityPosture?.recovery_codes_stale ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-900">Recovery codes need replacement</p>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  MigraAuth detected recovery codes issued by an older incompatible hash format.
+                  Do not rely on the printed set for account recovery; replace them before an incident.
+                </p>
               </div>
-              <button
-                type="submit"
-                disabled={!disablePassword || disablePending}
-                className="inline-flex items-center justify-center rounded-full border border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+            ) : null}
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-900">Recovery codes</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Replace the current set after re-authentication. The new plaintext codes are shown once;
+                MigraAuth stores only hashes.
+              </p>
+
+              {replacementRecoveryCodes ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900">Save these codes now</p>
+                      <p className="mt-1 text-xs leading-5 text-amber-800">
+                        This is the only time this replacement set can be displayed.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void navigator.clipboard.writeText(replacementRecoveryCodes.join("\n"))}
+                      className="rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800"
+                    >
+                      Copy all
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {replacementRecoveryCodes.map((code) => (
+                      <code
+                        key={code}
+                        className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
+                      >
+                        {code}
+                      </code>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReplacementRecoveryCodes(null)}
+                    className="mt-3 text-xs font-semibold text-amber-800 underline underline-offset-2"
+                  >
+                    I saved this set — hide it
+                  </button>
+                </div>
+              ) : (
+                <form
+                  onSubmit={replaceRecoveryCodes}
+                  className={
+                    "mt-4 grid gap-3 " +
+                    (securityPosture?.has_password
+                      ? "md:grid-cols-[1fr_1fr_auto]"
+                      : "md:grid-cols-[1fr_auto]")
+                  }
+                >
+                  {securityPosture?.has_password ? (
+                    <input
+                      type="password"
+                      value={recoveryPassword}
+                      onChange={(e) => setRecoveryPassword(e.target.value)}
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="Current password"
+                      aria-label="Password for recovery-code replacement"
+                    />
+                  ) : null}
+                  <input
+                    type="text"
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value.trimStart().slice(0, 64))}
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="Authenticator or recovery code"
+                    aria-label="Authenticator or recovery code for replacement"
+                  />
+                  <button
+                    type="submit"
+                    disabled={(!recoveryPassword.trim() && !recoveryCode.trim()) || recoveryPending}
+                    className="inline-flex items-center justify-center rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {recoveryPending ? "Replacing…" : "Replace codes"}
+                  </button>
+                </form>
+              )}
+
+              {recoveryMessage ? (
+                <p className="mt-3 text-xs leading-5 text-slate-600">{recoveryMessage}</p>
+              ) : null}
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-900">Disable MFA</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Re-authenticate with any credential this account actually has. MigraAuth accepts a password,
+                a current authenticator code, or one unused recovery code.
+              </p>
+
+              <form
+                onSubmit={disableMfa}
+                className={
+                  "mt-4 grid gap-3 " +
+                  (securityPosture?.has_password
+                    ? "md:grid-cols-[1fr_1fr_auto]"
+                    : "md:grid-cols-[1fr_auto]")
+                }
               >
-                {disablePending ? "Disabling…" : "Disable MFA"}
-              </button>
-            </form>
+                {securityPosture?.has_password ? (
+                  <div>
+                    <label htmlFor="disable-pw" className="mb-1 block text-sm font-medium text-slate-700">
+                      Password
+                    </label>
+                    <input
+                      id="disable-pw"
+                      type="password"
+                      value={disablePassword}
+                      onChange={(e) => setDisablePassword(e.target.value)}
+                      className="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      placeholder="Current password"
+                    />
+                  </div>
+                ) : null}
+
+                <div>
+                  <label htmlFor="disable-code" className="mb-1 block text-sm font-medium text-slate-700">
+                    Authenticator or recovery code
+                  </label>
+                  <input
+                    id="disable-code"
+                    type="text"
+                    autoComplete="one-time-code"
+                    value={disableCode}
+                    onChange={(e) => setDisableCode(e.target.value.trimStart().slice(0, 64))}
+                    className="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="6-digit code or recovery code"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={(!disablePassword.trim() && !disableCode.trim()) || disablePending}
+                  className="inline-flex items-center justify-center self-end rounded-full border border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                >
+                  {disablePending ? "Disabling…" : "Disable MFA"}
+                </button>
+              </form>
+            </div>
           </div>
         )}
       </section>
 
-      {/* ── Password reset ── */}
+      {/* ── Credential posture / recovery ── */}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-900">Password</h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Send a password reset email to the address registered with MigraAuth. Use this when a credential rotation is required or the current password is no longer trusted.
+        <h2 className="text-base font-semibold text-slate-900">Sign-in credentials</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          MigraAuth is the credential authority. This view shows which sign-in methods actually exist before offering a recovery action.
         </p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Password</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {postureLoading ? "Checking…" : securityPosture?.has_password ? "Configured" : "Not configured"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              {securityPosture?.has_password
+                ? securityPosture.password_updated_at
+                  ? "Updated " + new Date(securityPosture.password_updated_at).toLocaleString()
+                  : "Password credential is enabled."
+                : "This may be a provider-only account."}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Email</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {postureLoading ? "Checking…" : securityPosture?.email_verified ? "Verified" : "Not verified"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Recovery email flows should only be trusted after identity verification.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Sign-in methods</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {postureLoading ? "Checking…" : String(securityPosture?.sign_in_methods ?? 0)}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              {securityPosture?.linked_providers.length
+                ? "Linked: " + securityPosture.linked_providers.join(", ")
+                : "No linked external provider is reported."}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Last-method guard</p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {postureLoading
+                ? "Checking…"
+                : securityPosture?.can_unlink_a_provider
+                  ? "Redundant"
+                  : "Protected"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              {securityPosture?.can_unlink_a_provider
+                ? "At least one other sign-in method remains if a provider is disconnected."
+                : "The account must not lose its only remaining sign-in method."}
+            </p>
+          </div>
+        </div>
+
         {resetMessage && (
-          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
             <p className="text-sm text-slate-700">{resetMessage}</p>
           </div>
         )}
+
         <div className="mt-4">
           <button
             type="button"
             onClick={requestPasswordReset}
-            disabled={resetPending}
+            disabled={resetPending || securityPosture?.email_verified === false}
             className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
           >
-            {resetPending ? "Sending…" : "Send password reset email"}
+            {resetPending
+              ? "Sending…"
+              : securityPosture?.has_password
+                ? "Send password reset email"
+                : "Send password setup email"}
           </button>
+          {securityPosture?.email_verified === false ? (
+            <p className="mt-2 text-xs text-amber-700">
+              Verify the account email before using email-based password recovery.
+            </p>
+          ) : null}
         </div>
       </section>
     </div>

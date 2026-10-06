@@ -4,12 +4,17 @@ import { z } from "zod";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
 import { fetchAuthApi } from "@/lib/auth/api";
 
-const disableBody = z.object({
-  password: z.string().min(1),
-});
+const disableBody = z
+  .object({
+    password: z.string().min(1).max(128).optional(),
+    code: z.string().min(6).max(64).optional(),
+  })
+  .refine((body) => Boolean(body.password ?? body.code), {
+    message: "Provide your password, an authenticator code, or a recovery code.",
+  });
 
 /**
- * POST /api/platform/security/mfa/disable — disable MFA (requires password)
+ * POST /api/platform/security/mfa/disable — disable MFA after re-authentication
  */
 export async function POST(request: Request) {
   ensureAuthClientInitialized();
