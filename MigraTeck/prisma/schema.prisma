@@ -2587,17 +2587,29 @@ enum UsageMetric {
 }
 
 model UsageEvent {
-  id        String      @id @default(cuid())
-  orgId     String
-  product   ProductKey
-  metric    UsageMetric
-  quantity  BigInt      @default(1)
-  metadata  Json?
-  timestamp DateTime    @default(now())
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id             String      @id @default(cuid())
+  orgId          String
+  product        ProductKey
+  metric         UsageMetric
+  quantity       BigInt      @default(1)
+  metadata       Json?
+  timestamp      DateTime    @default(now())
+  meterName      String?
+  idempotencyKey String?     @unique
+  source         String      @default("api")
+  exportStatus   String      @default("LOCAL_ONLY")
+  exportAttempts Int         @default(0)
+  nextRetryAt    DateTime?
+  exportedAt     DateTime?
+  exportError    String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @default(now()) @updatedAt
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, product, metric, timestamp])
   @@index([orgId, timestamp])
+  @@index([orgId, meterName, timestamp])
+  @@index([exportStatus, nextRetryAt])
 }
 
 model UsageQuota {

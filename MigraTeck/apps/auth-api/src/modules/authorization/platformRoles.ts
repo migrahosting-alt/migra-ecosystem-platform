@@ -51,8 +51,10 @@ export const PLATFORM_PERMISSIONS = [
   "platform.users.mfa_reset",
   /** Read OAuth client configuration. */
   "platform.clients.read",
-  /** Read global commerce catalog, price bindings, and organization entitlement state. */
+  /** Read global commerce catalog, price bindings, organization access, usage, and reconciliation state. */
   "platform.commerce.read",
+  /** Manage usage quotas and retry commercial meter exports. */
+  "platform.commerce.usage.manage",
   /** Change effective organization product access and trigger provisioning transitions. */
   "platform.commerce.entitlements.manage",
   /** Change global price-to-product catalog bindings. Highest-risk commerce mutation. */
@@ -108,6 +110,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.users.mfa_reset",
     "platform.clients.read",
     "platform.commerce.read",
+    "platform.commerce.usage.manage",
     "platform.commerce.entitlements.manage",
     "platform.audit.read",
   ],

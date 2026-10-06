@@ -1,62 +1,71 @@
+import Link from "next/link";
 import { requirePermission } from "@migrateck/auth-client";
-import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
-import { PlatformStatCard } from "@/components/platform/PlatformStatCard";
+import {
+  Activity,
+  ArrowLeft,
+  Gauge,
+  RefreshCw,
+  ShieldCheck,
+  Waypoints,
+} from "lucide-react";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
-import { getCommercialSnapshot } from "@/lib/platform/commercial";
+import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
+import { CommerceUsageWorkspace } from "./CommerceUsageWorkspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function CommerceUsagePage() {
   ensureAuthClientInitialized();
-  const session = await requirePermission("platform.read");
-  const orgName = session.activeOrgName ?? "My Organization";
-  const commercial = await getCommercialSnapshot(session.activeOrgId);
-  const billingState = commercial.dunningState === "unknown"
-    ? "Not attached"
-    : commercial.dunningState.replace(/_/g, " ");
+  await requirePermission("platform.read");
 
   return (
-    <div className="p-6 lg:p-8">
-      <PlatformPageHeader eyebrow="Commerce / Consumption" title="Usage & Metering" description={`Billable product consumption, commercial meters, and subscription usage for ${orgName}.`} />
+    <div className="p-5 sm:p-6 lg:p-8">
+      <PlatformPageHeader
+        eyebrow="Commerce / Metering operations"
+        title="Usage & Metering"
+        description="Operate billable product consumption from the canonical ledger: meter definitions, quotas, Stripe export health, retries, and reconciliation evidence."
+        actions={
+          <Link
+            href="/platform/commerce"
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <ArrowLeft size={14} /> Commerce overview
+          </Link>
+        }
+      />
 
-      <div className="mb-8 grid gap-4 md:grid-cols-3">
-        <PlatformStatCard label="Usage signals" value={String(commercial.usageSummary.length)} detail="Distinct usage meters currently visible for the active organization." />
-        <PlatformStatCard label="Subscriptions" value={String(commercial.subscriptions.length)} detail="Usage rolls up against the active commercial subscriptions and entitlements." />
-        <PlatformStatCard label="Billing state" value={billingState} detail="Usage is visible even when no billable events have been recorded yet." />
+      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <Waypoints size={19} className="text-blue-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Canonical ledger</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Billable events and API telemetry share one usage ledger, while only catalog-backed meter events enter the Stripe export queue.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <Gauge size={19} className="text-violet-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Quota control</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Per-organization product quotas are visible and auditable, with usage counters updated transactionally during ingestion.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <RefreshCw size={19} className="text-amber-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Retry & reconciliation</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Export failures create operator-visible reconciliation evidence and can be retried without duplicating Stripe meter events.
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <ShieldCheck size={19} className="text-emerald-600" />
+          <h2 className="mt-3 text-sm font-semibold text-slate-950">Machine-scoped ingest</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Products report usage with scoped API keys. Organization identity comes from the credential, not a caller-controlled header.
+          </p>
+        </article>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">Usage history</h2>
-        {commercial.usageSummary.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center">
-            <p className="text-sm text-slate-500">No usage data yet.</p>
-            <p className="mt-1 text-xs text-slate-400">Usage charts will appear here when the active organization starts generating billable events.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100 text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Product</th>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Meter</th>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Quantity</th>
-                  <th className="px-6 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Events</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {commercial.usageSummary.map((entry) => (
-                  <tr key={`${entry.productFamily}:${entry.meterName}`}>
-                    <td className="px-6 py-4 font-medium text-slate-900">{entry.productFamily}</td>
-                    <td className="px-6 py-4 text-slate-600">{entry.meterName}</td>
-                    <td className="px-6 py-4 text-slate-600">{entry.totalQuantity}</td>
-                    <td className="px-6 py-4 text-slate-600">{entry.eventCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <CommerceUsageWorkspace />
     </div>
   );
 }

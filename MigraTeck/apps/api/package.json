@@ -8,6 +8,7 @@
     "lint": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server.js",
     "start:webhook-worker": "node dist/webhook-worker.js",
+    "start:usage-worker": "node dist/usage-worker.js",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -15,6 +16,7 @@
     "@migrateck/billing-core": "workspace:*",
     "fastify": "^5.10.0",
     "pg": "^8.20.0",
+    "stripe": "^17.7.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

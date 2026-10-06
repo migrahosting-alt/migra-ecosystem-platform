@@ -27,7 +27,7 @@ export const ENTITLEMENT_STATUSES = [
 export type ProductKey = (typeof PRODUCT_KEYS)[number];
 export type EntitlementStatus = (typeof ENTITLEMENT_STATUSES)[number];
 
-const FAMILY_TO_PRODUCT: Record<string, ProductKey> = {
+export const CATALOG_FAMILY_TO_PRODUCT: Record<string, ProductKey> = {
   builder: "MIGRABUILDER",
   hosting: "MIGRAHOSTING",
   intake: "MIGRAINTAKE",
@@ -42,7 +42,7 @@ const FAMILY_TO_PRODUCT: Record<string, ProductKey> = {
 function serializeCatalog() {
   return PRODUCT_CATALOG.map((product) => ({
     productFamily: product.productFamily,
-    productKey: FAMILY_TO_PRODUCT[product.productFamily] ?? null,
+    productKey: CATALOG_FAMILY_TO_PRODUCT[product.productFamily] ?? null,
     name: product.name,
     description: product.description,
     planCount: product.plans.length,
