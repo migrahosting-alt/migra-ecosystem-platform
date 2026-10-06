@@ -1,0 +1,29 @@
+[Unit]
+Description=MigraTeck Provisioning Engine Worker
+After=network.target migrateck-platform-api.service
+Wants=migrateck-platform-api.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/migra/services/migrateck-platform-api
+EnvironmentFile=/etc/migrateck/migrateck.env
+EnvironmentFile=/etc/migrateck/platform-api.env
+Environment=TZ=UTC
+ExecStart=/usr/bin/node dist/provisioning-worker.js
+Restart=always
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
