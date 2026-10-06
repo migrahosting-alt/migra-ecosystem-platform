@@ -1,5 +1,17 @@
 import { fetchPlatformApi } from "@/lib/auth/api";
 
+type ApiReadResult<T> =
+  | { data: T; ok: true }
+  | { error: string; status: number; ok: false };
+
+async function readCommercialSource<T>(path: string, orgId: string): Promise<ApiReadResult<T>> {
+  try {
+    return await fetchPlatformApi<T>(path, orgId, { signal: AbortSignal.timeout(5000) });
+  } catch {
+    return { error: "Commercial source unavailable", status: 503, ok: false };
+  }
+}
+
 export type BillingAccount = {
   id: string;
   orgId: string;
@@ -67,6 +79,16 @@ export type CommercialSnapshot = {
   entitlements: OrgEntitlements;
   usageSummary: UsageSummaryEntry[];
   dunningState: string;
+  availability: {
+    account: boolean;
+    subscriptions: boolean;
+    invoices: boolean;
+    paymentMethods: boolean;
+    tax: boolean;
+    entitlements: boolean;
+    usageSummary: boolean;
+    dunning: boolean;
+  };
 };
 
 export async function getCommercialSnapshot(orgId?: string | null): Promise<CommercialSnapshot> {
@@ -80,18 +102,28 @@ export async function getCommercialSnapshot(orgId?: string | null): Promise<Comm
       entitlements: {},
       usageSummary: [],
       dunningState: "unknown",
+      availability: {
+        account: false,
+        subscriptions: false,
+        invoices: false,
+        paymentMethods: false,
+        tax: false,
+        entitlements: false,
+        usageSummary: false,
+        dunning: false,
+      },
     };
   }
 
   const [accountRes, subscriptionsRes, invoicesRes, paymentMethodsRes, taxRes, entitlementsRes, usageSummaryRes, dunningRes] = await Promise.all([
-    fetchPlatformApi<BillingAccount>("/billing/account", orgId),
-    fetchPlatformApi<BillingSubscription[]>("/billing/subscriptions", orgId),
-    fetchPlatformApi<BillingInvoice[]>("/billing/invoices", orgId),
-    fetchPlatformApi<BillingPaymentMethod[]>("/billing/payment-methods", orgId),
-    fetchPlatformApi<TaxInfo>("/billing/tax", orgId),
-    fetchPlatformApi<OrgEntitlements>("/billing/entitlements", orgId),
-    fetchPlatformApi<UsageSummaryEntry[]>("/billing/usage/summary", orgId),
-    fetchPlatformApi<{ dunningState: string }>("/billing/dunning", orgId),
+    readCommercialSource<BillingAccount>("/billing/account", orgId),
+    readCommercialSource<BillingSubscription[]>("/billing/subscriptions", orgId),
+    readCommercialSource<BillingInvoice[]>("/billing/invoices", orgId),
+    readCommercialSource<BillingPaymentMethod[]>("/billing/payment-methods", orgId),
+    readCommercialSource<TaxInfo>("/billing/tax", orgId),
+    readCommercialSource<OrgEntitlements>("/billing/entitlements", orgId),
+    readCommercialSource<UsageSummaryEntry[]>("/billing/usage/summary", orgId),
+    readCommercialSource<{ dunningState: string }>("/billing/dunning", orgId),
   ]);
 
   return {
@@ -103,6 +135,16 @@ export async function getCommercialSnapshot(orgId?: string | null): Promise<Comm
     entitlements: entitlementsRes.ok ? entitlementsRes.data : {},
     usageSummary: usageSummaryRes.ok ? usageSummaryRes.data : [],
     dunningState: dunningRes.ok ? dunningRes.data.dunningState : "unknown",
+    availability: {
+      account: accountRes.ok,
+      subscriptions: subscriptionsRes.ok,
+      invoices: invoicesRes.ok,
+      paymentMethods: paymentMethodsRes.ok,
+      tax: taxRes.ok,
+      entitlements: entitlementsRes.ok,
+      usageSummary: usageSummaryRes.ok,
+      dunning: dunningRes.ok,
+    },
   };
 }
 

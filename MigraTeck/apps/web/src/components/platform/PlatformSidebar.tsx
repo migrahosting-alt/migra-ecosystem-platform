@@ -78,7 +78,7 @@ const platformNav: PlatformNavGroup[] = [
   {
     heading: "Trust",
     items: [
-      { href: "/platform/trust", label: "Trust Operations", icon: ShieldCheck },
+      { href: "/platform/trust", label: "Trust Overview", icon: ShieldCheck },
       { href: "/platform/security", label: "Security", icon: ShieldCheck },
       { href: "/platform/compliance", label: "Compliance & Audit", icon: BookOpenCheck },
     ],
