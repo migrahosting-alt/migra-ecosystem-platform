@@ -139,7 +139,7 @@ type AccessPayload = {
   subscriptions: Array<{
     id: string;
     provider: string;
-    stripeSubscriptionId: string;
+    externalSubscriptionId: string;
     status: string;
     currentPeriodStart: string | null;
     currentPeriodEnd: string | null;
@@ -720,7 +720,7 @@ export function CatalogEntitlementsWorkspace() {
                       id: subscription.id,
                       title: subscription.status,
                       badge: subscription.provider,
-                      meta: subscription.stripeSubscriptionId,
+                      meta: subscription.externalSubscriptionId,
                       detail: subscription.currentPeriodEnd ? "Period ends " + formatDate(subscription.currentPeriodEnd) : "No period end recorded",
                       status: subscription.status,
                     }))}

@@ -198,7 +198,7 @@ export async function getOrganizationCommerceAccess(orgId: string) {
       [orgId],
     ),
     db.query(
-      'SELECT id,provider::text AS provider,"stripeSubscriptionId","stripeCustomerId",status::text AS status,"currentPeriodStart","currentPeriodEnd","cancelAtPeriodEnd","canceledAt","createdAt","updatedAt" FROM "BillingSubscription" WHERE "orgId"=$1 ORDER BY "createdAt" DESC LIMIT 25',
+      'SELECT id,provider::text AS provider,"externalSubscriptionId","externalCustomerId",status::text AS status,"currentPeriodStart","currentPeriodEnd","cancelAtPeriodEnd","canceledAt","createdAt","updatedAt" FROM "BillingSubscription" WHERE "orgId"=$1 ORDER BY "createdAt" DESC LIMIT 25',
       [orgId],
     ),
   ]);
