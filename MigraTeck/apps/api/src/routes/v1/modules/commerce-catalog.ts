@@ -188,9 +188,15 @@ export async function registerCommerceCatalogRoutes(
   app.get(
     "/commerce/provisioning/jobs/:jobId/remediation",
     async (request) => {
-      await requirePlatformAuthority(request, ["platform.commerce.read"]);
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.read",
+      ]);
       const { jobId } = provisioningJobParamsSchema.parse(request.params);
-      return getDeadLetterRemediation(jobId);
+      return getDeadLetterRemediation(jobId, {
+        includeHostingSuggestions: authority.permissions.includes(
+          "platform.hosting.read",
+        ),
+      });
     },
   );
 

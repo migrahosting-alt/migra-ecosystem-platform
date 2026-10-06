@@ -414,6 +414,211 @@ export async function searchMigraPanelTenants(query = "", limit = 40) {
   );
 }
 
+export type HostingRecoveryCandidate = {
+  tenantId: string;
+  name: string | null;
+  slug: string | null;
+  companyName: string | null;
+  status: string | null;
+  matchScore: number;
+  matchReason: "exact_slug" | "exact_name" | "normalized_identity" | "partial_match";
+  domains: string[];
+  serviceInstances: Array<{
+    id: string;
+    status: string;
+  }>;
+  targetIps: string[];
+  suggestedContext: {
+    tenantId: string;
+    domain?: string;
+    serviceInstanceId?: string;
+    targetIp?: string;
+  };
+};
+
+function normalizedIdentity(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function rankRecoveryCandidate(
+  tenant: {
+    name: string | null;
+    slug: string | null;
+    companyName: string | null;
+  },
+  input: { orgName?: string | null; orgSlug?: string | null },
+): { score: number; reason: HostingRecoveryCandidate["matchReason"] } {
+  const orgSlug = input.orgSlug?.trim().toLowerCase() ?? "";
+  const orgName = input.orgName?.trim().toLowerCase() ?? "";
+  const tenantSlug = tenant.slug?.trim().toLowerCase() ?? "";
+  const tenantName = tenant.name?.trim().toLowerCase() ?? "";
+  const companyName = tenant.companyName?.trim().toLowerCase() ?? "";
+
+  if (orgSlug && tenantSlug === orgSlug) return { score: 100, reason: "exact_slug" };
+  if (orgName && (tenantName === orgName || companyName === orgName)) {
+    return { score: 95, reason: "exact_name" };
+  }
+
+  const orgTokens = [normalizedIdentity(input.orgSlug), normalizedIdentity(input.orgName)]
+    .filter(Boolean);
+  const tenantTokens = [
+    normalizedIdentity(tenant.slug),
+    normalizedIdentity(tenant.name),
+    normalizedIdentity(tenant.companyName),
+  ].filter(Boolean);
+
+  if (orgTokens.some((token) => tenantTokens.includes(token))) {
+    return { score: 85, reason: "normalized_identity" };
+  }
+  return { score: 50, reason: "partial_match" };
+}
+
+function uniqueNonEmpty(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+async function readTenantRecoverySignals(
+  tenantId: string,
+  tenantDomain: string | null,
+) {
+  const [websites, serviceInstances, pods, targetBindings] = await Promise.all([
+    panelQuery<{ primaryDomain: string; status: string }>(
+      `SELECT "primaryDomain",status
+       FROM websites
+       WHERE "tenantId"=$1
+       ORDER BY CASE WHEN lower(status)='active' THEN 0 ELSE 1 END,"updatedAt" DESC
+       LIMIT 20`,
+      [tenantId],
+    ),
+    panelQuery<{ id: string; status: string }>(
+      `SELECT id,status
+       FROM service_instances
+       WHERE "tenantId"=$1
+         AND lower("serviceType")='cloudpod'
+       ORDER BY
+         CASE
+           WHEN lower(status) IN ('active','pending','provisioning','running') THEN 0
+           WHEN lower(status)='terminated' THEN 2
+           ELSE 1
+         END,
+         "updatedAt" DESC
+       LIMIT 20`,
+      [tenantId],
+    ),
+    panelQuery<{ ip: string | null; status: string | null }>(
+      `SELECT ip,status
+       FROM cloud_pods
+       WHERE tenantid=$1
+         AND ip IS NOT NULL
+       ORDER BY CASE WHEN lower(COALESCE(status,''))='active' THEN 0 ELSE 1 END,updated_at DESC
+       LIMIT 20`,
+      [tenantId],
+    ),
+    panelQuery<{
+      desiredIpAddress: string | null;
+      discoveredIpAddress: string | null;
+      primaryDomain: string;
+    }>(
+      `SELECT
+         b."desiredIpAddress",
+         b."discoveredIpAddress",
+         w."primaryDomain"
+       FROM website_target_bindings b
+       JOIN websites w ON w.id=b."websiteId"
+       WHERE w."tenantId"=$1
+       ORDER BY b."updatedAt" DESC
+       LIMIT 20`,
+      [tenantId],
+    ),
+  ]);
+
+  const domains = uniqueNonEmpty([
+    tenantDomain,
+    ...websites.map((row) => row.primaryDomain),
+    ...targetBindings.map((row) => row.primaryDomain),
+  ]);
+  const targetIps = uniqueNonEmpty([
+    ...pods.map((row) => row.ip),
+    ...targetBindings.flatMap((row) => [
+      row.discoveredIpAddress,
+      row.desiredIpAddress,
+    ]),
+  ]);
+  const liveServiceInstances = serviceInstances.filter(
+    (row) => !["terminated", "canceled", "cancelled"].includes(row.status.toLowerCase()),
+  );
+
+  return {
+    domains,
+    serviceInstances,
+    targetIps,
+    suggested: {
+      domain: domains.length === 1 ? domains[0] : undefined,
+      serviceInstanceId:
+        liveServiceInstances.length === 1 ? liveServiceInstances[0]?.id : undefined,
+      targetIp: targetIps.length === 1 ? targetIps[0] : undefined,
+    },
+  };
+}
+
+export async function getHostingRecoveryCandidates(input: {
+  orgName?: string | null;
+  orgSlug?: string | null;
+  limit?: number;
+}): Promise<HostingRecoveryCandidate[]> {
+  const searchTerms = uniqueNonEmpty([input.orgSlug, input.orgName]);
+  if (searchTerms.length === 0) return [];
+
+  const candidateMap = new Map<
+    string,
+    Awaited<ReturnType<typeof searchMigraPanelTenants>>[number]
+  >();
+
+  for (const term of searchTerms) {
+    const matches = await searchMigraPanelTenants(term, 15);
+    for (const match of matches) candidateMap.set(match.id, match);
+  }
+
+  const ranked = [...candidateMap.values()]
+    .map((tenant) => ({
+      tenant,
+      rank: rankRecoveryCandidate(tenant, input),
+    }))
+    .sort(
+      (a, b) =>
+        b.rank.score - a.rank.score ||
+        b.tenant.websiteCount - a.tenant.websiteCount ||
+        a.tenant.id.localeCompare(b.tenant.id),
+    )
+    .slice(0, Math.min(Math.max(input.limit ?? 5, 1), 10));
+
+  return Promise.all(
+    ranked.map(async ({ tenant, rank }) => {
+      const signals = await readTenantRecoverySignals(tenant.id, tenant.domain);
+      return {
+        tenantId: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        companyName: tenant.companyName,
+        status: tenant.status,
+        matchScore: rank.score,
+        matchReason: rank.reason,
+        domains: signals.domains,
+        serviceInstances: signals.serviceInstances,
+        targetIps: signals.targetIps,
+        suggestedContext: {
+          tenantId: tenant.id,
+          ...(signals.suggested.domain ? { domain: signals.suggested.domain } : {}),
+          ...(signals.suggested.serviceInstanceId
+            ? { serviceInstanceId: signals.suggested.serviceInstanceId }
+            : {}),
+          ...(signals.suggested.targetIp ? { targetIp: signals.suggested.targetIp } : {}),
+        },
+      };
+    }),
+  );
+}
+
 async function readPanelTenant(tenantId: string) {
   const rows = await panelQuery<{
     id: string;

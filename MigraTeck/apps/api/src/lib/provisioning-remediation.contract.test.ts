@@ -75,3 +75,15 @@ test("recovery routes require platform commerce authority", () => {
     /commerce\/provisioning\/jobs\/:jobId\/cancel[\s\S]*?platform\.commerce\.entitlements\.manage/,
   );
 });
+
+test("cross-system recovery suggestions require Hosting read authority and remain optional", () => {
+  assert.match(service, /getHostingRecoveryCandidates/);
+  assert.match(service, /includeHostingSuggestions/);
+  assert.match(service, /hostingCandidates/);
+  assert.match(service, /suggestionReason/);
+  assert.match(routes, /authority\.permissions\.includes\(\s*"platform\.hosting\.read"/);
+  assert.match(
+    routes,
+    /getDeadLetterRemediation\(jobId, \{[\s\S]*?includeHostingSuggestions/,
+  );
+});

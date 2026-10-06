@@ -3,6 +3,10 @@ import type { PoolClient } from "pg";
 import { getDb } from "./db.js";
 import { getProvisioningWorkerStatus } from "./commerce-entitlements.js";
 import {
+  getHostingRecoveryCandidates,
+  type HostingRecoveryCandidate,
+} from "./hosting-integration.js";
+import {
   hashCanonicalPayload,
   signProvisioningEnvelope,
   verifyProvisioningEnvelope,
@@ -252,6 +256,7 @@ async function analyze(
   client: PoolClient,
   job: DeadJobRow,
   malformed: boolean,
+  options: { includeHostingSuggestions?: boolean } = {},
 ) {
   const payload = asRecord(job.payload);
   const product = productLane(payload);
@@ -264,6 +269,31 @@ async function analyze(
   const missingFields = contract.requiredFields.filter(
     (field) => !text(currentContext[field]),
   );
+
+  let hostingCandidates: HostingRecoveryCandidate[] = [];
+  let suggestionReason: string | null = null;
+  if (
+    options.includeHostingSuggestions &&
+    product === "MIGRAHOSTING" &&
+    contract.supported &&
+    job.status === "DEAD" &&
+    missingFields.length > 0
+  ) {
+    try {
+      hostingCandidates = await getHostingRecoveryCandidates({
+        orgName: job.orgName,
+        orgSlug: job.orgSlug,
+        limit: 5,
+      });
+      if (hostingCandidates.length === 0) {
+        suggestionReason =
+          "No MigraPanel tenant candidate matched this organization. Recovery context must be supplied manually or the organization must be linked from Hosting.";
+      }
+    } catch {
+      suggestionReason =
+        "MigraPanel recovery suggestions are temporarily unavailable. Manual audited recovery remains available.";
+    }
+  }
 
   let reason: string | null = null;
   if (job.status !== "DEAD") {
@@ -315,6 +345,8 @@ async function analyze(
       requiredFields: contract.requiredFields,
       missingFields,
       currentContext,
+      hostingCandidates,
+      suggestionReason,
       worker,
       provisioningPaused: paused,
     },
@@ -324,7 +356,10 @@ async function analyze(
   };
 }
 
-export async function getDeadLetterRemediation(jobId: string) {
+export async function getDeadLetterRemediation(
+  jobId: string,
+  options: { includeHostingSuggestions?: boolean } = {},
+) {
   const client = await getDb().connect();
   try {
     const job = await loadJob(client, jobId, false);
@@ -332,7 +367,7 @@ export async function getDeadLetterRemediation(jobId: string) {
       throw Object.assign(new Error("Provisioning job not found"), { statusCode: 404 });
     }
     const malformed = await isMalformed(client, job.id);
-    return analyze(client, job, malformed);
+    return analyze(client, job, malformed, options);
   } finally {
     client.release();
   }

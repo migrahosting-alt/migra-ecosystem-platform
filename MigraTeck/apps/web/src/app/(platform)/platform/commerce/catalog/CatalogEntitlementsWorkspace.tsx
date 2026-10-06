@@ -198,6 +198,23 @@ type DeadLetterRecoveryContext = {
   mailboxEmail: string;
 };
 
+type HostingRecoveryCandidate = {
+  tenantId: string;
+  name: string | null;
+  slug: string | null;
+  companyName: string | null;
+  status: string | null;
+  matchScore: number;
+  matchReason: "exact_slug" | "exact_name" | "normalized_identity" | "partial_match";
+  domains: string[];
+  serviceInstances: Array<{
+    id: string;
+    status: string;
+  }>;
+  targetIps: string[];
+  suggestedContext: Partial<DeadLetterRecoveryContext>;
+};
+
 type DeadLetterRemediation = {
   job: {
     id: string;
@@ -224,6 +241,8 @@ type DeadLetterRemediation = {
     requiredFields: string[];
     missingFields: string[];
     currentContext: Partial<DeadLetterRecoveryContext>;
+    hostingCandidates?: HostingRecoveryCandidate[];
+    suggestionReason?: string | null;
     worker: WorkerStatus;
     provisioningPaused: boolean;
   };
@@ -1271,6 +1290,25 @@ function DeadLetterRemediationPanel({
   });
   const [saving, setSaving] = useState<"retry" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const hostingCandidates = remediation.retry.hostingCandidates ?? [];
+
+  function applyHostingCandidate(candidate: HostingRecoveryCandidate) {
+    setContext((current) => ({
+      ...current,
+      tenantId: candidate.tenantId,
+      domain: candidate.suggestedContext.domain ?? current.domain,
+      serviceInstanceId:
+        candidate.suggestedContext.serviceInstanceId ?? current.serviceInstanceId,
+      targetIp: candidate.suggestedContext.targetIp ?? current.targetIp,
+    }));
+  }
+
+  function chooseRecoveryValue(
+    field: "domain" | "serviceInstanceId" | "targetIp",
+    value: string,
+  ) {
+    setContext((current) => ({ ...current, [field]: value }));
+  }
 
   const fieldMeta: Record<
     keyof DeadLetterRecoveryContext,
@@ -1529,6 +1567,142 @@ function DeadLetterRemediationPanel({
               </div>
             </div>
           )}
+
+          {hostingCandidates.length > 0 ? (
+            <div>
+              <p className="text-sm font-semibold text-slate-800">
+                MigraPanel recovery candidates
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Read-only tenant evidence matched from the failed organization name and slug.
+                Nothing is linked or retried until you explicitly choose values and submit.
+              </p>
+              <div className="mt-3 space-y-3">
+                {hostingCandidates.map((candidate) => (
+                  <div
+                    key={candidate.tenantId}
+                    className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs font-semibold text-slate-950">
+                            {candidate.name ?? candidate.companyName ?? candidate.slug ?? candidate.tenantId}
+                          </p>
+                          <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-cyan-700">
+                            {candidate.matchScore}% match
+                          </span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-500">
+                            {candidate.matchReason.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <code className="mt-1 block break-all text-[10px] text-slate-400">
+                          {candidate.tenantId}
+                        </code>
+                        <p className="mt-1 text-[10px] text-slate-500">
+                          Status {candidate.status ?? "unknown"} · {candidate.domains.length} domain option
+                          {candidate.domains.length === 1 ? "" : "s"} · {candidate.serviceInstances.length} cloudpod service instance
+                          {candidate.serviceInstances.length === 1 ? "" : "s"} · {candidate.targetIps.length} target IP
+                          {candidate.targetIps.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applyHostingCandidate(candidate)}
+                        disabled={!canManage || saving !== null}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-cyan-200 bg-white px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Check size={13} /> Use candidate
+                      </button>
+                    </div>
+
+                    {candidate.domains.length > 0 ? (
+                      <div className="mt-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Domains
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {candidate.domains.map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => chooseRecoveryValue("domain", value)}
+                              disabled={!canManage || saving !== null}
+                              className={
+                                "rounded-lg border px-2 py-1 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
+                                (context.domain === value
+                                  ? "border-cyan-300 bg-cyan-100 text-cyan-900"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-cyan-200")
+                              }
+                            >
+                              {value}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {candidate.serviceInstances.length > 0 ? (
+                      <div className="mt-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Cloudpod service instances
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {candidate.serviceInstances.map((instance) => (
+                            <button
+                              key={instance.id}
+                              type="button"
+                              onClick={() => chooseRecoveryValue("serviceInstanceId", instance.id)}
+                              disabled={!canManage || saving !== null}
+                              className={
+                                "max-w-full rounded-lg border px-2 py-1 text-left text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
+                                (context.serviceInstanceId === instance.id
+                                  ? "border-cyan-300 bg-cyan-100 text-cyan-900"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-cyan-200")
+                              }
+                            >
+                              <span className="block max-w-[18rem] truncate font-mono">{instance.id}</span>
+                              <span className="block text-[9px] text-slate-400">{instance.status}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {candidate.targetIps.length > 0 ? (
+                      <div className="mt-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                          Target IP evidence
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {candidate.targetIps.map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => chooseRecoveryValue("targetIp", value)}
+                              disabled={!canManage || saving !== null}
+                              className={
+                                "rounded-lg border px-2 py-1 font-mono text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
+                                (context.targetIp === value
+                                  ? "border-cyan-300 bg-cyan-100 text-cyan-900"
+                                  : "border-slate-200 bg-white text-slate-600 hover:border-cyan-200")
+                              }
+                            >
+                              {value}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : remediation.retry.suggestionReason ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+              {remediation.retry.suggestionReason}
+            </div>
+          ) : null}
 
           {requiredFields.length > 0 ? (
             <div>
