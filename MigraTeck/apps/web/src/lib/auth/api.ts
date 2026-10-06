@@ -139,6 +139,53 @@ export async function fetchAuthApi<T = unknown>(
 /**
  * Fetch from the main platform API with org context.
  */
+export async function fetchPlatformAuthorityApi<T = unknown>(
+  path: string,
+  options: RequestInit = {},
+): Promise<{ data: T; ok: true } | { error: string; status: number; ok: false }> {
+  const token = await getAccessToken();
+  if (!token) {
+    return {
+      error: "This control needs a refreshed sign-in before it can load.",
+      status: 401,
+      ok: false,
+    };
+  }
+
+  const baseUrl =
+    process.env.MIGRATECK_PLATFORM_API_URL ??
+    process.env.MIGRATECK_API_URL ??
+    "http://127.0.0.1:4010";
+  const headers = new Headers(options.headers);
+  if (!headers.has("Content-Type") && options.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+  headers.set("Authorization", `Bearer ${token}`);
+
+  const res = await fetch(`${baseUrl}/v1${path}`, {
+    ...options,
+    headers,
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const message =
+      res.status === 403
+        ? body?.error?.message ??
+          body?.message ??
+          "MigraTeck platform operator authority is required for this control."
+        : getSafePlatformErrorMessage(
+            res.status,
+            body?.error?.message ?? body?.message,
+          );
+    return { error: message, status: res.status, ok: false };
+  }
+
+  const data = await res.json() as T;
+  return { data, ok: true };
+}
+
 export async function fetchPlatformApi<T = unknown>(
   path: string,
   orgId: string,

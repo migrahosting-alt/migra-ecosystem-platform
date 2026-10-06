@@ -59,7 +59,7 @@ export default async function CommerceOverviewPage() {
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-50 text-amber-600"><Boxes size={19} /></span>
           <h2 className="mt-4 text-base font-semibold text-slate-950">Catalog & Entitlements</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">The repo already contains a product catalog synchronized to processor prices. Entitlements are the product-access contract consumed by the ecosystem.</p>
-          <p className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Control surface next</p>
+          <Link href="/platform/commerce/catalog" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-blue-600">Open catalog & entitlements <ArrowRight size={14} /></Link>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-50 text-cyan-600"><ChartNoAxesCombined size={19} /></span>

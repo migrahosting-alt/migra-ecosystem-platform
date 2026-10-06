@@ -99,6 +99,24 @@ test("OPERATOR can act on accounts but cannot widen authority", () => {
   assert.ok(!p.has("platform.roles.manage"), "only OWNER may grant roles");
 });
 
+test("commerce authority separates reading, org access changes, and global catalog mappings", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.commerce.read"));
+  assert.ok(!support.has("platform.commerce.entitlements.manage"));
+  assert.ok(!support.has("platform.commerce.catalog.manage"));
+
+  assert.ok(operator.has("platform.commerce.read"));
+  assert.ok(operator.has("platform.commerce.entitlements.manage"));
+  assert.ok(!operator.has("platform.commerce.catalog.manage"), "global price mappings remain OWNER-only");
+
+  assert.ok(owner.has("platform.commerce.read"));
+  assert.ok(owner.has("platform.commerce.entitlements.manage"));
+  assert.ok(owner.has("platform.commerce.catalog.manage"));
+});
+
 test("OWNER holds every permission, including future ones", () => {
   const p = permissionsForRoles(["OWNER"]);
   for (const perm of PLATFORM_PERMISSIONS) {

@@ -1,0 +1,850 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Boxes,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Edit3,
+  Layers3,
+  Loader2,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  SlidersHorizontal,
+} from "lucide-react";
+
+type ProductKey =
+  | "MIGRATECK"
+  | "MIGRAHOSTING"
+  | "MIGRAPANEL"
+  | "MIGRAVOICE"
+  | "MIGRAMAIL"
+  | "MIGRAINTAKE"
+  | "MIGRAMARKET"
+  | "MIGRAPILOT"
+  | "MIGRAINVOICE"
+  | "MIGRADRIVE"
+  | "MIGRABUILDER";
+
+type CatalogPrice = {
+  lookupKey: string;
+  componentType: string;
+  billingInterval: string;
+  unitAmount: number | null;
+  meterName: string | null;
+  usageDimension: string | null;
+};
+
+type CatalogPlan = {
+  planCode: string;
+  name: string;
+  description: string;
+  trialDays: number | null;
+  entitlementCount: number;
+  entitlements: Record<string, string | number | boolean>;
+  prices: CatalogPrice[];
+};
+
+type CatalogProduct = {
+  productFamily: string;
+  productKey: ProductKey | null;
+  name: string;
+  description: string;
+  planCount: number;
+  priceCount: number;
+  plans: CatalogPlan[];
+};
+
+type Binding = {
+  id: string;
+  provider: string;
+  externalPriceId: string;
+  product: ProductKey;
+  statusOnActive: "ACTIVE" | "TRIAL" | "RESTRICTED" | "INTERNAL_ONLY";
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CatalogPayload = {
+  authority: {
+    roles: string[];
+    permissions: string[];
+    viaBootstrap: boolean;
+  };
+  catalog: CatalogProduct[];
+  bindings: Binding[];
+  bindingCoverage: Array<{
+    product: ProductKey;
+    bindings: number;
+    activeEntitlements: number;
+    restrictedEntitlements: number;
+  }>;
+  readiness: {
+    canonicalCatalogAuthority: string;
+    nativeCatalogMirrorReady: boolean;
+    effectiveEntitlementAuthority: string | null;
+    tables: Record<string, { present: boolean; rows: number | null }>;
+  };
+  metrics: {
+    catalogProducts: number;
+    catalogPlans: number;
+    catalogPrices: number;
+    liveBindings: number;
+    effectiveEntitlements: number;
+  };
+  mutationReadiness: {
+    bindings: boolean;
+    entitlements: boolean;
+    entitlementReason: string;
+  };
+};
+
+type OrganizationSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  isMigraHostingClient: boolean;
+  authOrganizationId: string | null;
+  entitlementCount: number;
+  activeEntitlementCount: number;
+  subscriptionCount: number;
+  accessUpdatedAt: string | null;
+};
+
+type AccessPayload = {
+  canManageEntitlements: boolean;
+  managementBlockedReason: string;
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+    isMigraHostingClient: boolean;
+    authOrganizationId: string | null;
+  };
+  entitlements: Array<{
+    product: ProductKey;
+    status: "ACTIVE" | "TRIAL" | "RESTRICTED" | "INTERNAL_ONLY";
+    startsAt: string | null;
+    endsAt: string | null;
+    notes: string | null;
+    updatedAt: string | null;
+    persisted: boolean;
+    evidence: "stripe_sync" | "manual_or_legacy" | "none";
+  }>;
+  subscriptions: Array<{
+    id: string;
+    provider: string;
+    stripeSubscriptionId: string;
+    status: string;
+    currentPeriodStart: string | null;
+    currentPeriodEnd: string | null;
+    cancelAtPeriodEnd: boolean;
+    canceledAt: string | null;
+  }>;
+  recentProvisioningJobs: Array<{
+    id: string;
+    source: string;
+    type: string;
+    status: string;
+    attempts: number;
+    maxAttempts: number;
+    notBefore: string | null;
+    lastError: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
+type BindingEditor = {
+  externalPriceId: string;
+  product: ProductKey;
+  statusOnActive: "ACTIVE" | "TRIAL" | "RESTRICTED" | "INTERNAL_ONLY";
+  notes: string;
+};
+
+const PRODUCT_KEYS: ProductKey[] = [
+  "MIGRATECK",
+  "MIGRAHOSTING",
+  "MIGRAPANEL",
+  "MIGRAVOICE",
+  "MIGRAMAIL",
+  "MIGRAINTAKE",
+  "MIGRAMARKET",
+  "MIGRAPILOT",
+  "MIGRAINVOICE",
+  "MIGRADRIVE",
+  "MIGRABUILDER",
+];
+
+const emptyBinding: BindingEditor = {
+  externalPriceId: "",
+  product: "MIGRAHOSTING",
+  statusOnActive: "ACTIVE",
+  notes: "",
+};
+
+function formatMoney(cents: number | null) {
+  if (cents === null) return "Metered";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(cents / 100);
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString();
+}
+
+function statusClass(status: string) {
+  if (["ACTIVE", "SUCCEEDED"].includes(status)) return "bg-emerald-50 text-emerald-700";
+  if (["TRIAL", "PENDING", "RUNNING"].includes(status)) return "bg-blue-50 text-blue-700";
+  if (["RESTRICTED", "FAILED", "DEAD"].includes(status)) return "bg-rose-50 text-rose-700";
+  if (status === "INTERNAL_ONLY") return "bg-violet-50 text-violet-700";
+  return "bg-slate-100 text-slate-600";
+}
+
+export function CatalogEntitlementsWorkspace() {
+  const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
+  const [bindingEditor, setBindingEditor] = useState<BindingEditor>(emptyBinding);
+  const [bindingSaving, setBindingSaving] = useState(false);
+  const [bindingMessage, setBindingMessage] = useState<string | null>(null);
+  const [orgQuery, setOrgQuery] = useState("");
+  const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
+  const [orgLoading, setOrgLoading] = useState(false);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [access, setAccess] = useState<AccessPayload | null>(null);
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+
+  const loadCatalog = useCallback(async () => {
+    setLoading(true);
+    setCatalogError(null);
+    try {
+      const response = await fetch("/api/platform/commerce/catalog", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Unable to load commerce catalog");
+      setCatalog(body);
+    } catch (error) {
+      setCatalogError(error instanceof Error ? error.message : "Unable to load commerce catalog");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadOrganizations = useCallback(async (query: string) => {
+    setOrgLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "40" });
+      if (query.trim()) params.set("q", query.trim());
+      const response = await fetch(
+        "/api/platform/commerce/organizations?" + params.toString(),
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Unable to search organizations");
+      setOrganizations(body.organizations ?? []);
+    } catch (error) {
+      setAccessError(error instanceof Error ? error.message : "Unable to search organizations");
+    } finally {
+      setOrgLoading(false);
+    }
+  }, []);
+
+  const loadAccess = useCallback(async (orgId: string) => {
+    setAccessLoading(true);
+    setAccessError(null);
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/organizations/" +
+          encodeURIComponent(orgId) +
+          "/entitlements",
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Unable to load organization access");
+      setAccess(body);
+    } catch (error) {
+      setAccess(null);
+      setAccessError(error instanceof Error ? error.message : "Unable to load organization access");
+    } finally {
+      setAccessLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCatalog();
+    void loadOrganizations("");
+  }, [loadCatalog, loadOrganizations]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadOrganizations(orgQuery);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [orgQuery, loadOrganizations]);
+
+  const coverageByProduct = useMemo(
+    () => new Map(catalog?.bindingCoverage.map((entry) => [entry.product, entry]) ?? []),
+    [catalog],
+  );
+
+  async function selectOrganization(orgId: string) {
+    setSelectedOrgId(orgId);
+    await loadAccess(orgId);
+  }
+
+  function editBinding(binding: Binding) {
+    setBindingEditor({
+      externalPriceId: binding.externalPriceId,
+      product: binding.product,
+      statusOnActive: binding.statusOnActive,
+      notes: binding.notes ?? "",
+    });
+    setBindingMessage(null);
+    document.getElementById("binding-editor")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function saveBinding() {
+    if (!bindingEditor.externalPriceId.trim()) {
+      setBindingMessage("A Stripe price ID is required.");
+      return;
+    }
+    setBindingSaving(true);
+    setBindingMessage(null);
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/catalog/bindings/" +
+          encodeURIComponent(bindingEditor.externalPriceId.trim()),
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            product: bindingEditor.product,
+            statusOnActive: bindingEditor.statusOnActive,
+            notes: bindingEditor.notes.trim() || null,
+          }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Unable to save price binding");
+      setBindingMessage("Binding saved and audited.");
+      setBindingEditor(emptyBinding);
+      await loadCatalog();
+    } catch (error) {
+      setBindingMessage(error instanceof Error ? error.message : "Unable to save price binding");
+    } finally {
+      setBindingSaving(false);
+    }
+  }
+
+  if (loading && !catalog) {
+    return (
+      <div className="grid min-h-72 place-items-center rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-600">
+          <Loader2 size={18} className="animate-spin text-blue-600" />
+          Loading commerce authority…
+        </div>
+      </div>
+    );
+  }
+
+  if (!catalog) {
+    return (
+      <section className="rounded-3xl border border-rose-200 bg-rose-50 p-6">
+        <h2 className="font-semibold text-rose-950">Catalog authority unavailable</h2>
+        <p className="mt-2 text-sm leading-6 text-rose-800">
+          {catalogError ?? "Platform commerce authority is required."}
+        </p>
+        <button
+          onClick={() => void loadCatalog()}
+          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-800"
+        >
+          <RefreshCw size={15} /> Retry
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {catalog.authority.viaBootstrap ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          This operator session is using MigraAuth bootstrap authority. Grant a persistent platform role before removing the bootstrap path.
+        </div>
+      ) : null}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard label="Products" value={catalog.metrics.catalogProducts} detail="canonical source catalog" />
+        <MetricCard label="Plans" value={catalog.metrics.catalogPlans} detail="source-controlled plans" />
+        <MetricCard label="Price components" value={catalog.metrics.catalogPrices} detail="lookup-key definitions" />
+        <MetricCard label="Live bindings" value={catalog.metrics.liveBindings} detail="Stripe price mappings" />
+        <MetricCard label="Access rows" value={catalog.metrics.effectiveEntitlements} detail="effective entitlements" />
+      </section>
+
+      <section className="grid gap-6 2xl:grid-cols-[1.12fr_0.88fr]">
+        <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-end sm:justify-between sm:px-6">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Source authority</p>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Canonical product catalog</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Pricing definitions are code-reviewed. This surface inspects them; it does not invent a second price database.
+              </p>
+            </div>
+            <button
+              onClick={() => void loadCatalog()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <RefreshCw size={15} /> Refresh
+            </button>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {catalog.catalog.map((product) => {
+              const expanded = expandedProduct === product.productFamily;
+              const coverage = product.productKey ? coverageByProduct.get(product.productKey) : undefined;
+              return (
+                <article key={product.productFamily} className="p-5 sm:p-6">
+                  <button
+                    onClick={() => setExpandedProduct(expanded ? null : product.productFamily)}
+                    className="flex w-full items-start gap-3 text-left"
+                  >
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-50 text-blue-600">
+                      <Boxes size={19} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-slate-950">{product.name}</h3>
+                        {product.productKey ? (
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                            {product.productKey}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">{product.description}</p>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                        <span>{product.planCount} plans</span>
+                        <span>{product.priceCount} price components</span>
+                        <span>{coverage?.bindings ?? 0} live bindings</span>
+                        <span>{coverage?.activeEntitlements ?? 0} active orgs</span>
+                      </div>
+                    </div>
+                    {expanded ? <ChevronDown size={17} className="mt-3 text-slate-400" /> : <ChevronRight size={17} className="mt-3 text-slate-400" />}
+                  </button>
+
+                  {expanded ? (
+                    <div className="mt-5 grid gap-3">
+                      {product.plans.map((plan) => (
+                        <div key={plan.planCode} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-sm font-semibold text-slate-900">{plan.name}</h4>
+                                <code className="rounded bg-white px-1.5 py-0.5 text-[10px] text-slate-500">{plan.planCode}</code>
+                              </div>
+                              <p className="mt-1 text-xs leading-5 text-slate-500">{plan.description}</p>
+                            </div>
+                            <span className="text-xs font-medium text-slate-500">{plan.entitlementCount} entitlements</span>
+                          </div>
+                          {plan.prices.length ? (
+                            <div className="mt-3 grid gap-2">
+                              {plan.prices.map((price) => (
+                                <div key={price.lookupKey} className="grid gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                                  <div className="min-w-0">
+                                    <code className="block truncate text-[11px] font-semibold text-slate-700">{price.lookupKey}</code>
+                                    <p className="mt-0.5 text-[10px] text-slate-400">
+                                      {price.componentType} · {price.billingInterval}
+                                      {price.meterName ? " · " + price.meterName : ""}
+                                    </p>
+                                  </div>
+                                  <span className="text-xs font-semibold text-slate-800">{formatMoney(price.unitAmount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-3 text-xs font-medium text-slate-500">No billable price component — source plan is free/internal.</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <section id="binding-editor" className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Global mapping</p>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Stripe binding registry</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                A Stripe price ID maps to one product access lane. Global changes require MigraAuth catalog authority.
+              </p>
+            </div>
+
+            <div className="space-y-4 p-5 sm:p-6">
+              {!catalog.mutationReadiness.bindings ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+                  You have read access only. platform.commerce.catalog.manage is required to change global mappings.
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-sm font-semibold text-slate-800">Stripe price ID</label>
+                    <input
+                      value={bindingEditor.externalPriceId}
+                      onChange={(event) => setBindingEditor((current) => ({ ...current, externalPriceId: event.target.value }))}
+                      placeholder="price_..."
+                      className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 font-mono text-xs text-slate-900 outline-none focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-500/10"
+                    />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm font-semibold text-slate-800">
+                      Product
+                      <select
+                        value={bindingEditor.product}
+                        onChange={(event) => setBindingEditor((current) => ({ ...current, product: event.target.value as ProductKey }))}
+                        className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-violet-400"
+                      >
+                        {PRODUCT_KEYS.map((product) => <option key={product} value={product}>{product}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-sm font-semibold text-slate-800">
+                      Status on active subscription
+                      <select
+                        value={bindingEditor.statusOnActive}
+                        onChange={(event) => setBindingEditor((current) => ({ ...current, statusOnActive: event.target.value as BindingEditor["statusOnActive"] }))}
+                        className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-violet-400"
+                      >
+                        <option value="ACTIVE">ACTIVE</option>
+                        <option value="TRIAL">TRIAL</option>
+                        <option value="RESTRICTED">RESTRICTED</option>
+                        <option value="INTERNAL_ONLY">INTERNAL_ONLY</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div>
+                    <label className="text-sm font-semibold text-slate-800">Operator note</label>
+                    <textarea
+                      value={bindingEditor.notes}
+                      onChange={(event) => setBindingEditor((current) => ({ ...current, notes: event.target.value }))}
+                      rows={2}
+                      maxLength={2000}
+                      placeholder="Plan/tier mapping context"
+                      className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm text-slate-900 outline-none focus:border-violet-400 focus:bg-white"
+                    />
+                  </div>
+                  {bindingMessage ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700">{bindingMessage}</div>
+                  ) : null}
+                  <button
+                    onClick={() => void saveBinding()}
+                    disabled={bindingSaving}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {bindingSaving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                    {bindingSaving ? "Saving…" : "Save global binding"}
+                  </button>
+                </>
+              )}
+
+              <div className="border-t border-slate-100 pt-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{catalog.bindings.length} live bindings</p>
+                <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+                  {catalog.bindings.map((binding) => (
+                    <div key={binding.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <code className="block truncate text-[11px] font-semibold text-slate-800">{binding.externalPriceId}</code>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-semibold text-slate-600">{binding.product}</span>
+                            <span className={"rounded-full px-2 py-0.5 text-[9px] font-bold " + statusClass(binding.statusOnActive)}>{binding.statusOnActive}</span>
+                          </div>
+                          {binding.notes ? <p className="mt-1.5 text-[11px] leading-5 text-slate-500">{binding.notes}</p> : null}
+                        </div>
+                        {catalog.mutationReadiness.bindings ? (
+                          <button onClick={() => editBinding(binding)} className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 hover:text-violet-700" aria-label="Edit binding">
+                            <Edit3 size={13} />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-600">Runtime readiness</p>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Schema authority</h2>
+            </div>
+            <div className="space-y-3 p-5 sm:p-6">
+              <ReadinessRow label="Canonical pricing" value="Source controlled" ok detail="billing-core PRODUCT_CATALOG" />
+              <ReadinessRow
+                label="Effective access"
+                value={catalog.readiness.effectiveEntitlementAuthority ?? "Missing"}
+                ok={Boolean(catalog.readiness.effectiveEntitlementAuthority)}
+                detail="production enforcement source"
+              />
+              <ReadinessRow
+                label="Native catalog mirror"
+                value={catalog.readiness.nativeCatalogMirrorReady ? "Ready" : "Not deployed"}
+                ok={catalog.readiness.nativeCatalogMirrorReady}
+                detail="BillingProduct + BillingPrice"
+              />
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">Organization access</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Effective product access</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Search an organization to inspect the exact entitlement rows, subscriptions, and recent provisioning jobs that control access.
+          </p>
+          <div className="relative mt-4">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={orgQuery}
+              onChange={(event) => setOrgQuery(event.target.value)}
+              placeholder="Search organization name or slug…"
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 outline-none focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/10"
+            />
+            {orgLoading ? <Loader2 size={15} className="absolute right-3.5 top-1/2 -translate-y-1/2 animate-spin text-slate-400" /> : null}
+          </div>
+        </div>
+
+        <div className="grid min-h-[28rem] lg:grid-cols-[0.72fr_1.28fr]">
+          <div className="border-b border-slate-100 lg:border-b-0 lg:border-r">
+            {organizations.length === 0 ? (
+              <div className="p-6 text-sm text-slate-500">No organizations match this search.</div>
+            ) : (
+              <div className="max-h-[42rem] divide-y divide-slate-100 overflow-y-auto">
+                {organizations.map((org) => (
+                  <button
+                    key={org.id}
+                    onClick={() => void selectOrganization(org.id)}
+                    className={"w-full p-4 text-left transition hover:bg-slate-50 " + (selectedOrgId === org.id ? "bg-emerald-50/70" : "")}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{org.name}</p>
+                        <code className="mt-1 block truncate text-[10px] text-slate-400">{org.slug}</code>
+                      </div>
+                      <ChevronRight size={15} className="mt-1 shrink-0 text-slate-300" />
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-medium text-slate-500">
+                      <span>{org.activeEntitlementCount} active access</span>
+                      <span>{org.subscriptionCount} subscriptions</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="min-w-0">
+            {accessLoading ? (
+              <div className="grid min-h-[28rem] place-items-center">
+                <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 size={17} className="animate-spin" /> Loading access evidence…</div>
+              </div>
+            ) : accessError ? (
+              <div className="p-6">
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{accessError}</div>
+              </div>
+            ) : access ? (
+              <div className="space-y-6 p-5 sm:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-950">{access.organization.name}</h3>
+                    <p className="mt-1 text-sm text-slate-500">{access.organization.slug}</p>
+                  </div>
+                  {!access.canManageEntitlements ? (
+                    <div className="max-w-md rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                      {access.managementBlockedReason}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {access.entitlements.map((entitlement) => (
+                    <article key={entitlement.product} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-900">{entitlement.product}</p>
+                          <span className={"mt-2 inline-block rounded-full px-2 py-0.5 text-[9px] font-bold " + statusClass(entitlement.status)}>
+                            {entitlement.status}
+                          </span>
+                        </div>
+                        <span className={"rounded-full px-2 py-0.5 text-[9px] font-semibold " + (entitlement.persisted ? "bg-white text-slate-600" : "bg-slate-200 text-slate-500")}>
+                          {entitlement.persisted ? "persisted" : "default"}
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-1 text-[10px] leading-5 text-slate-500">
+                        <p>Starts: {formatDate(entitlement.startsAt)}</p>
+                        <p>Ends: {formatDate(entitlement.endsAt)}</p>
+                        <p>Evidence: {entitlement.evidence.replace(/_/g, " ")}</p>
+                      </div>
+                      {entitlement.notes ? <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-slate-500">{entitlement.notes}</p> : null}
+                      <button
+                        disabled
+                        title={access.managementBlockedReason}
+                        className="mt-3 inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-400"
+                      >
+                        <SlidersHorizontal size={13} /> Change access
+                      </button>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="grid gap-5 xl:grid-cols-2">
+                  <EvidenceList
+                    title="Subscriptions"
+                    empty="No billing subscriptions are recorded for this organization."
+                    items={access.subscriptions.map((subscription) => ({
+                      id: subscription.id,
+                      title: subscription.status,
+                      badge: subscription.provider,
+                      meta: subscription.stripeSubscriptionId,
+                      detail: subscription.currentPeriodEnd ? "Period ends " + formatDate(subscription.currentPeriodEnd) : "No period end recorded",
+                      status: subscription.status,
+                    }))}
+                  />
+                  <EvidenceList
+                    title="Provisioning jobs"
+                    empty="No provisioning jobs are recorded for this organization."
+                    items={access.recentProvisioningJobs.map((job) => ({
+                      id: job.id,
+                      title: job.type,
+                      badge: job.source,
+                      meta: job.id,
+                      detail: job.attempts + "/" + job.maxAttempts + " attempts · " + formatDate(job.createdAt),
+                      status: job.status,
+                    }))}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="grid min-h-[28rem] place-items-center p-8 text-center">
+                <div>
+                  <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-slate-100 text-slate-500"><Layers3 size={21} /></span>
+                  <h3 className="mt-4 text-sm font-semibold text-slate-900">Select an organization</h3>
+                  <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500">
+                    The right side will show the effective access matrix, billing evidence, and provisioning state.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Deployment truth</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Commerce schema readiness</h2>
+          <p className="mt-1 text-sm text-slate-600">The operator surface reports what is actually deployed instead of assuming the newest Prisma model is live.</p>
+        </div>
+        <div className="grid gap-3 p-5 sm:grid-cols-2 sm:p-6 xl:grid-cols-4">
+          {Object.entries(catalog.readiness.tables).map(([name, table]) => (
+            <div key={name} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-2">
+                <Database size={15} className={table.present ? "text-emerald-600" : "text-slate-400"} />
+                <code className="text-xs font-semibold text-slate-800">{name}</code>
+              </div>
+              <p className={"mt-3 text-sm font-semibold " + (table.present ? "text-emerald-700" : "text-slate-500")}>
+                {table.present ? "Deployed" : "Not deployed"}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">{table.rows === null ? "No runtime table" : table.rows + " rows"}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{value.toLocaleString()}</p>
+      <p className="mt-1 text-xs text-slate-500">{detail}</p>
+    </article>
+  );
+}
+
+function ReadinessRow({
+  label,
+  value,
+  detail,
+  ok,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  ok: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <span className={"mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl " + (ok ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
+        {ok ? <ShieldCheck size={15} /> : <AlertTriangle size={15} />}
+      </span>
+      <div>
+        <p className="text-xs font-semibold text-slate-900">{label}</p>
+        <p className={"mt-1 text-sm font-semibold " + (ok ? "text-emerald-700" : "text-amber-700")}>{value}</p>
+        <p className="mt-1 text-[10px] leading-5 text-slate-500">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function EvidenceList({
+  title,
+  items,
+  empty,
+}: {
+  title: string;
+  items: Array<{ id: string; title: string; badge: string; meta: string; detail: string; status: string }>;
+  empty: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-100 px-4 py-3">
+        <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
+      </div>
+      {items.length === 0 ? (
+        <p className="p-4 text-xs leading-5 text-slate-500">{empty}</p>
+      ) : (
+        <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
+          {items.map((item) => (
+            <div key={item.id} className="p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-900">{item.title}</span>
+                <span className={"rounded-full px-2 py-0.5 text-[9px] font-bold " + statusClass(item.status)}>{item.status}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-500">{item.badge}</span>
+              </div>
+              <code className="mt-2 block truncate text-[10px] text-slate-400">{item.meta}</code>
+              <p className="mt-1 text-[10px] leading-5 text-slate-500">{item.detail}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -51,6 +51,12 @@ export const PLATFORM_PERMISSIONS = [
   "platform.users.mfa_reset",
   /** Read OAuth client configuration. */
   "platform.clients.read",
+  /** Read global commerce catalog, price bindings, and organization entitlement state. */
+  "platform.commerce.read",
+  /** Change effective organization product access and trigger provisioning transitions. */
+  "platform.commerce.entitlements.manage",
+  /** Change global price-to-product catalog bindings. Highest-risk commerce mutation. */
+  "platform.commerce.catalog.manage",
   /** Read the platform audit log. */
   "platform.audit.read",
   /** Grant and revoke platform roles — authority over authority. */
@@ -88,7 +94,12 @@ export type PlatformPermission = (typeof PLATFORM_PERMISSIONS)[number];
  * who acts" is the point of having more than one role at all.
  */
 const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
-  SUPPORT: ["platform.self.read", "platform.users.read", "platform.audit.read"],
+  SUPPORT: [
+    "platform.self.read",
+    "platform.users.read",
+    "platform.commerce.read",
+    "platform.audit.read",
+  ],
   OPERATOR: [
     "platform.self.read",
     "platform.users.read",
@@ -96,6 +107,8 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.users.suspend",
     "platform.users.mfa_reset",
     "platform.clients.read",
+    "platform.commerce.read",
+    "platform.commerce.entitlements.manage",
     "platform.audit.read",
   ],
   /*

@@ -26,6 +26,22 @@ type OrganizationsResponse = {
   organizations: AuthMembership[];
 };
 
+type PlatformAuthorityResponse = {
+  user_id: string;
+  email: string | null;
+  roles: string[];
+  permissions: string[];
+  via_bootstrap: boolean;
+};
+
+export type PlatformAuthorityPrincipal = {
+  authUser: AuthUser;
+  platformUserId: string;
+  roles: string[];
+  permissions: string[];
+  viaBootstrap: boolean;
+};
+
 export type PlatformPrincipal = {
   authUser: AuthUser;
   membership: AuthMembership;
@@ -72,6 +88,33 @@ async function authFetch<T>(path: string, token: string): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+async function authFetchPlatformAuthority(
+  token: string,
+): Promise<PlatformAuthorityResponse> {
+  const response = await fetch(authBaseUrl() + "/v1/admin/me", {
+    headers: { Authorization: "Bearer " + token },
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  if (response.status === 401) {
+    throw Object.assign(new Error("MigraAuth session is invalid or expired"), {
+      statusCode: 401,
+    });
+  }
+  if (response.status === 404 || response.status === 403) {
+    throw Object.assign(new Error("Platform operator authority is required"), {
+      statusCode: 403,
+    });
+  }
+  if (!response.ok) {
+    throw Object.assign(new Error("Identity authority is temporarily unavailable"), {
+      statusCode: 503,
+    });
+  }
+
+  return response.json() as Promise<PlatformAuthorityResponse>;
 }
 
 async function ensurePlatformUser(user: AuthUser): Promise<string> {
@@ -127,6 +170,41 @@ async function ensurePlatformOrganization(
     [id, membership.id, membership.name, membership.slug, createdById],
   );
   return id;
+}
+
+export async function requirePlatformAuthority(
+  request: FastifyRequest,
+  requiredPermissions: readonly string[] = ["platform.commerce.read"],
+): Promise<PlatformAuthorityPrincipal> {
+  const token = bearerToken(request);
+  const [me, authority] = await Promise.all([
+    authFetch<MeResponse>("/v1/me", token),
+    authFetchPlatformAuthority(token),
+  ]);
+
+  if (authority.user_id !== me.user.id) {
+    throw Object.assign(new Error("Identity authority returned inconsistent operator identity"), {
+      statusCode: 503,
+    });
+  }
+
+  const held = new Set(authority.permissions);
+  const missing = requiredPermissions.filter((permission) => !held.has(permission));
+  if (missing.length > 0) {
+    throw Object.assign(
+      new Error("Platform operator is missing required permission: " + missing.join(", ")),
+      { statusCode: 403 },
+    );
+  }
+
+  const platformUserId = await ensurePlatformUser(me.user);
+  return {
+    authUser: me.user,
+    platformUserId,
+    roles: authority.roles,
+    permissions: authority.permissions,
+    viaBootstrap: authority.via_bootstrap,
+  };
 }
 
 export async function requireOrganizationPrincipal(
