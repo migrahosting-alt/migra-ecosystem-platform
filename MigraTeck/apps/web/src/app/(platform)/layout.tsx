@@ -16,7 +16,7 @@ export default async function PlatformLayout({
   const organizations = getPlatformOrganizations(session);
 
   return (
-    <div className="fixed inset-0 z-[100] flex bg-black">
+    <div className="fixed inset-0 z-[100] flex bg-slate-950">
       <PlatformSidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <PlatformTopBar

@@ -80,9 +80,9 @@ export function PlatformSidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-white/8 bg-[linear-gradient(180deg,#000000,#050a14_58%,#080d18)] text-slate-100">
-      <div className="flex items-center gap-2.5 border-b border-white/8 px-4 py-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 text-xs font-bold text-white shadow-[0_10px_24px_rgba(56,189,248,0.24)]">
+    <aside className="flex h-full w-72 flex-col border-r border-slate-800 bg-[linear-gradient(180deg,#020617,#0f172a)] text-slate-100">
+      <div className="flex items-center gap-3 border-b border-slate-800 px-5 py-5">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-sm font-bold text-white shadow-[0_12px_30px_rgba(56,189,248,0.28)]">
           M
         </div>
         <div className="min-w-0">
@@ -93,9 +93,9 @@ export function PlatformSidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2.5 py-3">
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
         {platformNav.map((group) => (
-          <div key={group.heading} className="mb-4">
+          <div key={group.heading} className="mb-5">
             <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
               {group.heading}
             </p>
@@ -111,14 +111,14 @@ export function PlatformSidebar() {
                     <Link
                       href={item.planned ? "/platform/developers" : item.href}
                       className={cn(
-                        "group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors",
+                        "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                         active
                           ? "bg-blue-500/14 text-blue-100"
                           : "text-slate-300 hover:bg-white/5 hover:text-white",
                       )}
                     >
                       <Icon
-                        size={16}
+                        size={17}
                         strokeWidth={1.8}
                         className={cn(active ? "text-cyan-300" : "text-slate-500 group-hover:text-slate-300")}
                       />
@@ -137,8 +137,8 @@ export function PlatformSidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-white/8 px-3 py-3">
-        <div className="rounded-xl border border-white/8 bg-white/[0.035] px-3.5 py-3.5">
+      <div className="border-t border-slate-800 px-4 py-4">
+        <div className="rounded-2xl border border-white/8 bg-white/5 px-4 py-4">
           <div className="flex items-center gap-2 text-cyan-300">
             <Gauge size={15} />
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
