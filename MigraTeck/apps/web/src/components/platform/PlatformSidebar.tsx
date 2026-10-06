@@ -9,9 +9,11 @@ import {
   Boxes,
   Building2,
   ChartNoAxesCombined,
+  ClipboardList,
   Code2,
   CreditCard,
   Gauge,
+  Server,
   KeyRound,
   LayoutDashboard,
   ShieldCheck,
@@ -64,6 +66,13 @@ const platformNav: PlatformNavGroup[] = [
       { href: "/platform/billing", label: "MigraPay & Billing", icon: CreditCard },
       { href: "/platform/commerce/catalog", label: "Catalog & Entitlements", icon: Boxes },
       { href: "/platform/commerce/usage", label: "Usage & Metering", icon: ChartNoAxesCombined },
+    ],
+  },
+  {
+    heading: "Infrastructure",
+    items: [
+      { href: "/platform/hosting", label: "Hosting", icon: Server },
+      { href: "/platform/intake", label: "Intake", icon: ClipboardList },
     ],
   },
   {

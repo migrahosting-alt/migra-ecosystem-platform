@@ -67,6 +67,8 @@ export const PLATFORM_PERMISSIONS = [
   "platform.hosting.read",
   /** Bind or unbind an organization to its authoritative MigraPanel tenant. */
   "platform.hosting.bindings.manage",
+  /** Read the global legacy MigraIntake runtime and migration posture. */
+  "platform.intake.read",
   /** Read the platform audit log. */
   "platform.audit.read",
   /** Grant and revoke platform roles — authority over authority. */
@@ -109,6 +111,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.users.read",
     "platform.commerce.read",
     "platform.hosting.read",
+    "platform.intake.read",
     "platform.audit.read",
   ],
   OPERATOR: [
@@ -124,6 +127,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.commerce.billing.manage",
     "platform.commerce.entitlements.manage",
     "platform.hosting.read",
+    "platform.intake.read",
     "platform.audit.read",
   ],
   /*

@@ -7,6 +7,7 @@ import {
   Building2,
   Code2,
   CreditCard,
+  Server,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -52,6 +53,12 @@ const domains = [
     href: "/platform/organizations",
     icon: Building2,
   },
+  {
+    title: "Infrastructure",
+    description: "Hosting runtime linkage and Intake service visibility with explicit cross-system ownership boundaries.",
+    href: "/platform/hosting",
+    icon: Server,
+  },
 ] as const;
 
 export default async function PlatformOverviewPage() {
@@ -83,7 +90,7 @@ export default async function PlatformOverviewPage() {
       <PlatformPageHeader
         eyebrow="Parent platform"
         title={"Welcome back, " + ownerName}
-        description="Operate MigraTeck's shared company primitives: identity, developer access, commerce, metering, organizations, security, and governance. Product execution stays in the products; operator execution stays in MigraPanel."
+        description="Operate MigraTeck's shared company primitives: identity, developer access, commerce, metering, organizations, infrastructure bridges, security, and governance. Product execution stays in the products; operator execution stays in MigraPanel."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -134,7 +141,7 @@ export default async function PlatformOverviewPage() {
           </p>
         </div>
 
-        <div className="mt-5 grid gap-4 xl:grid-cols-4">
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           {domains.map((domain) => {
             const Icon = domain.icon;
             return (

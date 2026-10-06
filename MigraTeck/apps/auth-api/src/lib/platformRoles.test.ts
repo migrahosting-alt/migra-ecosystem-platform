@@ -140,6 +140,17 @@ test("hosting authority separates read-only topology inspection from tenant bind
   assert.ok(owner.has("platform.hosting.bindings.manage"));
 });
 
+test("legacy Intake runtime visibility is read-only platform authority", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.intake.read"));
+  assert.ok(operator.has("platform.intake.read"));
+  assert.ok(owner.has("platform.intake.read"));
+  assert.ok(!PLATFORM_PERMISSIONS.includes("platform.intake.manage" as never));
+});
+
 test("OWNER holds every permission, including future ones", () => {
   const p = permissionsForRoles(["OWNER"]);
   for (const perm of PLATFORM_PERMISSIONS) {
