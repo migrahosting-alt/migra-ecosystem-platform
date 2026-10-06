@@ -63,6 +63,10 @@ export const PLATFORM_PERMISSIONS = [
   "platform.commerce.entitlements.manage",
   /** Change global price-to-product catalog bindings. Highest-risk commerce mutation. */
   "platform.commerce.catalog.manage",
+  /** Read cross-organization hosting linkage and runtime inventory. */
+  "platform.hosting.read",
+  /** Bind or unbind an organization to its authoritative MigraPanel tenant. */
+  "platform.hosting.bindings.manage",
   /** Read the platform audit log. */
   "platform.audit.read",
   /** Grant and revoke platform roles — authority over authority. */
@@ -104,6 +108,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.self.read",
     "platform.users.read",
     "platform.commerce.read",
+    "platform.hosting.read",
     "platform.audit.read",
   ],
   OPERATOR: [
@@ -118,6 +123,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.commerce.usage.manage",
     "platform.commerce.billing.manage",
     "platform.commerce.entitlements.manage",
+    "platform.hosting.read",
     "platform.audit.read",
   ],
   /*

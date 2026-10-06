@@ -125,6 +125,21 @@ test("commerce authority separates reading, usage, billing, org access, and glob
   assert.ok(owner.has("platform.commerce.catalog.manage"));
 });
 
+test("hosting authority separates read-only topology inspection from tenant binding", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.hosting.read"));
+  assert.ok(!support.has("platform.hosting.bindings.manage"));
+
+  assert.ok(operator.has("platform.hosting.read"));
+  assert.ok(!operator.has("platform.hosting.bindings.manage"), "tenant linkage remains OWNER-only");
+
+  assert.ok(owner.has("platform.hosting.read"));
+  assert.ok(owner.has("platform.hosting.bindings.manage"));
+});
+
 test("OWNER holds every permission, including future ones", () => {
   const p = permissionsForRoles(["OWNER"]);
   for (const perm of PLATFORM_PERMISSIONS) {
