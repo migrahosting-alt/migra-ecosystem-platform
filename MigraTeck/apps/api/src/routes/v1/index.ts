@@ -7,6 +7,7 @@ import { registerBillingAdminRoutes } from "./modules/billing-admin.js";
 import { registerDeveloperRoutes } from "./modules/developer.js";
 import { registerWebhookRoutes } from "./modules/webhooks.js";
 import { registerCommerceCatalogRoutes } from "./modules/commerce-catalog.js";
+import { registerCommerceBillingRoutes } from "./modules/commerce-billing.js";
 import { registerCommerceUsageRoutes } from "./modules/commerce-usage.js";
 
 export async function registerV1Routes(app: FastifyInstance): Promise<void> {
@@ -19,6 +20,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     await registerDeveloperRoutes(instance);
     await registerWebhookRoutes(instance);
     await registerCommerceCatalogRoutes(instance);
+    await registerCommerceBillingRoutes(instance);
     await registerCommerceUsageRoutes(instance);
   }, {
     prefix: "/v1",

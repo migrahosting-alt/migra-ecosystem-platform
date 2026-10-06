@@ -12,9 +12,11 @@ import {
   Layers3,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   SlidersHorizontal,
+  XCircle,
 } from "lucide-react";
 
 type ProductKey =
@@ -177,12 +179,56 @@ type CatalogPayload = {
     provisioningSucceeded: number;
     provisioningFailed: number;
     provisioningDead: number;
+    provisioningCanceled: number;
   };
   mutationReadiness: {
     bindings: boolean;
     entitlements: boolean;
     entitlementReason: string;
     worker: WorkerStatus;
+  };
+};
+
+type DeadLetterRecoveryContext = {
+  domain: string;
+  tenantId: string;
+  serviceInstanceId: string;
+  targetIp: string;
+  plan: string;
+  mailboxEmail: string;
+};
+
+type DeadLetterRemediation = {
+  job: {
+    id: string;
+    orgId: string;
+    orgName: string | null;
+    orgSlug: string | null;
+    source: string;
+    type: string;
+    status: string;
+    attempts: number;
+    maxAttempts: number;
+    lastError: string | null;
+    createdAt: string;
+    updatedAt: string;
+    productLane: string | null;
+    action: string | null;
+  };
+  retry: {
+    available: boolean;
+    reason: string | null;
+    malformed: boolean;
+    payloadHashValid: boolean;
+    signatureValid: boolean;
+    requiredFields: string[];
+    missingFields: string[];
+    currentContext: Partial<DeadLetterRecoveryContext>;
+    worker: WorkerStatus;
+    provisioningPaused: boolean;
+  };
+  cancel: {
+    available: boolean;
   };
 };
 
@@ -306,6 +352,10 @@ export function CatalogEntitlementsWorkspace() {
     useState<EntitlementEditorState | null>(null);
   const [entitlementSaving, setEntitlementSaving] = useState(false);
   const [entitlementMessage, setEntitlementMessage] = useState<string | null>(null);
+  const [deadLetter, setDeadLetter] = useState<DeadLetterRemediation | null>(null);
+  const [deadLetterLoadingId, setDeadLetterLoadingId] = useState<string | null>(null);
+  const [deadLetterError, setDeadLetterError] = useState<string | null>(null);
+  const [deadLetterMessage, setDeadLetterMessage] = useState<string | null>(null);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -555,6 +605,38 @@ export function CatalogEntitlementsWorkspace() {
     }
   }
 
+  async function openDeadLetter(jobId: string) {
+    setDeadLetterLoadingId(jobId);
+    setDeadLetterError(null);
+    setDeadLetterMessage(null);
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/provisioning/jobs/" +
+          encodeURIComponent(jobId) +
+          "/remediation",
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to inspect dead-letter recovery");
+      }
+      setDeadLetter(body);
+    } catch (error) {
+      setDeadLetter(null);
+      setDeadLetterError(
+        error instanceof Error ? error.message : "Unable to inspect dead-letter recovery",
+      );
+    } finally {
+      setDeadLetterLoadingId(null);
+    }
+  }
+
+  async function completeDeadLetterResolution(message: string) {
+    setDeadLetterMessage(message);
+    setDeadLetter(null);
+    await loadCatalog();
+  }
+
   if (loading && !catalog) {
     return (
       <div className="grid min-h-72 place-items-center rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -629,13 +711,25 @@ export function CatalogEntitlementsWorkspace() {
           </div>
         </div>
 
-        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6 xl:grid-cols-5">
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6 lg:grid-cols-3 xl:grid-cols-6">
           <MetricCard label="Pending" value={catalog.metrics.provisioningPending} detail="waiting for worker" />
           <MetricCard label="Running" value={catalog.metrics.provisioningRunning} detail="currently executing" />
           <MetricCard label="Succeeded" value={catalog.metrics.provisioningSucceeded} detail="completed jobs" />
           <MetricCard label="Failed" value={catalog.metrics.provisioningFailed} detail="retryable failures" />
-          <MetricCard label="Dead letters" value={catalog.metrics.provisioningDead} detail="terminal historical failures" />
+          <MetricCard label="Dead letters" value={catalog.metrics.provisioningDead} detail="unresolved terminal failures" />
+          <MetricCard label="Resolved" value={catalog.metrics.provisioningCanceled} detail="operator-canceled or superseded" />
         </div>
+
+        {deadLetterMessage ? (
+          <div className="border-t border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-800 sm:px-6">
+            {deadLetterMessage}
+          </div>
+        ) : null}
+        {deadLetterError ? (
+          <div className="border-t border-rose-100 bg-rose-50 px-5 py-3 text-sm font-medium text-rose-800 sm:px-6">
+            {deadLetterError}
+          </div>
+        ) : null}
 
         {catalog.provisioning.deadJobs.length === 0 ? (
           <div className="border-t border-slate-100 px-5 py-5 text-sm text-slate-500 sm:px-6">
@@ -656,9 +750,24 @@ export function CatalogEntitlementsWorkspace() {
                     <p className="mt-2 break-words text-xs leading-5 text-rose-700">{job.lastError ?? "No terminal error text recorded."}</p>
                     <code className="mt-1 block truncate text-[10px] text-slate-400">{job.id}</code>
                   </div>
-                  <div className="text-xs text-slate-500 lg:text-right">
-                    <p><span className="font-semibold text-slate-700">{job.attempts}</span> / {job.maxAttempts} attempts</p>
-                    <p className="mt-1">{formatDate(job.lastErrorAt ?? job.updatedAt)}</p>
+                  <div className="flex flex-col gap-2 text-xs text-slate-500 lg:items-end lg:text-right">
+                    <div>
+                      <p><span className="font-semibold text-slate-700">{job.attempts}</span> / {job.maxAttempts} attempts</p>
+                      <p className="mt-1">{formatDate(job.lastErrorAt ?? job.updatedAt)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void openDeadLetter(job.id)}
+                      disabled={deadLetterLoadingId === job.id}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {deadLetterLoadingId === job.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <SlidersHorizontal size={13} />
+                      )}
+                      Resolve
+                    </button>
                   </div>
                 </article>
               ))}
@@ -666,6 +775,15 @@ export function CatalogEntitlementsWorkspace() {
           </div>
         )}
       </section>
+
+      {deadLetter ? (
+        <DeadLetterRemediationPanel
+          remediation={deadLetter}
+          canManage={catalog.mutationReadiness.entitlements}
+          onClose={() => setDeadLetter(null)}
+          onResolved={completeDeadLetterResolution}
+        />
+      ) : null}
 
       <section className="grid gap-6 2xl:grid-cols-[1.12fr_0.88fr]">
         <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -1127,6 +1245,427 @@ export function CatalogEntitlementsWorkspace() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function DeadLetterRemediationPanel({
+  remediation,
+  canManage,
+  onClose,
+  onResolved,
+}: {
+  remediation: DeadLetterRemediation;
+  canManage: boolean;
+  onClose: () => void;
+  onResolved: (message: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [context, setContext] = useState<DeadLetterRecoveryContext>({
+    domain: remediation.retry.currentContext.domain ?? "",
+    tenantId: remediation.retry.currentContext.tenantId ?? "",
+    serviceInstanceId: remediation.retry.currentContext.serviceInstanceId ?? "",
+    targetIp: remediation.retry.currentContext.targetIp ?? "",
+    plan: remediation.retry.currentContext.plan ?? "",
+    mailboxEmail: remediation.retry.currentContext.mailboxEmail ?? "",
+  });
+  const [saving, setSaving] = useState<"retry" | "cancel" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const fieldMeta: Record<
+    keyof DeadLetterRecoveryContext,
+    { label: string; placeholder: string; type?: string }
+  > = {
+    domain: { label: "Domain", placeholder: "example.com" },
+    tenantId: { label: "Tenant ID", placeholder: "tenant_..." },
+    serviceInstanceId: {
+      label: "Service instance ID",
+      placeholder: "svc_...",
+    },
+    targetIp: { label: "Target IP", placeholder: "203.0.113.10" },
+    plan: { label: "Provisioning plan", placeholder: "business" },
+    mailboxEmail: {
+      label: "Mailbox email",
+      placeholder: "user@example.com",
+      type: "email",
+    },
+  };
+
+  const requiredFields = remediation.retry.requiredFields.filter(
+    (field): field is keyof DeadLetterRecoveryContext =>
+      Object.prototype.hasOwnProperty.call(fieldMeta, field),
+  );
+  const unsupportedFields = remediation.retry.requiredFields.filter(
+    (field) => !Object.prototype.hasOwnProperty.call(fieldMeta, field),
+  );
+  const missingFields = requiredFields.filter(
+    (field) => !context[field].trim(),
+  );
+  const retryReady =
+    canManage &&
+    remediation.retry.available &&
+    unsupportedFields.length === 0 &&
+    missingFields.length === 0 &&
+    reason.trim().length >= 3 &&
+    saving === null;
+  const cancelReady =
+    canManage &&
+    remediation.cancel.available &&
+    reason.trim().length >= 3 &&
+    saving === null;
+
+  async function submit(action: "retry" | "cancel") {
+    setSaving(action);
+    setError(null);
+    try {
+      const payload =
+        action === "retry"
+          ? {
+              reason: reason.trim(),
+              context: Object.fromEntries(
+                Object.entries(context)
+                  .map(([key, value]) => [key, value.trim()])
+                  .filter(([, value]) => Boolean(value)),
+              ),
+            }
+          : { reason: reason.trim() };
+
+      const response = await fetch(
+        "/api/platform/commerce/provisioning/jobs/" +
+          encodeURIComponent(remediation.job.id) +
+          "/" +
+          action,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          body.error ??
+            (action === "retry"
+              ? "Unable to retry dead-letter job"
+              : "Unable to cancel dead-letter job"),
+        );
+      }
+
+      await onResolved(
+        action === "retry"
+          ? "Recovery job queued. The original dead-letter job is preserved as CANCELED."
+          : "Dead-letter job canceled and retained with its failure history.",
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : action === "retry"
+            ? "Unable to retry dead-letter job"
+            : "Unable to cancel dead-letter job",
+      );
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <section className="rounded-3xl border border-rose-200 bg-[linear-gradient(145deg,#ffffff,#fff7f7)] shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-rose-100 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">
+            Dead-letter remediation
+          </p>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+            {remediation.job.orgName ?? remediation.job.orgSlug ?? remediation.job.orgId}
+          </h3>
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-semibold">
+            <span className="rounded-full bg-rose-100 px-2 py-1 text-rose-700">
+              {remediation.job.status}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+              {remediation.job.productLane ?? "unknown product"}
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">
+              {remediation.job.action ?? remediation.job.type}
+            </span>
+          </div>
+          <code className="mt-2 block break-all text-[10px] text-slate-400">
+            {remediation.job.id}
+          </code>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving !== null}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          <XCircle size={14} /> Close
+        </button>
+      </div>
+
+      <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Source evidence
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <EvidenceFlag
+                label="Payload hash"
+                ok={remediation.retry.payloadHashValid}
+              />
+              <EvidenceFlag
+                label="Envelope signature"
+                ok={remediation.retry.signatureValid}
+              />
+              <EvidenceFlag
+                label="Legacy malformed"
+                ok={!remediation.retry.malformed}
+                trueLabel="No"
+                falseLabel="Yes"
+              />
+              <EvidenceFlag
+                label="Provisioning paused"
+                ok={!remediation.retry.provisioningPaused}
+                trueLabel="No"
+                falseLabel="Yes"
+              />
+            </div>
+          </div>
+
+          <div
+            className={
+              "rounded-2xl border p-4 " +
+              (remediation.retry.worker.ready
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-amber-200 bg-amber-50")
+            }
+          >
+            <div className="flex items-start gap-3">
+              {remediation.retry.worker.ready ? (
+                <ShieldCheck
+                  size={17}
+                  className="mt-0.5 shrink-0 text-emerald-700"
+                />
+              ) : (
+                <AlertTriangle
+                  size={17}
+                  className="mt-0.5 shrink-0 text-amber-700"
+                />
+              )}
+              <div>
+                <p className="text-xs font-semibold text-slate-900">
+                  {remediation.retry.worker.ready
+                    ? "Managed worker is live"
+                    : "Managed worker unavailable"}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  {remediation.retry.worker.ready
+                    ? "A signed recovery job can enter the production provisioning queue."
+                    : remediation.retry.worker.reason ??
+                      "Provisioning worker health could not be verified."}
+                </p>
+                {remediation.retry.worker.lastSeenAt ? (
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Heartbeat {formatDate(remediation.retry.worker.lastSeenAt)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+            <p className="text-xs font-semibold text-rose-950">Original failure</p>
+            <p className="mt-2 break-words text-xs leading-5 text-rose-800">
+              {remediation.job.lastError ?? "No terminal error text recorded."}
+            </p>
+            <p className="mt-2 text-[10px] text-rose-700">
+              {remediation.job.attempts} / {remediation.job.maxAttempts} attempts · updated{" "}
+              {formatDate(remediation.job.updatedAt)}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          {!remediation.retry.available ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle
+                  size={17}
+                  className="mt-0.5 shrink-0 text-amber-700"
+                />
+                <div>
+                  <p className="text-xs font-semibold text-amber-950">
+                    Automatic replay is blocked
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-amber-800">
+                    {remediation.retry.reason ??
+                      "This historical action does not have an audited replay contract."}
+                  </p>
+                  <p className="mt-2 text-[10px] leading-5 text-amber-700">
+                    Canceling the dead letter does not erase it; it marks the incident resolved
+                    while retaining the original failure evidence and audit trail.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <div className="flex items-start gap-3">
+                <RotateCcw
+                  size={17}
+                  className="mt-0.5 shrink-0 text-blue-700"
+                />
+                <div>
+                  <p className="text-xs font-semibold text-blue-950">
+                    Signed recovery is available
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-blue-800">
+                    Retry creates a new signed MANUAL provisioning job. The source dead letter
+                    is changed to CANCELED only in the same successful database transaction.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {requiredFields.length > 0 ? (
+            <div>
+              <p className="text-sm font-semibold text-slate-800">
+                Recovery context
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Correct the missing or stale fields required by this specific dispatcher.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {requiredFields.map((field) => {
+                  const meta = fieldMeta[field];
+                  return (
+                    <label
+                      key={field}
+                      className="text-xs font-semibold text-slate-700"
+                    >
+                      {meta.label}
+                      <input
+                        type={meta.type ?? "text"}
+                        value={context[field]}
+                        onChange={(event) =>
+                          setContext((current) => ({
+                            ...current,
+                            [field]: event.target.value,
+                          }))
+                        }
+                        placeholder={meta.placeholder}
+                        disabled={!canManage || saving !== null}
+                        className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 disabled:bg-slate-100"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+              {unsupportedFields.length > 0 ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                  This UI does not support required recovery field
+                  {unsupportedFields.length === 1 ? " " : "s "}
+                  {unsupportedFields.join(", ")}. Retry remains locked.
+                </div>
+              ) : null}
+              {missingFields.length > 0 && remediation.retry.available ? (
+                <p className="mt-2 text-[10px] font-medium text-amber-700">
+                  Required before retry: {missingFields.join(", ")}.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          <label className="block text-sm font-semibold text-slate-800">
+            Operator reason
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Why is this dead letter being retried or canceled?"
+              disabled={!canManage || saving !== null}
+              className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-normal text-slate-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-500/10 disabled:bg-slate-100"
+            />
+            <span className="mt-1 block text-[10px] font-normal leading-5 text-slate-500">
+              Required for both retry and cancel. Stored in the audit record.
+            </span>
+          </label>
+
+          {error ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
+              {error}
+            </div>
+          ) : null}
+
+          {!canManage ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+              Read-only platform commerce authority. Entitlement-management permission is
+              required to resolve dead letters.
+            </div>
+          ) : null}
+
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => void submit("cancel")}
+              disabled={!cancelReady}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving === "cancel" ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <XCircle size={15} />
+              )}
+              {saving === "cancel" ? "Canceling…" : "Cancel dead letter"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void submit("retry")}
+              disabled={!retryReady}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving === "retry" ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <RotateCcw size={15} />
+              )}
+              {saving === "retry" ? "Queueing…" : "Queue signed retry"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function EvidenceFlag({
+  label,
+  ok,
+  trueLabel = "Valid",
+  falseLabel = "Invalid",
+}: {
+  label: string;
+  ok: boolean;
+  trueLabel?: string;
+  falseLabel?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+        {label}
+      </p>
+      <p
+        className={
+          "mt-1 text-xs font-semibold " +
+          (ok ? "text-emerald-700" : "text-rose-700")
+        }
+      >
+        {ok ? trueLabel : falseLabel}
+      </p>
     </div>
   );
 }

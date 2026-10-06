@@ -14,6 +14,11 @@ import {
   getProvisioningWorkerStatus,
   mutateOrganizationEntitlement,
 } from "../../../lib/commerce-entitlements.js";
+import {
+  cancelDeadProvisioningJob,
+  getDeadLetterRemediation,
+  retryDeadProvisioningJob,
+} from "../../../lib/provisioning-remediation.js";
 
 const organizationQuerySchema = z.object({
   q: z.string().trim().max(120).default(""),
@@ -59,6 +64,28 @@ const entitlementMutationSchema = z.object({
   reason: z.string().trim().min(3).max(500),
   acknowledgeBillingOverride: z.boolean().default(false),
   context: entitlementContextSchema,
+});
+
+const provisioningJobParamsSchema = z.object({
+  jobId: z.string().trim().min(1).max(120),
+});
+
+const deadLetterRecoveryContextSchema = z.object({
+  domain: z.string().trim().min(1).max(253).optional(),
+  tenantId: z.string().trim().min(1).max(255).optional(),
+  serviceInstanceId: z.string().trim().min(1).max(255).optional(),
+  targetIp: z.string().trim().min(1).max(64).optional(),
+  plan: z.string().trim().min(1).max(255).optional(),
+  mailboxEmail: z.string().trim().email().max(320).optional(),
+}).default({});
+
+const deadLetterRetrySchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  context: deadLetterRecoveryContextSchema,
+});
+
+const deadLetterCancelSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
 });
 
 export async function registerCommerceCatalogRoutes(
@@ -155,6 +182,53 @@ export async function registerCommerceCatalogRoutes(
       });
 
       return reply.code(200).send(result);
+    },
+  );
+
+  app.get(
+    "/commerce/provisioning/jobs/:jobId/remediation",
+    async (request) => {
+      await requirePlatformAuthority(request, ["platform.commerce.read"]);
+      const { jobId } = provisioningJobParamsSchema.parse(request.params);
+      return getDeadLetterRemediation(jobId);
+    },
+  );
+
+  app.post(
+    "/commerce/provisioning/jobs/:jobId/retry",
+    async (request, reply) => {
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.entitlements.manage",
+      ]);
+      const { jobId } = provisioningJobParamsSchema.parse(request.params);
+      const body = deadLetterRetrySchema.parse(request.body);
+      const result = await retryDeadProvisioningJob({
+        jobId,
+        actorId: authority.platformUserId,
+        reason: body.reason,
+        context: body.context,
+        ip: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+      return reply.code(202).send(result);
+    },
+  );
+
+  app.post(
+    "/commerce/provisioning/jobs/:jobId/cancel",
+    async (request) => {
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.entitlements.manage",
+      ]);
+      const { jobId } = provisioningJobParamsSchema.parse(request.params);
+      const body = deadLetterCancelSchema.parse(request.body);
+      return cancelDeadProvisioningJob({
+        jobId,
+        actorId: authority.platformUserId,
+        reason: body.reason,
+        ip: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
     },
   );
 

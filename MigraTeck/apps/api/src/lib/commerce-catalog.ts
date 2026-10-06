@@ -182,6 +182,7 @@ export async function getCommerceCatalogSnapshot() {
       provisioningSucceeded: provisioningCount("SUCCEEDED"),
       provisioningFailed: provisioningCount("FAILED"),
       provisioningDead: provisioningCount("DEAD"),
+      provisioningCanceled: provisioningCount("CANCELED"),
     },
   };
 }

@@ -55,6 +55,8 @@ export const PLATFORM_PERMISSIONS = [
   "platform.commerce.read",
   /** Manage usage quotas and retry commercial meter exports. */
   "platform.commerce.usage.manage",
+  /** Reconcile billing ledgers and operate customer subscription lifecycle. */
+  "platform.commerce.billing.manage",
   /** Change effective organization product access and trigger provisioning transitions. */
   "platform.commerce.entitlements.manage",
   /** Change global price-to-product catalog bindings. Highest-risk commerce mutation. */
@@ -111,6 +113,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.clients.read",
     "platform.commerce.read",
     "platform.commerce.usage.manage",
+    "platform.commerce.billing.manage",
     "platform.commerce.entitlements.manage",
     "platform.audit.read",
   ],
