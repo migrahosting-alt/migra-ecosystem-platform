@@ -421,7 +421,12 @@ export type HostingRecoveryCandidate = {
   companyName: string | null;
   status: string | null;
   matchScore: number;
-  matchReason: "exact_slug" | "exact_name" | "normalized_identity" | "partial_match";
+  matchReason:
+    | "exact_slug"
+    | "exact_name"
+    | "normalized_identity"
+    | "partial_match"
+    | "explicit_selection";
   domains: string[];
   serviceInstances: Array<{
     id: string;
@@ -557,6 +562,37 @@ async function readTenantRecoverySignals(
       serviceInstanceId:
         liveServiceInstances.length === 1 ? liveServiceInstances[0]?.id : undefined,
       targetIp: targetIps.length === 1 ? targetIps[0] : undefined,
+    },
+  };
+}
+
+export async function getHostingRecoveryCandidateByTenantId(
+  tenantId: string,
+): Promise<HostingRecoveryCandidate> {
+  const tenant = await readPanelTenant(tenantId);
+  if (!tenant) {
+    throw Object.assign(new Error("MigraPanel tenant not found"), { statusCode: 404 });
+  }
+
+  const signals = await readTenantRecoverySignals(tenant.id, tenant.domain);
+  return {
+    tenantId: tenant.id,
+    name: tenant.name,
+    slug: tenant.slug,
+    companyName: tenant.companyName,
+    status: tenant.status,
+    matchScore: 100,
+    matchReason: "explicit_selection",
+    domains: signals.domains,
+    serviceInstances: signals.serviceInstances,
+    targetIps: signals.targetIps,
+    suggestedContext: {
+      tenantId: tenant.id,
+      ...(signals.suggested.domain ? { domain: signals.suggested.domain } : {}),
+      ...(signals.suggested.serviceInstanceId
+        ? { serviceInstanceId: signals.suggested.serviceInstanceId }
+        : {}),
+      ...(signals.suggested.targetIp ? { targetIp: signals.suggested.targetIp } : {}),
     },
   };
 }

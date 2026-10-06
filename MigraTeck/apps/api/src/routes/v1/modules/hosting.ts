@@ -6,6 +6,7 @@ import {
 } from "../../../lib/migraauth.js";
 import {
   bindOrganizationToMigraPanelTenant,
+  getHostingRecoveryCandidateByTenantId,
   getOrganizationHostingSnapshot,
   searchMigraPanelTenants,
   unbindOrganizationFromMigraPanelTenant,
@@ -18,6 +19,10 @@ const tenantSearchSchema = z.object({
 
 const organizationParamsSchema = z.object({
   orgId: z.string().trim().min(1).max(120),
+});
+
+const tenantParamsSchema = z.object({
+  tenantId: z.string().trim().min(1).max(120),
 });
 
 const bindingBodySchema = z.object({
@@ -61,6 +66,17 @@ export async function registerHostingRoutes(app: FastifyInstance): Promise<void>
       tenants: await searchMigraPanelTenants(query.q, query.limit),
     };
   });
+
+  app.get(
+    "/hosting/tenants/:tenantId/recovery-context",
+    async (request) => {
+      await requirePlatformAuthority(request, ["platform.hosting.read"]);
+      const { tenantId } = tenantParamsSchema.parse(request.params);
+      return {
+        candidate: await getHostingRecoveryCandidateByTenantId(tenantId),
+      };
+    },
+  );
 
   app.put("/hosting/organizations/:orgId/binding", async (request) => {
     const authority = await requirePlatformAuthority(request, [

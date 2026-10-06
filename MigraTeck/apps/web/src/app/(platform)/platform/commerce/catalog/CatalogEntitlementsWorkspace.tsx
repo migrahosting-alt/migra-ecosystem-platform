@@ -205,7 +205,12 @@ type HostingRecoveryCandidate = {
   companyName: string | null;
   status: string | null;
   matchScore: number;
-  matchReason: "exact_slug" | "exact_name" | "normalized_identity" | "partial_match";
+  matchReason:
+    | "exact_slug"
+    | "exact_name"
+    | "normalized_identity"
+    | "partial_match"
+    | "explicit_selection";
   domains: string[];
   serviceInstances: Array<{
     id: string;
@@ -213,6 +218,17 @@ type HostingRecoveryCandidate = {
   }>;
   targetIps: string[];
   suggestedContext: Partial<DeadLetterRecoveryContext>;
+};
+
+type HostingTenantSearchResult = {
+  id: string;
+  name: string | null;
+  slug: string | null;
+  domain: string | null;
+  status: string | null;
+  tenantType: string | null;
+  companyName: string | null;
+  websiteCount: number;
 };
 
 type DeadLetterRemediation = {
@@ -797,6 +813,7 @@ export function CatalogEntitlementsWorkspace() {
 
       {deadLetter ? (
         <DeadLetterRemediationPanel
+          key={deadLetter.job.id}
           remediation={deadLetter}
           canManage={catalog.mutationReadiness.entitlements}
           onClose={() => setDeadLetter(null)}
@@ -1291,6 +1308,25 @@ function DeadLetterRemediationPanel({
   const [saving, setSaving] = useState<"retry" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const hostingCandidates = remediation.retry.hostingCandidates ?? [];
+  const [manualHostingCandidate, setManualHostingCandidate] =
+    useState<HostingRecoveryCandidate | null>(null);
+  const [tenantSearchQuery, setTenantSearchQuery] = useState("");
+  const [tenantSearchResults, setTenantSearchResults] = useState<
+    HostingTenantSearchResult[]
+  >([]);
+  const [tenantSearchLoading, setTenantSearchLoading] = useState(false);
+  const [tenantEvidenceLoadingId, setTenantEvidenceLoadingId] = useState<
+    string | null
+  >(null);
+  const [tenantSearchError, setTenantSearchError] = useState<string | null>(null);
+  const availableHostingCandidates = manualHostingCandidate
+    ? [
+        manualHostingCandidate,
+        ...hostingCandidates.filter(
+          (candidate) => candidate.tenantId !== manualHostingCandidate.tenantId,
+        ),
+      ]
+    : hostingCandidates;
 
   function contextForHostingCandidate(
     current: DeadLetterRecoveryContext,
@@ -1356,6 +1392,104 @@ function DeadLetterRemediationPanel({
   const missingFields = requiredFields.filter(
     (field) => !context[field].trim(),
   );
+  const hostingSearchEnabled =
+    remediation.job.productLane === "MIGRAHOSTING" && requiredFields.length > 0;
+
+  useEffect(() => {
+    if (!hostingSearchEnabled) return;
+
+    const query = tenantSearchQuery.trim();
+    if (query.length < 2) {
+      setTenantSearchResults([]);
+      setTenantSearchError(null);
+      setTenantSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setTenantSearchLoading(true);
+      setTenantSearchError(null);
+      try {
+        const params = new URLSearchParams({
+          q: query,
+          limit: "20",
+        });
+        const response = await fetch(
+          "/api/platform/hosting/tenants?" + params.toString(),
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
+        const body = await response.json();
+        if (response.status === 403) {
+          throw new Error(
+            "Hosting read authority is required to search MigraPanel tenants.",
+          );
+        }
+        if (!response.ok) {
+          throw new Error(body.error ?? "Unable to search MigraPanel tenants");
+        }
+        setTenantSearchResults(
+          Array.isArray(body.tenants) ? body.tenants : [],
+        );
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setTenantSearchResults([]);
+        setTenantSearchError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to search MigraPanel tenants",
+        );
+      } finally {
+        if (!controller.signal.aborted) setTenantSearchLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [hostingSearchEnabled, tenantSearchQuery]);
+
+  async function loadTenantRecoveryEvidence(
+    tenant: HostingTenantSearchResult,
+  ) {
+    setTenantEvidenceLoadingId(tenant.id);
+    setTenantSearchError(null);
+    try {
+      const response = await fetch(
+        "/api/platform/hosting/tenants/" +
+          encodeURIComponent(tenant.id) +
+          "/recovery-context",
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          body.error ?? "Unable to load MigraPanel recovery evidence",
+        );
+      }
+      const candidate = body.candidate as HostingRecoveryCandidate | undefined;
+      if (!candidate || candidate.tenantId !== tenant.id) {
+        throw new Error("MigraPanel returned inconsistent tenant evidence");
+      }
+      setManualHostingCandidate(candidate);
+      applyHostingCandidate(candidate);
+      setTenantSearchResults([]);
+      setTenantSearchQuery("");
+    } catch (caught) {
+      setTenantSearchError(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to load MigraPanel recovery evidence",
+      );
+    } finally {
+      setTenantEvidenceLoadingId(null);
+    }
+  }
+
   const retryReady =
     canManage &&
     remediation.retry.available &&
@@ -1585,17 +1719,97 @@ function DeadLetterRemediationPanel({
             </div>
           )}
 
-          {hostingCandidates.length > 0 ? (
+          {hostingSearchEnabled ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-800">
+                Find a MigraPanel tenant
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                If automatic identity matching found nothing, search MigraPanel explicitly.
+                Selecting a tenant only loads read-only recovery evidence; it does not link the
+                tenant or retry the job.
+              </p>
+              <div className="relative mt-3">
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  value={tenantSearchQuery}
+                  onChange={(event) => setTenantSearchQuery(event.target.value)}
+                  placeholder="Search tenant name, slug, domain, or company…"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-10 text-sm text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-500/10"
+                />
+                {tenantSearchLoading ? (
+                  <Loader2
+                    size={14}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-cyan-600"
+                  />
+                ) : null}
+              </div>
+              <p className="mt-1 text-[10px] leading-5 text-slate-400">
+                Enter at least two characters. Results require Platform Hosting read authority.
+              </p>
+
+              {tenantSearchError ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                  {tenantSearchError}
+                </div>
+              ) : null}
+
+              {tenantSearchQuery.trim().length >= 2 &&
+              !tenantSearchLoading &&
+              !tenantSearchError &&
+              tenantSearchResults.length === 0 ? (
+                <p className="mt-3 text-xs text-slate-500">
+                  No MigraPanel tenants match this search.
+                </p>
+              ) : null}
+
+              {tenantSearchResults.length > 0 ? (
+                <div className="mt-3 max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                  {tenantSearchResults.map((tenant) => (
+                    <button
+                      key={tenant.id}
+                      type="button"
+                      onClick={() => void loadTenantRecoveryEvidence(tenant)}
+                      disabled={tenantEvidenceLoadingId !== null}
+                      className="flex w-full items-start gap-3 bg-white px-3 py-3 text-left transition hover:bg-cyan-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-semibold text-slate-900">
+                          {tenant.name ?? tenant.companyName ?? tenant.slug ?? tenant.id}
+                        </p>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                          {tenant.slug ? <span>{tenant.slug}</span> : null}
+                          {tenant.domain ? <span>{tenant.domain}</span> : null}
+                          <span>{tenant.websiteCount} website{tenant.websiteCount === 1 ? "" : "s"}</span>
+                          <span>{tenant.status ?? "unknown status"}</span>
+                        </div>
+                      </div>
+                      {tenantEvidenceLoadingId === tenant.id ? (
+                        <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin text-cyan-600" />
+                      ) : (
+                        <ChevronRight size={14} className="mt-0.5 shrink-0 text-slate-300" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {availableHostingCandidates.length > 0 ? (
             <div>
               <p className="text-sm font-semibold text-slate-800">
                 MigraPanel recovery candidates
               </p>
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                Read-only tenant evidence matched from the failed organization name and slug.
-                Nothing is linked or retried until you explicitly choose values and submit.
+                Read-only tenant evidence from automatic identity matches or an explicit Hosting
+                search. Nothing is linked or retried until you explicitly choose values and submit.
               </p>
               <div className="mt-3 space-y-3">
-                {hostingCandidates.map((candidate) => (
+                {availableHostingCandidates.map((candidate) => (
                   <div
                     key={candidate.tenantId}
                     className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-4"
@@ -1607,7 +1821,9 @@ function DeadLetterRemediationPanel({
                             {candidate.name ?? candidate.companyName ?? candidate.slug ?? candidate.tenantId}
                           </p>
                           <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-cyan-700">
-                            {candidate.matchScore}% match
+                            {candidate.matchReason === "explicit_selection"
+                              ? "Operator selected"
+                              : candidate.matchScore + "% match"}
                           </span>
                           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-500">
                             {candidate.matchReason.replaceAll("_", " ")}

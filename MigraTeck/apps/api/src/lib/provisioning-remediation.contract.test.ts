@@ -92,6 +92,7 @@ test("cross-system recovery suggestions require Hosting read authority and remai
 });
 
 test("switching Hosting recovery candidates cannot retain another tenant's ambiguous context", () => {
+  assert.match(operatorUi, /key=\{deadLetter\.job\.id\}/);
   assert.match(operatorUi, /current\.tenantId === candidate\.tenantId/);
   assert.match(operatorUi, /tenantId: candidate\.tenantId/);
   assert.match(
@@ -110,4 +111,15 @@ test("switching Hosting recovery candidates cannot retain another tenant's ambig
     operatorUi,
     /chooseRecoveryValue\(\s*candidate,\s*"serviceInstanceId"/,
   );
+});
+
+test("operators can explicitly search Hosting authority without automatic linking", () => {
+  assert.match(operatorUi, /\/api\/platform\/hosting\/tenants\?/);
+  assert.match(
+    operatorUi,
+    /\/api\/platform\/hosting\/tenants\/"\s*\+[\s\S]*?\/recovery-context/,
+  );
+  assert.match(operatorUi, /Selecting a tenant only loads read-only recovery evidence/);
+  assert.match(operatorUi, /setManualHostingCandidate\(candidate\)/);
+  assert.doesNotMatch(operatorUi, /\/api\/platform\/hosting\/binding/);
 });

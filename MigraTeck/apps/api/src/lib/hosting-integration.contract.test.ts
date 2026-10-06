@@ -70,11 +70,16 @@ test("parent Platform does not duplicate destructive MigraPanel Hosting operatio
 
 test("dead-letter recovery candidates use read-only MigraPanel hosting evidence", () => {
   assert.match(model, /getHostingRecoveryCandidates/);
+  assert.match(model, /getHostingRecoveryCandidateByTenantId/);
   assert.match(model, /service_instances/);
   assert.match(model, /lower\("serviceType"\)='cloudpod'/);
   assert.match(model, /cloud_pods/);
   assert.match(model, /website_target_bindings/);
   assert.match(model, /suggestedContext/);
-  assert.match(model, /matchReason/);
+  assert.match(model, /matchReason: "explicit_selection"/);
   assert.match(model, /matchScore/);
+  assert.match(
+    routes,
+    /hosting\/tenants\/:tenantId\/recovery-context[\s\S]*?platform\.hosting\.read/,
+  );
 });
