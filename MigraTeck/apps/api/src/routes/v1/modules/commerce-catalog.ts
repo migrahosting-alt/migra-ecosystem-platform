@@ -9,6 +9,11 @@ import {
   searchCommerceOrganizations,
   upsertBillingBinding,
 } from "../../../lib/commerce-catalog.js";
+import {
+  buildEntitlementTransitionMatrix,
+  getProvisioningWorkerStatus,
+  mutateOrganizationEntitlement,
+} from "../../../lib/commerce-entitlements.js";
 
 const organizationQuerySchema = z.object({
   q: z.string().trim().max(120).default(""),
@@ -29,6 +34,33 @@ const bindingSchema = z.object({
   notes: z.string().trim().max(2000).nullable().optional(),
 });
 
+const entitlementParamsSchema = z.object({
+  orgId: z.string().trim().min(1).max(120),
+  product: z.enum(PRODUCT_KEYS),
+});
+
+const entitlementContextSchema = z.object({
+  domain: z.string().trim().min(1).max(253).optional(),
+  tenantId: z.string().trim().min(1).max(255).optional(),
+  serviceInstanceId: z.string().trim().min(1).max(255).optional(),
+  targetIp: z.string().trim().min(1).max(64).optional(),
+  plan: z.string().trim().min(1).max(255).optional(),
+  limits: z.record(z.string(), z.unknown()).optional(),
+  mailboxEmail: z.string().trim().email().max(320).optional(),
+  mailboxQuotaMb: z.number().int().positive().max(1_000_000).optional(),
+}).default({});
+
+const entitlementMutationSchema = z.object({
+  status: z.enum(ENTITLEMENT_STATUSES),
+  expectedUpdatedAt: z.string().datetime().nullable().optional(),
+  startsAt: z.string().datetime().nullable().optional(),
+  endsAt: z.string().datetime().nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+  reason: z.string().trim().min(3).max(500),
+  acknowledgeBillingOverride: z.boolean().default(false),
+  context: entitlementContextSchema,
+});
+
 export async function registerCommerceCatalogRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -36,6 +68,8 @@ export async function registerCommerceCatalogRoutes(
     const authority = await requirePlatformAuthority(request, [
       "platform.commerce.read",
     ]);
+
+    const worker = await getProvisioningWorkerStatus();
 
     return {
       authority: {
@@ -48,9 +82,15 @@ export async function registerCommerceCatalogRoutes(
       ...(await getCommerceCatalogSnapshot()),
       mutationReadiness: {
         bindings: authority.permissions.includes("platform.commerce.catalog.manage"),
-        entitlements: false,
-        entitlementReason:
-          "Manual access changes remain blocked until the provisioning job signer is aligned with the production worker.",
+        entitlements: authority.permissions.includes(
+          "platform.commerce.entitlements.manage",
+        ),
+        entitlementReason: authority.permissions.includes(
+          "platform.commerce.entitlements.manage",
+        )
+          ? "Each transition is evaluated independently. Unsafe product lanes remain locked."
+          : "platform.commerce.entitlements.manage is required.",
+        worker,
       },
     };
   });
@@ -74,16 +114,49 @@ export async function registerCommerceCatalogRoutes(
       "platform.commerce.read",
     ]);
     const { orgId } = organizationParamsSchema.parse(request.params);
+    const access = await getOrganizationCommerceAccess(orgId);
+    const readiness = await buildEntitlementTransitionMatrix({
+      orgSlug: access.organization.slug,
+      entitlements: access.entitlements,
+    });
 
     return {
-      canManageEntitlements:
-        authority.permissions.includes("platform.commerce.entitlements.manage") &&
-        false,
-      managementBlockedReason:
-        "Manual access changes remain blocked until the provisioning job signer is aligned with the production worker.",
-      ...(await getOrganizationCommerceAccess(orgId)),
+      canManageEntitlements: authority.permissions.includes(
+        "platform.commerce.entitlements.manage",
+      ),
+      ...access,
+      ...readiness,
     };
   });
+
+  app.put(
+    "/commerce/organizations/:orgId/entitlements/:product",
+    async (request, reply) => {
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.entitlements.manage",
+      ]);
+      const { orgId, product } = entitlementParamsSchema.parse(request.params);
+      const body = entitlementMutationSchema.parse(request.body);
+
+      const result = await mutateOrganizationEntitlement({
+        orgId,
+        actorId: authority.platformUserId,
+        product,
+        newStatus: body.status,
+        expectedUpdatedAt: body.expectedUpdatedAt,
+        startsAt: body.startsAt,
+        endsAt: body.endsAt,
+        notes: body.notes,
+        reason: body.reason,
+        acknowledgeBillingOverride: body.acknowledgeBillingOverride,
+        context: body.context,
+        ip: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+
+      return reply.code(200).send(result);
+    },
+  );
 
   app.put("/commerce/bindings/:externalPriceId", async (request, reply) => {
     const authority = await requirePlatformAuthority(request, [

@@ -30,6 +30,59 @@ type ProductKey =
   | "MIGRADRIVE"
   | "MIGRABUILDER";
 
+type EntitlementStatus =
+  | "ACTIVE"
+  | "TRIAL"
+  | "RESTRICTED"
+  | "INTERNAL_ONLY";
+
+type WorkerStatus = {
+  ready: boolean;
+  workerId: string | null;
+  pid: number | null;
+  lastSeenAt: string | null;
+  ageMs: number | null;
+  reason: string | null;
+};
+
+type EntitlementTransition = {
+  product: ProductKey;
+  fromStatus: EntitlementStatus;
+  toStatus: EntitlementStatus;
+  available: boolean;
+  mode: "database_only" | "provisioning" | "blocked";
+  actions: string[];
+  requiredFields: string[];
+  reason: string | null;
+};
+
+type AccessEntitlement = {
+  product: ProductKey;
+  status: EntitlementStatus;
+  startsAt: string | null;
+  endsAt: string | null;
+  notes: string | null;
+  updatedAt: string | null;
+  persisted: boolean;
+  evidence: "stripe_sync" | "manual_or_legacy" | "none";
+};
+
+type EntitlementEditorState = {
+  product: ProductKey;
+  status: EntitlementStatus;
+  reason: string;
+  notes: string;
+  acknowledgeBillingOverride: boolean;
+  context: {
+    domain: string;
+    tenantId: string;
+    serviceInstanceId: string;
+    targetIp: string;
+    plan: string;
+    mailboxEmail: string;
+  };
+};
+
 type CatalogPrice = {
   lookupKey: string;
   componentType: string;
@@ -101,6 +154,7 @@ type CatalogPayload = {
     bindings: boolean;
     entitlements: boolean;
     entitlementReason: string;
+    worker: WorkerStatus;
   };
 };
 
@@ -118,7 +172,12 @@ type OrganizationSummary = {
 
 type AccessPayload = {
   canManageEntitlements: boolean;
-  managementBlockedReason: string;
+  worker: WorkerStatus;
+  transitions: Array<{
+    product: ProductKey;
+    currentStatus: EntitlementStatus;
+    targets: EntitlementTransition[];
+  }>;
   organization: {
     id: string;
     name: string;
@@ -126,16 +185,7 @@ type AccessPayload = {
     isMigraHostingClient: boolean;
     authOrganizationId: string | null;
   };
-  entitlements: Array<{
-    product: ProductKey;
-    status: "ACTIVE" | "TRIAL" | "RESTRICTED" | "INTERNAL_ONLY";
-    startsAt: string | null;
-    endsAt: string | null;
-    notes: string | null;
-    updatedAt: string | null;
-    persisted: boolean;
-    evidence: "stripe_sync" | "manual_or_legacy" | "none";
-  }>;
+  entitlements: AccessEntitlement[];
   subscriptions: Array<{
     id: string;
     provider: string;
@@ -224,6 +274,10 @@ export function CatalogEntitlementsWorkspace() {
   const [access, setAccess] = useState<AccessPayload | null>(null);
   const [accessLoading, setAccessLoading] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [entitlementEditor, setEntitlementEditor] =
+    useState<EntitlementEditorState | null>(null);
+  const [entitlementSaving, setEntitlementSaving] = useState(false);
+  const [entitlementMessage, setEntitlementMessage] = useState<string | null>(null);
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -299,7 +353,134 @@ export function CatalogEntitlementsWorkspace() {
 
   async function selectOrganization(orgId: string) {
     setSelectedOrgId(orgId);
+    setEntitlementEditor(null);
+    setEntitlementMessage(null);
     await loadAccess(orgId);
+  }
+
+  function transitionFor(
+    product: ProductKey,
+    status: EntitlementStatus,
+  ): EntitlementTransition | null {
+    const row = access?.transitions.find((item) => item.product === product);
+    return row?.targets.find((target) => target.toStatus === status) ?? null;
+  }
+
+  function openEntitlementEditor(entitlement: AccessEntitlement) {
+    setEntitlementEditor({
+      product: entitlement.product,
+      status: entitlement.status,
+      reason: "",
+      notes: entitlement.notes ?? "",
+      acknowledgeBillingOverride: false,
+      context: {
+        domain: "",
+        tenantId: "",
+        serviceInstanceId: "",
+        targetIp: "",
+        plan: "",
+        mailboxEmail: "",
+      },
+    });
+    setEntitlementMessage(null);
+  }
+
+  async function saveEntitlement() {
+    if (!access || !selectedOrgId || !entitlementEditor) return;
+
+    const current = access.entitlements.find(
+      (item) => item.product === entitlementEditor.product,
+    );
+    const transition = transitionFor(
+      entitlementEditor.product,
+      entitlementEditor.status,
+    );
+
+    if (!current || !transition) {
+      setEntitlementMessage("Refresh access evidence before saving this change.");
+      return;
+    }
+    if (!transition.available) {
+      setEntitlementMessage(
+        transition.reason ?? "This transition is not operationally ready.",
+      );
+      return;
+    }
+    if (entitlementEditor.reason.trim().length < 3) {
+      setEntitlementMessage("An operator reason is required.");
+      return;
+    }
+
+    const context = Object.fromEntries(
+      Object.entries(entitlementEditor.context).flatMap(([key, value]) => {
+        const normalized = value?.trim() ?? "";
+        return normalized.length > 0 ? [[key, normalized]] : [];
+      }),
+    );
+
+    const missingContext = transition.requiredFields.filter((field) => {
+      const value = context[field];
+      return typeof value !== "string" || value.trim().length === 0;
+    });
+    if (missingContext.length > 0) {
+      setEntitlementMessage(
+        "Required provisioning context is missing: " + missingContext.join(", "),
+      );
+      return;
+    }
+
+    if (
+      current.evidence === "stripe_sync" &&
+      current.status !== entitlementEditor.status &&
+      !entitlementEditor.acknowledgeBillingOverride
+    ) {
+      setEntitlementMessage(
+        "Explicitly acknowledge the billing override before changing Stripe-synchronized access.",
+      );
+      return;
+    }
+
+    setEntitlementSaving(true);
+    setEntitlementMessage(null);
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/organizations/" +
+          encodeURIComponent(selectedOrgId) +
+          "/entitlements/" +
+          encodeURIComponent(entitlementEditor.product),
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: entitlementEditor.status,
+            expectedUpdatedAt: current.updatedAt,
+            notes: entitlementEditor.notes.trim() || null,
+            reason: entitlementEditor.reason.trim(),
+            acknowledgeBillingOverride:
+              entitlementEditor.acknowledgeBillingOverride,
+            context,
+          }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to update product access");
+      }
+
+      setEntitlementMessage("Access update committed and audited.");
+      setEntitlementEditor(null);
+      await Promise.all([
+        loadAccess(selectedOrgId),
+        loadOrganizations(orgQuery),
+        loadCatalog(),
+      ]);
+    } catch (error) {
+      setEntitlementMessage(
+        error instanceof Error ? error.message : "Unable to update product access",
+      );
+    } finally {
+      setEntitlementSaving(false);
+    }
   }
 
   function editBinding(binding: Binding) {
@@ -373,6 +554,21 @@ export function CatalogEntitlementsWorkspace() {
       </section>
     );
   }
+
+  const editingEntitlement =
+    access && entitlementEditor
+      ? access.entitlements.find(
+          (item) => item.product === entitlementEditor.product,
+        ) ?? null
+      : null;
+  const editingTransition = entitlementEditor
+    ? transitionFor(entitlementEditor.product, entitlementEditor.status)
+    : null;
+  const editingTargets = entitlementEditor
+    ? access?.transitions.find(
+        (item) => item.product === entitlementEditor.product,
+      )?.targets ?? []
+    : [];
 
   return (
     <div className="space-y-6">
@@ -674,43 +870,118 @@ export function CatalogEntitlementsWorkspace() {
                     <h3 className="text-lg font-semibold text-slate-950">{access.organization.name}</h3>
                     <p className="mt-1 text-sm text-slate-500">{access.organization.slug}</p>
                   </div>
-                  {!access.canManageEntitlements ? (
-                    <div className="max-w-md rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-                      {access.managementBlockedReason}
-                    </div>
-                  ) : null}
+                  <div className="flex max-w-xl flex-col items-start gap-2 sm:items-end">
+                    <span
+                      className={
+                        "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] " +
+                        (access.worker.ready
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-800")
+                      }
+                    >
+                      <span
+                        className={
+                          "h-2 w-2 rounded-full " +
+                          (access.worker.ready ? "bg-emerald-500" : "bg-amber-500")
+                        }
+                      />
+                      {access.worker.ready
+                        ? "Provisioning worker live"
+                        : "Provisioning worker unavailable"}
+                    </span>
+                    {!access.canManageEntitlements ? (
+                      <p className="text-right text-xs leading-5 text-amber-800">
+                        Your platform role can inspect access but cannot change entitlements.
+                      </p>
+                    ) : access.worker.reason ? (
+                      <p className="text-right text-xs leading-5 text-slate-500">
+                        {access.worker.reason}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
 
+                {entitlementMessage ? (
+                  <div
+                    className={
+                      "rounded-2xl border px-4 py-3 text-sm font-medium " +
+                      (entitlementMessage.includes("committed")
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-200 bg-amber-50 text-amber-900")
+                    }
+                  >
+                    {entitlementMessage}
+                  </div>
+                ) : null}
+
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {access.entitlements.map((entitlement) => (
-                    <article key={entitlement.product} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-xs font-semibold text-slate-900">{entitlement.product}</p>
-                          <span className={"mt-2 inline-block rounded-full px-2 py-0.5 text-[9px] font-bold " + statusClass(entitlement.status)}>
-                            {entitlement.status}
+                  {access.entitlements.map((entitlement) => {
+                    const targets =
+                      access.transitions.find(
+                        (item) => item.product === entitlement.product,
+                      )?.targets ?? [];
+                    const availableTargets = targets.filter(
+                      (target) => target.available,
+                    ).length;
+
+                    return (
+                      <article key={entitlement.product} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold text-slate-900">{entitlement.product}</p>
+                            <span className={"mt-2 inline-block rounded-full px-2 py-0.5 text-[9px] font-bold " + statusClass(entitlement.status)}>
+                              {entitlement.status}
+                            </span>
+                          </div>
+                          <span className={"rounded-full px-2 py-0.5 text-[9px] font-semibold " + (entitlement.persisted ? "bg-white text-slate-600" : "bg-slate-200 text-slate-500")}>
+                            {entitlement.persisted ? "persisted" : "default"}
                           </span>
                         </div>
-                        <span className={"rounded-full px-2 py-0.5 text-[9px] font-semibold " + (entitlement.persisted ? "bg-white text-slate-600" : "bg-slate-200 text-slate-500")}>
-                          {entitlement.persisted ? "persisted" : "default"}
-                        </span>
-                      </div>
-                      <div className="mt-3 space-y-1 text-[10px] leading-5 text-slate-500">
-                        <p>Starts: {formatDate(entitlement.startsAt)}</p>
-                        <p>Ends: {formatDate(entitlement.endsAt)}</p>
-                        <p>Evidence: {entitlement.evidence.replace(/_/g, " ")}</p>
-                      </div>
-                      {entitlement.notes ? <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-slate-500">{entitlement.notes}</p> : null}
-                      <button
-                        disabled
-                        title={access.managementBlockedReason}
-                        className="mt-3 inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-400"
-                      >
-                        <SlidersHorizontal size={13} /> Change access
-                      </button>
-                    </article>
-                  ))}
+                        <div className="mt-3 space-y-1 text-[10px] leading-5 text-slate-500">
+                          <p>Starts: {formatDate(entitlement.startsAt)}</p>
+                          <p>Ends: {formatDate(entitlement.endsAt)}</p>
+                          <p>Evidence: {entitlement.evidence.replace(/_/g, " ")}</p>
+                          <p>{availableTargets} of {targets.length} target states operationally available</p>
+                        </div>
+                        {entitlement.notes ? <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-slate-500">{entitlement.notes}</p> : null}
+                        <button
+                          onClick={() => openEntitlementEditor(entitlement)}
+                          disabled={!access.canManageEntitlements}
+                          title={
+                            access.canManageEntitlements
+                              ? "Open access controls"
+                              : "platform.commerce.entitlements.manage is required"
+                          }
+                          className={
+                            "mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+                            (access.canManageEntitlements
+                              ? "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700"
+                              : "cursor-not-allowed border-slate-200 bg-white text-slate-400")
+                          }
+                        >
+                          <SlidersHorizontal size={13} /> Configure access
+                        </button>
+                      </article>
+                    );
+                  })}
                 </div>
+
+                {entitlementEditor && editingEntitlement ? (
+                  <EntitlementEditorPanel
+                    editor={entitlementEditor}
+                    entitlement={editingEntitlement}
+                    targets={editingTargets}
+                    selectedTransition={editingTransition}
+                    worker={access.worker}
+                    saving={entitlementSaving}
+                    onChange={setEntitlementEditor}
+                    onCancel={() => {
+                      setEntitlementEditor(null);
+                      setEntitlementMessage(null);
+                    }}
+                    onSave={() => void saveEntitlement()}
+                  />
+                ) : null}
 
                 <div className="grid gap-5 xl:grid-cols-2">
                   <EvidenceList
@@ -811,6 +1082,348 @@ function ReadinessRow({
         <p className="mt-1 text-[10px] leading-5 text-slate-500">{detail}</p>
       </div>
     </div>
+  );
+}
+
+
+function EntitlementEditorPanel({
+  editor,
+  entitlement,
+  targets,
+  selectedTransition,
+  worker,
+  saving,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  editor: EntitlementEditorState;
+  entitlement: AccessEntitlement;
+  targets: EntitlementTransition[];
+  selectedTransition: EntitlementTransition | null;
+  worker: WorkerStatus;
+  saving: boolean;
+  onChange: (value: EntitlementEditorState) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const fieldMeta: Record<
+    keyof EntitlementEditorState["context"],
+    { label: string; placeholder: string; type?: string }
+  > = {
+    domain: {
+      label: "Domain",
+      placeholder: "example.com",
+    },
+    tenantId: {
+      label: "Tenant ID",
+      placeholder: "tenant_...",
+    },
+    serviceInstanceId: {
+      label: "Service instance ID",
+      placeholder: "svc_...",
+    },
+    targetIp: {
+      label: "Target IP",
+      placeholder: "203.0.113.10",
+    },
+    plan: {
+      label: "Provisioning plan",
+      placeholder: "business",
+    },
+    mailboxEmail: {
+      label: "Mailbox email",
+      placeholder: "user@example.com",
+      type: "email",
+    },
+  };
+
+  const supportedFields = new Set(Object.keys(fieldMeta));
+  const requiredFields = selectedTransition?.requiredFields ?? [];
+  const unsupportedFields = requiredFields.filter(
+    (field) => !supportedFields.has(field),
+  );
+  const isStripeOverride =
+    entitlement.evidence === "stripe_sync" &&
+    entitlement.status !== editor.status;
+  const canSave =
+    Boolean(selectedTransition?.available) &&
+    unsupportedFields.length === 0 &&
+    !saving;
+
+  return (
+    <section className="rounded-3xl border border-emerald-200 bg-[linear-gradient(145deg,#ffffff,#f4fbf8)] p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-4 border-b border-emerald-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+            Access operation
+          </p>
+          <h4 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+            {editor.product}
+          </h4>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Current state{" "}
+            <span className={"rounded-full px-2 py-0.5 text-[10px] font-bold " + statusClass(entitlement.status)}>
+              {entitlement.status}
+            </span>
+            {" · "}
+            {entitlement.persisted ? "persisted entitlement" : "default restricted state"}
+          </p>
+        </div>
+        <div className="text-left sm:text-right">
+          <span
+            className={
+              "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] " +
+              (worker.ready
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-amber-100 text-amber-800")
+            }
+          >
+            <span
+              className={
+                "h-2 w-2 rounded-full " +
+                (worker.ready ? "bg-emerald-500" : "bg-amber-500")
+              }
+            />
+            {worker.ready ? "Worker live" : "Worker unavailable"}
+          </span>
+          {worker.lastSeenAt ? (
+            <p className="mt-1 text-[10px] text-slate-500">
+              Heartbeat {formatDate(worker.lastSeenAt)}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <p className="text-sm font-semibold text-slate-800">Target access state</p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Only transitions the backend preflight marks operationally safe can be committed.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {targets.map((target) => {
+            const selected = editor.status === target.toStatus;
+            return (
+              <button
+                key={target.toStatus}
+                type="button"
+                disabled={!target.available || saving}
+                onClick={() =>
+                  onChange({
+                    ...editor,
+                    status: target.toStatus,
+                  })
+                }
+                className={
+                  "rounded-2xl border p-3 text-left transition " +
+                  (selected
+                    ? "border-emerald-300 bg-emerald-50 shadow-sm"
+                    : target.available
+                      ? "border-slate-200 bg-white hover:border-emerald-200"
+                      : "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60")
+                }
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className={"rounded-full px-2 py-0.5 text-[9px] font-bold " + statusClass(target.toStatus)}>
+                    {target.toStatus}
+                  </span>
+                  {selected ? <Check size={14} className="text-emerald-700" /> : null}
+                </div>
+                <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                  {target.mode.replace("_", " ")}
+                </p>
+                <p className="mt-1 min-h-10 text-[10px] leading-5 text-slate-500">
+                  {target.available
+                    ? target.actions.length
+                      ? target.actions.join(" · ")
+                      : "No external provisioning action"
+                    : target.reason ?? "Transition blocked"}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {selectedTransition ? (
+        <div
+          className={
+            "mt-5 rounded-2xl border p-4 " +
+            (selectedTransition.available
+              ? selectedTransition.mode === "provisioning"
+                ? "border-blue-200 bg-blue-50"
+                : "border-emerald-200 bg-emerald-50"
+              : "border-amber-200 bg-amber-50")
+          }
+        >
+          <div className="flex items-start gap-3">
+            {selectedTransition.available ? (
+              <ShieldCheck
+                size={17}
+                className={
+                  selectedTransition.mode === "provisioning"
+                    ? "mt-0.5 shrink-0 text-blue-700"
+                    : "mt-0.5 shrink-0 text-emerald-700"
+                }
+              />
+            ) : (
+              <AlertTriangle size={17} className="mt-0.5 shrink-0 text-amber-700" />
+            )}
+            <div>
+              <p className="text-xs font-semibold text-slate-900">
+                {selectedTransition.available
+                  ? selectedTransition.mode === "provisioning"
+                    ? "Signed provisioning transition"
+                    : "Database-only access transition"
+                  : "Transition is currently blocked"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-600">
+                {selectedTransition.available
+                  ? selectedTransition.actions.length
+                    ? "The entitlement change and signed provisioning jobs commit in one database transaction."
+                    : "No external service mutation is required for this product lane."
+                  : selectedTransition.reason ?? "This transition is not operationally ready."}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {requiredFields.length > 0 ? (
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-slate-800">Provisioning context</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            These fields were requested by the backend preflight for this exact transition.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {requiredFields
+              .filter((field): field is keyof EntitlementEditorState["context"] =>
+                supportedFields.has(field),
+              )
+              .map((field) => {
+                const meta = fieldMeta[field];
+                return (
+                  <label key={field} className="text-xs font-semibold text-slate-700">
+                    {meta.label}
+                    <input
+                      type={meta.type ?? "text"}
+                      value={editor.context[field]}
+                      onChange={(event) =>
+                        onChange({
+                          ...editor,
+                          context: {
+                            ...editor.context,
+                            [field]: event.target.value,
+                          },
+                        })
+                      }
+                      placeholder={meta.placeholder}
+                      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
+                    />
+                  </label>
+                );
+              })}
+          </div>
+          {unsupportedFields.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+              This UI does not yet support required context field
+              {unsupportedFields.length === 1 ? " " : "s "}
+              {unsupportedFields.join(", ")}. The operation stays locked.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <label className="text-sm font-semibold text-slate-800">
+          Operator reason
+          <textarea
+            value={editor.reason}
+            onChange={(event) =>
+              onChange({
+                ...editor,
+                reason: event.target.value,
+              })
+            }
+            rows={3}
+            maxLength={500}
+            placeholder="Why is this access change required?"
+            className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-normal text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
+          />
+          <span className="mt-1 block text-[10px] font-normal leading-5 text-slate-500">
+            Required. Stored in the audit record and provisioning payload.
+          </span>
+        </label>
+
+        <label className="text-sm font-semibold text-slate-800">
+          Access note
+          <textarea
+            value={editor.notes}
+            onChange={(event) =>
+              onChange({
+                ...editor,
+                notes: event.target.value,
+              })
+            }
+            rows={3}
+            maxLength={2000}
+            placeholder="Optional operator-visible context"
+            className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-normal text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
+          />
+          <span className="mt-1 block text-[10px] font-normal leading-5 text-slate-500">
+            This becomes the persisted entitlement note.
+          </span>
+        </label>
+      </div>
+
+      {isStripeOverride ? (
+        <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <input
+            type="checkbox"
+            checked={editor.acknowledgeBillingOverride}
+            onChange={(event) =>
+              onChange({
+                ...editor,
+                acknowledgeBillingOverride: event.target.checked,
+              })
+            }
+            className="mt-1 accent-amber-600"
+          />
+          <span>
+            <span className="block text-xs font-semibold text-amber-950">
+              Acknowledge manual billing override
+            </span>
+            <span className="mt-1 block text-xs leading-5 text-amber-800">
+              This entitlement contains Stripe synchronization evidence. A manual state change can diverge from billing until the next synchronization.
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      <div className="mt-5 flex flex-col-reverse gap-2 border-t border-emerald-100 pt-5 sm:flex-row sm:justify-end">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!canSave}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+          {saving
+            ? "Committing…"
+            : selectedTransition?.mode === "provisioning"
+              ? "Commit & queue provisioning"
+              : "Commit access change"}
+        </button>
+      </div>
+    </section>
   );
 }
 
