@@ -11,6 +11,9 @@ function repoFile(path: string): string {
 
 const service = repoFile("apps/api/src/lib/provisioning-remediation.ts");
 const routes = repoFile("apps/api/src/routes/v1/modules/commerce-catalog.ts");
+const operatorUi = repoFile(
+  "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+);
 
 test("dead-letter retry verifies immutable source evidence before replay", () => {
   assert.match(service, /hashCanonicalPayload\(job\.payload\) === job\.payloadHash/);
@@ -85,5 +88,26 @@ test("cross-system recovery suggestions require Hosting read authority and remai
   assert.match(
     routes,
     /getDeadLetterRemediation\(jobId, \{[\s\S]*?includeHostingSuggestions/,
+  );
+});
+
+test("switching Hosting recovery candidates cannot retain another tenant's ambiguous context", () => {
+  assert.match(operatorUi, /current\.tenantId === candidate\.tenantId/);
+  assert.match(operatorUi, /tenantId: candidate\.tenantId/);
+  assert.match(
+    operatorUi,
+    /candidate\.suggestedContext\.domain \?\?[\s\S]*?sameTenant \? current\.domain : ""/,
+  );
+  assert.match(
+    operatorUi,
+    /candidate\.suggestedContext\.serviceInstanceId \?\?[\s\S]*?sameTenant \? current\.serviceInstanceId : ""/,
+  );
+  assert.match(
+    operatorUi,
+    /candidate\.suggestedContext\.targetIp \?\?[\s\S]*?sameTenant \? current\.targetIp : ""/,
+  );
+  assert.match(
+    operatorUi,
+    /chooseRecoveryValue\(\s*candidate,\s*"serviceInstanceId"/,
   );
 });

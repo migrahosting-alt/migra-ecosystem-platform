@@ -1292,22 +1292,39 @@ function DeadLetterRemediationPanel({
   const [error, setError] = useState<string | null>(null);
   const hostingCandidates = remediation.retry.hostingCandidates ?? [];
 
-  function applyHostingCandidate(candidate: HostingRecoveryCandidate) {
-    setContext((current) => ({
+  function contextForHostingCandidate(
+    current: DeadLetterRecoveryContext,
+    candidate: HostingRecoveryCandidate,
+  ): DeadLetterRecoveryContext {
+    const sameTenant = current.tenantId === candidate.tenantId;
+    return {
       ...current,
       tenantId: candidate.tenantId,
-      domain: candidate.suggestedContext.domain ?? current.domain,
+      domain:
+        candidate.suggestedContext.domain ??
+        (sameTenant ? current.domain : ""),
       serviceInstanceId:
-        candidate.suggestedContext.serviceInstanceId ?? current.serviceInstanceId,
-      targetIp: candidate.suggestedContext.targetIp ?? current.targetIp,
-    }));
+        candidate.suggestedContext.serviceInstanceId ??
+        (sameTenant ? current.serviceInstanceId : ""),
+      targetIp:
+        candidate.suggestedContext.targetIp ??
+        (sameTenant ? current.targetIp : ""),
+    };
+  }
+
+  function applyHostingCandidate(candidate: HostingRecoveryCandidate) {
+    setContext((current) => contextForHostingCandidate(current, candidate));
   }
 
   function chooseRecoveryValue(
+    candidate: HostingRecoveryCandidate,
     field: "domain" | "serviceInstanceId" | "targetIp",
     value: string,
   ) {
-    setContext((current) => ({ ...current, [field]: value }));
+    setContext((current) => ({
+      ...contextForHostingCandidate(current, candidate),
+      [field]: value,
+    }));
   }
 
   const fieldMeta: Record<
@@ -1626,7 +1643,7 @@ function DeadLetterRemediationPanel({
                             <button
                               key={value}
                               type="button"
-                              onClick={() => chooseRecoveryValue("domain", value)}
+                              onClick={() => chooseRecoveryValue(candidate, "domain", value)}
                               disabled={!canManage || saving !== null}
                               className={
                                 "rounded-lg border px-2 py-1 text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
@@ -1652,7 +1669,13 @@ function DeadLetterRemediationPanel({
                             <button
                               key={instance.id}
                               type="button"
-                              onClick={() => chooseRecoveryValue("serviceInstanceId", instance.id)}
+                              onClick={() =>
+                                chooseRecoveryValue(
+                                  candidate,
+                                  "serviceInstanceId",
+                                  instance.id,
+                                )
+                              }
                               disabled={!canManage || saving !== null}
                               className={
                                 "max-w-full rounded-lg border px-2 py-1 text-left text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
@@ -1679,7 +1702,7 @@ function DeadLetterRemediationPanel({
                             <button
                               key={value}
                               type="button"
-                              onClick={() => chooseRecoveryValue("targetIp", value)}
+                              onClick={() => chooseRecoveryValue(candidate, "targetIp", value)}
                               disabled={!canManage || saving !== null}
                               className={
                                 "rounded-lg border px-2 py-1 font-mono text-[10px] font-medium transition disabled:cursor-not-allowed disabled:opacity-50 " +
