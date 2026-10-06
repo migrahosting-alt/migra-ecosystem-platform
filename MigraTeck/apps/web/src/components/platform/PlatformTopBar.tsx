@@ -38,19 +38,19 @@ export function PlatformTopBar({ activeOrgId, organizations, session }: Platform
   }
 
   return (
-    <header className="border-b border-slate-200/80 bg-white/92 px-6 py-3.5 backdrop-blur-xl">
+    <header className="border-b border-white/8 bg-[linear-gradient(180deg,#05080f,#0a101b)] px-5 py-2.5 text-slate-100 shadow-[0_8px_24px_rgba(2,6,23,0.14)] backdrop-blur-xl">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-4">
-          <div className="min-w-[175px]">
+          <div className="min-w-[160px]">
             <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
               MigraTeck Platform
             </p>
             <div className="mt-1 flex items-center gap-2">
-              <span className="truncate text-sm font-semibold text-slate-900">
+              <span className="truncate text-[13px] font-semibold text-white">
                 {session.activeOrgName ?? "Platform context"}
               </span>
               {session.activeOrgRole ? (
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-300">
                   {session.activeOrgRole}
                 </span>
               ) : null}
@@ -65,7 +65,7 @@ export function PlatformTopBar({ activeOrgId, organizations, session }: Platform
             <input
               aria-label="Search MigraTeck platform"
               placeholder="Search organizations, API access, billing, events..."
-              className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-500/10"
+              className="h-9 w-full rounded-lg border border-white/10 bg-white/[0.055] pl-9 pr-3 text-[13px] text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-blue-400/70 focus:bg-white/[0.08] focus:ring-2 focus:ring-blue-500/15"
             />
           </div>
 
@@ -74,7 +74,7 @@ export function PlatformTopBar({ activeOrgId, organizations, session }: Platform
             value={activeOrgId ?? ""}
             disabled={switchPending || organizations.length === 0}
             onChange={(event) => void handleSwitchOrg(event.target.value)}
-            className="hidden min-w-[190px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 disabled:opacity-50 2xl:block"
+            className="hidden min-w-[170px] rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-[13px] font-medium text-slate-100 shadow-sm outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-500/15 disabled:opacity-50 2xl:block"
           >
             {organizations.length === 0 ? <option value="">No organization selected</option> : null}
             {organizations.map((organization) => (
@@ -89,30 +89,30 @@ export function PlatformTopBar({ activeOrgId, organizations, session }: Platform
           <nav className="hidden items-center gap-1 lg:flex">
             <Link
               href="/platform/developers"
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-slate-300 transition hover:bg-white/5 hover:text-white"
             >
               <Code2 size={16} /> Developers
             </Link>
             <Link
               href="/platform/commerce"
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-slate-300 transition hover:bg-white/5 hover:text-white"
             >
               <CreditCard size={16} /> Commerce
             </Link>
             <Link
               href="/platform/trust"
-              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-slate-300 transition hover:bg-white/5 hover:text-white"
             >
               <ShieldCheck size={16} /> Trust
             </Link>
           </nav>
 
-          <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.055] px-2.5 py-1.5">
             <div className="min-w-0">
-              <p className="max-w-[180px] truncate text-sm font-semibold text-slate-900">
+              <p className="max-w-[160px] truncate text-[13px] font-semibold text-white">
                 {session.displayName ?? session.email}
               </p>
-              <p className="max-w-[180px] truncate text-xs text-slate-500">{session.email}</p>
+              <p className="max-w-[160px] truncate text-[11px] text-slate-400">{session.email}</p>
             </div>
             <LogoutButton />
           </div>

@@ -79,7 +79,7 @@ export default async function PlatformOverviewPage() {
   const orgContext = organizations.find((organization) => organization.id === session.activeOrgId) ?? organizations[0] ?? null;
 
   return (
-    <div className="p-6 lg:p-8">
+    <div className="p-5 lg:p-6">
       <PlatformPageHeader
         eyebrow="Parent platform"
         title={"Welcome back, " + ownerName}
@@ -102,7 +102,7 @@ export default async function PlatformOverviewPage() {
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <PlatformStatCard
           label="Platform authority"
           value={authorityLabel}
@@ -125,7 +125,7 @@ export default async function PlatformOverviewPage() {
         />
       </div>
 
-      <section className="mt-7 rounded-3xl border border-slate-200 bg-[radial-gradient(circle_at_15%_15%,rgba(59,130,246,.08),transparent_34%),linear-gradient(135deg,#ffffff,#f8fafc)] p-6 shadow-sm">
+      <section className="mt-5 rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_15%_15%,rgba(59,130,246,.07),transparent_34%),linear-gradient(135deg,#ffffff,#f8fafc)] p-5 shadow-sm">
         <div className="flex flex-col gap-2">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Platform domains</p>
           <h2 className="text-xl font-semibold tracking-tight text-slate-950">Shared infrastructure, separated by responsibility.</h2>
@@ -134,21 +134,21 @@ export default async function PlatformOverviewPage() {
           </p>
         </div>
 
-        <div className="mt-5 grid gap-4 xl:grid-cols-4">
+        <div className="mt-4 grid gap-3 xl:grid-cols-4">
           {domains.map((domain) => {
             const Icon = domain.icon;
             return (
               <Link
                 key={domain.href}
                 href={domain.href}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+                className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
               >
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-600 transition group-hover:bg-blue-600 group-hover:text-white">
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-blue-50 text-blue-600 transition group-hover:bg-blue-600 group-hover:text-white">
                   <Icon size={19} />
                 </span>
-                <h3 className="mt-4 text-base font-semibold text-slate-950">{domain.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{domain.description}</p>
-                <span className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-blue-600">
+                <h3 className="mt-3 text-[15px] font-semibold text-slate-950">{domain.title}</h3>
+                <p className="mt-1.5 text-[13px] leading-5 text-slate-700">{domain.description}</p>
+                <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-blue-600">
                   Open domain <ArrowRight size={14} />
                 </span>
               </Link>
@@ -157,7 +157,7 @@ export default async function PlatformOverviewPage() {
         </div>
       </section>
 
-      <div className="mt-7 grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-6 py-5">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Scoped business context</p>
