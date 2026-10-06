@@ -39,6 +39,8 @@ export const PLATFORM_PERMISSIONS = [
   "platform.users.create",
   /** Lock, unlock or disable an account. Changes whether someone can sign in. */
   "platform.users.suspend",
+  /** Revoke another user's renewable sessions without changing account status. */
+  "platform.users.sessions.manage",
   /**
    * Clear someone's TOTP enrolment so they can re-enrol.
    *
@@ -109,6 +111,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.users.read",
     "platform.users.create",
     "platform.users.suspend",
+    "platform.users.sessions.manage",
     "platform.users.mfa_reset",
     "platform.clients.read",
     "platform.commerce.read",

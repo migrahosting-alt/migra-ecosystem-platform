@@ -172,6 +172,83 @@ export async function revokeAllUserSessions(userId: string): Promise<number> {
   return result.count;
 }
 
+export type OperatorSessionContainmentResult = {
+  revokedSessions: number;
+  revokedRefreshTokens: number;
+};
+
+/**
+ * Revoke one renewable session for a target user.
+ *
+ * The userId predicate is part of the lookup, not a second check performed
+ * after reading the row. An operator route must never be able to present one
+ * user's id and another user's session id and revoke whichever row wins.
+ */
+export async function revokeUserSessionForOperator(
+  userId: string,
+  sessionId: string,
+): Promise<OperatorSessionContainmentResult | null> {
+  return db.$transaction(async (tx) => {
+    const target = await tx.session.findFirst({
+      where: {
+        id: sessionId,
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    if (!target) return null;
+
+    const now = new Date();
+    const sessions = await tx.session.updateMany({
+      where: { id: sessionId, userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    const refreshTokens = await tx.oAuthRefreshToken.updateMany({
+      where: {
+        userId,
+        deviceId: sessionId,
+        revokedAt: null,
+      },
+      data: { revokedAt: now },
+    });
+
+    return {
+      revokedSessions: sessions.count,
+      revokedRefreshTokens: refreshTokens.count,
+    };
+  });
+}
+
+/**
+ * Revoke every renewable credential for a user without changing account state.
+ *
+ * Access JWTs are deliberately short-lived; this stops every path that could
+ * mint another one by invalidating both the browser sessions and their bound
+ * refresh-token rows atomically.
+ */
+export async function revokeAllUserAccessForOperator(
+  userId: string,
+): Promise<OperatorSessionContainmentResult> {
+  return db.$transaction(async (tx) => {
+    const now = new Date();
+    const sessions = await tx.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    const refreshTokens = await tx.oAuthRefreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+
+    return {
+      revokedSessions: sessions.count,
+      revokedRefreshTokens: refreshTokens.count,
+    };
+  });
+}
+
 export async function revokeOtherUserSessions(
   userId: string,
   currentSessionId: string,

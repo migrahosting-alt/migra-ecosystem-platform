@@ -10,6 +10,11 @@ export const adminUserIdSchema = z.object({
   id: uuidSchema,
 });
 
+export const adminUserSessionParamsSchema = z.object({
+  id: uuidSchema,
+  sessionId: uuidSchema,
+});
+
 export const adminUserListQuerySchema = z.object({
   q: z.string().trim().max(255).optional(),
   status: z.enum(["PENDING", "ACTIVE", "LOCKED", "DISABLED"]).optional(),

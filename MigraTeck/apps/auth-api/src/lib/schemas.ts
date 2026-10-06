@@ -24,6 +24,7 @@ export {
   orgMemberIdSchema,
   updateOrganizationMemberRoleSchema,
   adminUserIdSchema,
+  adminUserSessionParamsSchema,
   adminActionSchema,
   adminUserListQuerySchema,
   adminClientListQuerySchema,

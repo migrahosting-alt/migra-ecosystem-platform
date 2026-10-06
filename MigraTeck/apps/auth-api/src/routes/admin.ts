@@ -3,12 +3,13 @@
  * Protected by `requireAdmin`: an explicit operator allowlist that authorizes
  * nobody when unset. Previously these were open to any signed-in user.
  */
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   adminActionSchema,
   adminAuditQuerySchema,
   adminClientListQuerySchema,
   adminUserIdSchema,
+  adminUserSessionParamsSchema,
   adminUserListQuerySchema,
   platformRoleGrantSchema,
   platformRoleRevokeSchema,
@@ -19,21 +20,26 @@ import {
   createPasswordResetToken,
   findIdentifierByParsedValue,
   findUserById,
-  lockUser,
+  lockUserWithContainment,
   unlockUser,
-  disableUser,
+  disableUserWithContainment,
 } from "../modules/users/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
 import { parseIdentifier } from "../lib/identifier.js";
 import { sendInternalInviteEmail } from "../lib/email.js";
 import { hasTotpEnabled, disableTotp } from "../modules/mfa/index.js";
-import { listUserSessions } from "../modules/sessions/index.js";
+import {
+  listUserSessions,
+  revokeAllUserAccessForOperator,
+  revokeUserSessionForOperator,
+} from "../modules/sessions/index.js";
 import { requirePermission, getClientIp } from "../middleware/session.js";
 import {
   grantRole,
   revokeRole,
   listGrants,
   PLATFORM_PERMISSIONS,
+  rolesForUser,
 } from "../modules/authorization/platformRoles.js";
 import type { PlatformRole } from "../prisma-client.js";
 
@@ -101,6 +107,42 @@ function serializeAdminClient(client: {
     created_at: client.createdAt.toISOString(),
     updated_at: client.updatedAt.toISOString(),
   };
+}
+
+async function containmentBlockReason(
+  request: FastifyRequest,
+  targetUserId: string,
+  opts: { persistent: boolean },
+): Promise<string | null> {
+  const actor = request.authUser;
+  if (!actor) return "Authenticated operator identity is unavailable.";
+
+  if (opts.persistent && actor.id === targetUserId) {
+    return "You cannot lock or disable your own platform operator account.";
+  }
+
+  const targetRoles = await rolesForUser(targetUserId);
+  if (!targetRoles.includes("OWNER")) return null;
+
+  if (!request.platformAuthority?.permissions.has("platform.roles.manage")) {
+    return "Platform OWNER accounts can only be contained by another OWNER.";
+  }
+
+  if (!opts.persistent) return null;
+
+  const otherActiveOwners = await db.platformRoleGrant.count({
+    where: {
+      role: "OWNER",
+      revokedAt: null,
+      userId: { not: targetUserId },
+      user: { status: "ACTIVE" },
+    },
+  });
+  if (otherActiveOwners === 0) {
+    return "This is the last active platform OWNER. Make another OWNER active before suspending this account.";
+  }
+
+  return null;
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
@@ -490,19 +532,37 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const actor = request.authUser!;
     const ip = getClientIp(request);
     const ua = request.headers["user-agent"];
+    const target = await findUserById(id);
+    if (!target) {
+      return reply.code(404).send({ error: { code: "not_found", message: "User not found." } });
+    }
 
-    await lockUser(id);
+    const blocked = await containmentBlockReason(request, id, { persistent: true });
+    if (blocked) {
+      return reply.code(409).send({ error: { code: "protected_operator", message: blocked } });
+    }
+
+    const containment = await lockUserWithContainment(id);
 
     await logAuditEvent({
       actorUserId: actor.id,
       targetUserId: id,
       eventType: "ACCOUNT_LOCKED",
-      eventData: { reason },
+      eventData: {
+        reason,
+        revoked_sessions: containment.revokedSessions,
+        revoked_refresh_tokens: containment.revokedRefreshTokens,
+      },
       ipAddress: ip,
       userAgent: ua,
     });
 
-    return reply.code(200).send({ success: true, message: "User locked." });
+    return reply.code(200).send({
+      success: true,
+      message: "User locked and renewable access revoked.",
+      revoked_sessions: containment.revokedSessions,
+      revoked_refresh_tokens: containment.revokedRefreshTokens,
+    });
   });
 
   // ── POST /v1/admin/users/:id/unlock ───────────────────────────────
@@ -534,20 +594,127 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const actor = request.authUser!;
     const ip = getClientIp(request);
     const ua = request.headers["user-agent"];
+    const target = await findUserById(id);
+    if (!target) {
+      return reply.code(404).send({ error: { code: "not_found", message: "User not found." } });
+    }
 
-    await disableUser(id);
+    const blocked = await containmentBlockReason(request, id, { persistent: true });
+    if (blocked) {
+      return reply.code(409).send({ error: { code: "protected_operator", message: blocked } });
+    }
+
+    const containment = await disableUserWithContainment(id);
 
     await logAuditEvent({
       actorUserId: actor.id,
       targetUserId: id,
       eventType: "ACCOUNT_DISABLED",
-      eventData: { reason },
+      eventData: {
+        reason,
+        revoked_sessions: containment.revokedSessions,
+        revoked_refresh_tokens: containment.revokedRefreshTokens,
+      },
       ipAddress: ip,
       userAgent: ua,
     });
 
-    return reply.code(200).send({ success: true, message: "User disabled." });
+    return reply.code(200).send({
+      success: true,
+      message: "User disabled and renewable access revoked.",
+      revoked_sessions: containment.revokedSessions,
+      revoked_refresh_tokens: containment.revokedRefreshTokens,
+    });
   });
+
+  // ── POST /v1/admin/users/:id/sessions/:sessionId/revoke ───────────
+  app.post<{ Params: { id: string; sessionId: string } }>(
+    "/v1/admin/users/:id/sessions/:sessionId/revoke",
+    { preHandler: requirePermission("platform.users.sessions.manage") },
+    async (request, reply) => {
+      const { id, sessionId } = adminUserSessionParamsSchema.parse(request.params);
+      const { reason } = adminActionSchema.parse(request.body);
+      const actor = request.authUser!;
+      const target = await findUserById(id);
+      if (!target) {
+        return reply.code(404).send({ error: { code: "not_found", message: "User not found." } });
+      }
+
+      const blocked = await containmentBlockReason(request, id, { persistent: false });
+      if (blocked) {
+        return reply.code(409).send({ error: { code: "protected_operator", message: blocked } });
+      }
+
+      const containment = await revokeUserSessionForOperator(id, sessionId);
+      if (!containment) {
+        return reply.code(404).send({
+          error: { code: "not_found", message: "Active session not found for this user." },
+        });
+      }
+
+      await logAuditEvent({
+        actorUserId: actor.id,
+        targetUserId: id,
+        eventType: "ADMIN_SESSION_REVOKED",
+        eventData: {
+          reason,
+          session_id: sessionId,
+          revoked_sessions: containment.revokedSessions,
+          revoked_refresh_tokens: containment.revokedRefreshTokens,
+        },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
+
+      return reply.code(200).send({
+        revoked: true,
+        session_id: sessionId,
+        revoked_sessions: containment.revokedSessions,
+        revoked_refresh_tokens: containment.revokedRefreshTokens,
+      });
+    },
+  );
+
+  // ── POST /v1/admin/users/:id/sessions/revoke-all ──────────────────
+  app.post<{ Params: { id: string } }>(
+    "/v1/admin/users/:id/sessions/revoke-all",
+    { preHandler: requirePermission("platform.users.sessions.manage") },
+    async (request, reply) => {
+      const { id } = adminUserIdSchema.parse(request.params);
+      const { reason } = adminActionSchema.parse(request.body);
+      const actor = request.authUser!;
+      const target = await findUserById(id);
+      if (!target) {
+        return reply.code(404).send({ error: { code: "not_found", message: "User not found." } });
+      }
+
+      const blocked = await containmentBlockReason(request, id, { persistent: false });
+      if (blocked) {
+        return reply.code(409).send({ error: { code: "protected_operator", message: blocked } });
+      }
+
+      const containment = await revokeAllUserAccessForOperator(id);
+
+      await logAuditEvent({
+        actorUserId: actor.id,
+        targetUserId: id,
+        eventType: "ADMIN_SESSIONS_REVOKED",
+        eventData: {
+          reason,
+          revoked_sessions: containment.revokedSessions,
+          revoked_refresh_tokens: containment.revokedRefreshTokens,
+        },
+        ipAddress: getClientIp(request),
+        userAgent: request.headers["user-agent"],
+      });
+
+      return reply.code(200).send({
+        revoked: true,
+        revoked_sessions: containment.revokedSessions,
+        revoked_refresh_tokens: containment.revokedRefreshTokens,
+      });
+    },
+  );
 
   // ── GET /v1/admin/audit ───────────────────────────────────────────
   app.get("/v1/admin/audit", { preHandler: requirePermission("platform.audit.read") }, async (request, reply) => {
@@ -603,10 +770,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     "/v1/admin/users/:id/mfa/reset",
     { preHandler: requirePermission("platform.users.mfa_reset") },
     async (request, reply) => {
-    const { id } = adminUserIdSchema.parse(request.params);
+      const { id } = adminUserIdSchema.parse(request.params);
+      const { reason } = adminActionSchema.parse(request.body);
       const target = await findUserById(id);
       if (!target) {
         return reply.code(404).send({ error: { code: "not_found", message: "No such user." } });
+      }
+
+      const blocked = await containmentBlockReason(request, id, { persistent: false });
+      if (blocked) {
+        return reply.code(409).send({ error: { code: "protected_operator", message: blocked } });
       }
 
       const hadTotp = await hasTotpEnabled(target.id);
@@ -619,7 +792,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         actorUserId: request.authUser!.id,
         targetUserId: target.id,
         eventType: "ADMIN_MFA_RESET",
-        eventData: { had_totp: hadTotp },
+        eventData: { had_totp: hadTotp, reason },
         ipAddress: getClientIp(request),
         userAgent: request.headers["user-agent"],
       });

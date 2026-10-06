@@ -44,7 +44,7 @@ export async function GET(_request: Request, context: RouteContext) {
       role: string;
       status: string;
       joined_at: string;
-      user: { id: string; email: string; display_name: string | null };
+      user: { id: string; email: string; display_name: string | null; status: string };
     }>;
   }>(`/v1/organizations/${encodeURIComponent(orgId)}/members`);
 
@@ -75,12 +75,16 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const result = await fetchAuthApi<{
+    invited: boolean;
+    identity_created: boolean;
+    invite_sent: boolean | null;
+    warning: string | null;
     member: {
       id: string;
       role: string;
       status: string;
       joined_at: string;
-      user: { id: string; email: string; display_name: string | null };
+      user: { id: string; email: string; display_name: string | null; status: string };
     };
   }>(`/v1/organizations/${encodeURIComponent(orgId)}/members`, {
     method: "POST",

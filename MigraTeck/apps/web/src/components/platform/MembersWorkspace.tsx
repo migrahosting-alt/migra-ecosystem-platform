@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 
@@ -12,6 +13,7 @@ type OrganizationMember = {
     id: string;
     email: string;
     displayName?: string | null;
+    status: string;
   };
 };
 
@@ -64,7 +66,7 @@ type ApiMember = {
   role: string;
   status: string;
   joined_at: string | null;
-  user: { id: string; email: string; display_name: string | null };
+  user: { id: string; email: string; display_name: string | null; status: string };
 };
 
 export function MembersWorkspace({
@@ -85,6 +87,7 @@ export function MembersWorkspace({
   const [roleDrafts, setRoleDrafts] = useState<Record<string, string>>({});
   const [updatePendingId, setUpdatePendingId] = useState<string | null>(null);
   const [removePendingId, setRemovePendingId] = useState<string | null>(null);
+  const [resendPendingId, setResendPendingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +119,7 @@ export function MembersWorkspace({
                     id: member.user.id,
                     email: member.user.email,
                     displayName: member.user.display_name,
+                    status: member.user.status,
                   },
                 }))
               : [],
@@ -153,6 +157,7 @@ export function MembersWorkspace({
           id: "current-user",
           email: currentUserEmail,
           displayName: currentUserName,
+          status: "ACTIVE",
         },
       },
     ];
@@ -161,6 +166,7 @@ export function MembersWorkspace({
   const ownerCount = visibleMembers.filter((member) => member.role === "OWNER").length;
   const adminCount = visibleMembers.filter((member) => ["OWNER", "ADMIN"].includes(member.role)).length;
   const billingCount = visibleMembers.filter((member) => member.role === "BILLING_ADMIN").length;
+  const pendingIdentityCount = visibleMembers.filter((member) => member.user.status === "PENDING").length;
 
   async function handleInvite(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -194,6 +200,7 @@ export function MembersWorkspace({
               id: payload.member.user.id,
               email: payload.member.user.email,
               displayName: payload.member.user.display_name,
+              status: payload.member.user.status,
             },
           },
         ]);
@@ -201,7 +208,14 @@ export function MembersWorkspace({
 
       setEmail("");
       setRole("member");
-      setSubmitMessage("Member added to the organization.");
+      setSubmitMessage(
+        payload?.invited
+          ? payload?.invite_sent
+            ? "Invitation sent. The organization membership is attached, but access begins only after the identity finishes account setup."
+            : payload?.warning ??
+              "The organization membership is attached to a pending identity. Resend the invitation when email delivery is available."
+          : "Existing MigraAuth identity added to the organization.",
+      );
     } catch {
       setSubmitMessage("Unable to add this member right now.");
     } finally {
@@ -253,6 +267,35 @@ export function MembersWorkspace({
     }
   }
 
+  async function handleResendInvite(memberId: string) {
+    setResendPendingId(memberId);
+    setSubmitMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/platform/organizations/${orgId}/members/${memberId}/resend-invite`,
+        { method: "POST" },
+      );
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setSubmitMessage(
+          payload?.error ??
+            "Unable to resend the setup invitation right now.",
+        );
+        return;
+      }
+
+      setSubmitMessage(
+        "Setup invitation resent. The identity remains pending until the recipient completes account setup.",
+      );
+    } catch {
+      setSubmitMessage("Unable to resend the setup invitation right now.");
+    } finally {
+      setResendPendingId(null);
+    }
+  }
+
   async function handleRemove(memberId: string) {
     setRemovePendingId(memberId);
     setSubmitMessage(null);
@@ -290,9 +333,11 @@ export function MembersWorkspace({
           <p className="mt-2 text-sm leading-6 text-slate-500">{ownerCount} owner{ownerCount === 1 ? "" : "s"}, {billingCount} billing admin{billingCount === 1 ? "" : "s"}.</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Access workflow</p>
-          <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">Direct add</p>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Existing MigraAuth users can be added immediately. Invitation tracking is not yet exposed by the auth service.</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Pending setup</p>
+          <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{pendingIdentityCount}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            New identities remain unable to sign in until setup is completed. Pending invitations can be resent from the member row.
+          </p>
         </div>
       </div>
 
@@ -364,16 +409,30 @@ export function MembersWorkspace({
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <span
-                          className={cn(
-                            "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                            member.status === "ACTIVE"
-                              ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                              : "border border-amber-200 bg-amber-50 text-amber-700",
-                          )}
-                        >
-                          {member.status}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={cn(
+                              "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                              member.status === "ACTIVE"
+                                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border border-amber-200 bg-amber-50 text-amber-700",
+                            )}
+                          >
+                            Membership {member.status}
+                          </span>
+                          <span
+                            className={cn(
+                              "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                              member.user.status === "ACTIVE"
+                                ? "border border-slate-200 bg-slate-50 text-slate-600"
+                                : member.user.status === "PENDING"
+                                  ? "border border-amber-200 bg-amber-50 text-amber-700"
+                                  : "border border-rose-200 bg-rose-50 text-rose-700",
+                            )}
+                          >
+                            Identity {member.user.status}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-500">{new Date(member.joinedAt).toLocaleDateString()}</td>
                       <td className="px-6 py-4">
@@ -389,6 +448,16 @@ export function MembersWorkspace({
                             >
                               {updatePendingId === member.id ? "Saving..." : "Save"}
                             </button>
+                            {member.user.status === "PENDING" ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleResendInvite(member.id)}
+                                disabled={resendPendingId === member.id}
+                                className="rounded-full border border-amber-200 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-50 disabled:opacity-50"
+                              >
+                                {resendPendingId === member.id ? "Sending..." : "Resend invite"}
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => void handleRemove(member.id)}
@@ -410,10 +479,20 @@ export function MembersWorkspace({
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-900">Add member</h2>
-        <p className="mt-1 text-sm leading-6 text-slate-500">
-          Add an existing MigraAuth user by email and assign a platform role immediately.
-        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Invite or add member</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Existing MigraAuth identities are attached immediately. A new email creates a pending identity and sends a secure setup invitation.
+            </p>
+          </div>
+          <Link
+            href="/platform/trust"
+            className="shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Platform roles live in Trust Operations
+          </Link>
+        </div>
         <form className="mt-5 grid gap-4 md:grid-cols-[1.3fr_0.7fr_auto]" onSubmit={handleInvite}>
           <input
             type="email"
@@ -437,7 +516,7 @@ export function MembersWorkspace({
             disabled={submitPending}
             className="inline-flex items-center justify-center rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
           >
-            {submitPending ? "Adding..." : "Add member"}
+            {submitPending ? "Processing..." : "Invite / add"}
           </button>
         </form>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">

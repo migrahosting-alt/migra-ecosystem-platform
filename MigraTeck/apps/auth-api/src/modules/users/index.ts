@@ -257,6 +257,61 @@ export async function disableUser(userId: string): Promise<User> {
   });
 }
 
+export type AccountContainmentResult = {
+  user: User;
+  revokedSessions: number;
+  revokedRefreshTokens: number;
+};
+
+async function containUserWithStatus(
+  userId: string,
+  status: "LOCKED" | "DISABLED",
+): Promise<AccountContainmentResult> {
+  return db.$transaction(async (tx) => {
+    const now = new Date();
+    const user = await tx.user.update({
+      where: { id: userId },
+      data:
+        status === "LOCKED"
+          ? { status: "LOCKED", lockedAt: now }
+          : { status: "DISABLED", disabledAt: now },
+    });
+    const sessions = await tx.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    const refreshTokens = await tx.oAuthRefreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+
+    return {
+      user,
+      revokedSessions: sessions.count,
+      revokedRefreshTokens: refreshTokens.count,
+    };
+  });
+}
+
+/**
+ * Security containment, not just a login-state flag.
+ *
+ * A locked account with a still-live session is not contained. This operation
+ * commits the status change and renewable-credential revocation together.
+ */
+export async function lockUserWithContainment(
+  userId: string,
+): Promise<AccountContainmentResult> {
+  return containUserWithStatus(userId, "LOCKED");
+}
+
+/** Disable an account and revoke every renewable credential atomically. */
+export async function disableUserWithContainment(
+  userId: string,
+): Promise<AccountContainmentResult> {
+  return containUserWithStatus(userId, "DISABLED");
+}
+
 export async function changePassword(
   userId: string,
   newPassword: string,

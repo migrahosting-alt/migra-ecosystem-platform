@@ -50,6 +50,7 @@ test("SUPPORT can read but cannot change anything", () => {
   assert.ok(p.has("platform.users.read"));
   assert.ok(p.has("platform.audit.read"));
   assert.ok(!p.has("platform.users.suspend"), "support must not be able to disable accounts");
+  assert.ok(!p.has("platform.users.sessions.manage"), "support must not be able to revoke another user's sessions");
   assert.ok(!p.has("platform.roles.manage"), "support must not be able to widen access");
 });
 
@@ -91,6 +92,7 @@ test("qualifying a model is a distinct power from granting roles", () => {
 test("OPERATOR can act on accounts but cannot widen authority", () => {
   const p = permissionsForRoles(["OPERATOR"]);
   assert.ok(p.has("platform.users.suspend"));
+  assert.ok(p.has("platform.users.sessions.manage"));
   assert.ok(p.has("platform.clients.read"));
   /*
    * The separation the whole taxonomy exists for. An operator who can grant
