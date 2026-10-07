@@ -437,6 +437,16 @@ export async function retryDeadProvisioningJob(input: {
     }
 
     const retryJobId = randomUUID();
+    const retryTaskId = randomUUID();
+    mergedPayload.jobId = retryJobId;
+
+    if (!remediation.job.productLane || !remediation.job.action) {
+      throw Object.assign(
+        new Error("Recovery source is missing product or action identity"),
+        { statusCode: 409 },
+      );
+    }
+
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000);
     const payloadHash = hashCanonicalPayload(mergedPayload);
@@ -476,8 +486,24 @@ export async function retryDeadProvisioningJob(input: {
       ],
     );
 
+    await client.query(
+      `INSERT INTO "ProvisioningTask"
+       (id,"orgId",product,action,status,attempts,"runAfter","lastError",payload,"createdByUserId","createdAt","updatedAt")
+       VALUES ($1,$2,$3::"ProductKey",$4::"ProvisioningAction",'PENDING'::"ProvisioningTaskStatus",0,NULL,NULL,$5::jsonb,$6,$7,$7)`,
+      [
+        retryTaskId,
+        job.orgId,
+        remediation.job.productLane,
+        remediation.job.action,
+        JSON.stringify(mergedPayload),
+        input.actorId,
+        createdAt,
+      ],
+    );
+
     await appendEvent(client, retryJobId, "PENDING", "queued_from_dead_letter", {
       sourceJobId: job.id,
+      retryTaskId,
       operatorActorId: input.actorId,
       operatorReason: input.reason,
     });
@@ -485,6 +511,14 @@ export async function retryDeadProvisioningJob(input: {
     await client.query(
       'UPDATE "ProvisioningJob" SET status=\'CANCELED\'::"ProvisioningJobStatus","lockedAt"=NULL,"lockedBy"=NULL,"finishedAt"=COALESCE("finishedAt",NOW()),"updatedAt"=NOW() WHERE id=$1 AND status=\'DEAD\'::"ProvisioningJobStatus"',
       [job.id],
+    );
+    await client.query(
+      `UPDATE "ProvisioningTask"
+       SET status='FAILED'::"ProvisioningTaskStatus",
+           "lastError"=$2,
+           "updatedAt"=NOW()
+       WHERE "orgId"=$1 AND payload->>'jobId'=$3`,
+      [job.orgId, "superseded_by_retry:" + retryJobId, job.id],
     );
     await appendEvent(client, job.id, "CANCELED", "dead_letter_retry_queued", {
       retryJobId,
@@ -512,6 +546,7 @@ export async function retryDeadProvisioningJob(input: {
     return {
       sourceJobId: job.id,
       retryJobId,
+      retryTaskId,
       status: "PENDING",
       productLane: remediation.job.productLane,
       action: remediation.job.action,

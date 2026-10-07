@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getDb } from "./db.js";
+import {
+  ENTITLEMENT_STATUSES,
+  PRODUCT_KEYS,
+  type EntitlementStatus,
+  type ProductKey,
+} from "./commerce-catalog.js";
 import { publishPlatformEvent } from "./platform-events.js";
 import {
   hashCanonicalPayload,
@@ -32,6 +38,368 @@ function nextBackoffDate(attempts: number): Date {
 }
 
 type QueryExecutor = Pick<PoolClient, "query">;
+
+type JsonRecord = Record<string, unknown>;
+
+type DeferredEntitlementIntent = {
+  transitionId: string;
+  product: ProductKey;
+  previousStatus: EntitlementStatus;
+  newStatus: EntitlementStatus;
+  entitlementId: string;
+  expectedUpdatedAt: Date | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  notes: string | null;
+};
+
+function asRecord(value: unknown): JsonRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as JsonRecord;
+}
+
+function stringField(record: JsonRecord, key: string): string | null {
+  const value = record[key];
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function nullableDateField(record: JsonRecord, key: string): Date | null | undefined {
+  const value = record[key];
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+}
+
+function deferredEntitlementIntent(
+  job: Pick<ProvisioningJobRecord, "payload">,
+): DeferredEntitlementIntent | null {
+  const payload = asRecord(job.payload);
+  if (
+    payload.intent !== "org_entitlement_transition" ||
+    payload.entitlementApplyMode !== "after_all_jobs_succeed"
+  ) {
+    return null;
+  }
+
+  const transitionId = stringField(payload, "transitionId");
+  const product = stringField(payload, "product");
+  const previousStatus = stringField(payload, "previousStatus");
+  const newStatus = stringField(payload, "newStatus");
+  const entitlementId = stringField(payload, "entitlementId");
+  const expectedUpdatedAt = nullableDateField(
+    payload,
+    "entitlementExpectedUpdatedAt",
+  );
+  const startsAt = nullableDateField(payload, "entitlementStartsAt");
+  const endsAt = nullableDateField(payload, "entitlementEndsAt");
+  const notesValue = payload.entitlementNotes;
+  const notes =
+    notesValue === null || typeof notesValue === "string"
+      ? notesValue
+      : undefined;
+
+  if (
+    !transitionId ||
+    !product ||
+    !previousStatus ||
+    !newStatus ||
+    !entitlementId ||
+    expectedUpdatedAt === undefined ||
+    startsAt === undefined ||
+    endsAt === undefined ||
+    notes === undefined ||
+    !(PRODUCT_KEYS as readonly string[]).includes(product) ||
+    !(ENTITLEMENT_STATUSES as readonly string[]).includes(previousStatus) ||
+    !(ENTITLEMENT_STATUSES as readonly string[]).includes(newStatus)
+  ) {
+    return null;
+  }
+
+  return {
+    transitionId,
+    product: product as ProductKey,
+    previousStatus: previousStatus as EntitlementStatus,
+    newStatus: newStatus as EntitlementStatus,
+    entitlementId,
+    expectedUpdatedAt,
+    startsAt,
+    endsAt,
+    notes,
+  };
+}
+
+async function updateProvisioningTaskState(
+  database: QueryExecutor,
+  job: ProvisioningJobRecord,
+  input: {
+    status: "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED";
+    runAfter?: Date | null;
+    lastError?: string | null;
+  },
+): Promise<void> {
+  await database.query(
+    `UPDATE "ProvisioningTask"
+     SET status=$2::"ProvisioningTaskStatus",
+         attempts=$3,
+         "runAfter"=$4,
+         "lastError"=$5,
+         "updatedAt"=NOW()
+     WHERE "orgId"=$1
+       AND payload->>'jobId'=$6`,
+    [
+      job.orgId,
+      input.status,
+      job.attempts,
+      input.runAfter ?? null,
+      input.lastError ?? null,
+      job.id,
+    ],
+  );
+}
+
+async function finalizeDeferredEntitlementTransition(
+  transitionId: string,
+): Promise<boolean> {
+  const client = await getDb().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      transitionId,
+    ]);
+
+    const jobs = await client.query<{
+      id: string;
+      orgId: string;
+      createdByActorId: string | null;
+      status: string;
+      payload: unknown;
+    }>(
+      `SELECT j.id,j."orgId",j."createdByActorId",j.status::text AS status,j.payload
+       FROM "ProvisioningJob" j
+       WHERE j.source='MANUAL'::"ProvisioningJobSource"
+         AND j.payload->>'intent'='org_entitlement_transition'
+         AND j.payload->>'entitlementApplyMode'='after_all_jobs_succeed'
+         AND j.payload->>'transitionId'=$1
+         AND NOT EXISTS (
+           SELECT 1
+           FROM "ProvisioningJob" replacement
+           WHERE replacement.payload->>'recoverySourceJobId'=j.id
+             AND replacement.payload->>'transitionId'=j.payload->>'transitionId'
+         )
+       ORDER BY j."createdAt" ASC
+       FOR UPDATE OF j`,
+      [transitionId],
+    );
+
+    if (jobs.rows.length === 0 || jobs.rows.some((row) => row.status !== "SUCCEEDED")) {
+      await client.query("COMMIT");
+      return false;
+    }
+
+    const first = jobs.rows[0]!;
+    const intent = deferredEntitlementIntent({ payload: first.payload });
+    if (!intent) {
+      await client.query("COMMIT");
+      return false;
+    }
+
+    const terminalAudit = await client.query<{ action: string }>(
+      `SELECT action
+       FROM "AuditLog"
+       WHERE action = ANY($2::text[])
+         AND metadata->>'transitionId'=$1
+       ORDER BY "createdAt" DESC
+       LIMIT 1`,
+      [
+        transitionId,
+        ["ORG_ENTITLEMENT_TRANSITION_APPLIED", "ORG_ENTITLEMENT_TRANSITION_STALE"],
+      ],
+    );
+    if (terminalAudit.rows[0]) {
+      await client.query("COMMIT");
+      return terminalAudit.rows[0].action === "ORG_ENTITLEMENT_TRANSITION_APPLIED";
+    }
+
+    const current = await client.query<{
+      id: string;
+      status: string;
+      updatedAt: Date;
+    }>(
+      `SELECT id,status::text AS status,"updatedAt"
+       FROM "OrgEntitlement"
+       WHERE "orgId"=$1 AND product=$2::"ProductKey"
+       FOR UPDATE`,
+      [first.orgId, intent.product],
+    );
+    const actualStatus = current.rows[0]?.status ?? "RESTRICTED";
+    const actualUpdatedAt = current.rows[0]?.updatedAt
+      ? new Date(current.rows[0].updatedAt).toISOString()
+      : null;
+    const expectedUpdatedAt = intent.expectedUpdatedAt
+      ? intent.expectedUpdatedAt.toISOString()
+      : null;
+
+    if (
+      actualStatus !== intent.previousStatus ||
+      actualUpdatedAt !== expectedUpdatedAt
+    ) {
+      await client.query(
+        `INSERT INTO "AuditLog"
+          (id,"userId","orgId",action,"entityType","entityId",metadata,"createdAt")
+         VALUES ($1,$2,$3,'ORG_ENTITLEMENT_TRANSITION_STALE','org_entitlement',$4,$5::jsonb,NOW())`,
+        [
+          randomUUID(),
+          first.createdByActorId,
+          first.orgId,
+          intent.entitlementId,
+          JSON.stringify({
+            transitionId,
+            product: intent.product,
+            expectedPreviousStatus: intent.previousStatus,
+            actualStatus,
+            expectedUpdatedAt,
+            actualUpdatedAt,
+            desiredStatus: intent.newStatus,
+            jobs: jobs.rows.map((row) => row.id),
+          }),
+        ],
+      );
+      await client.query("COMMIT");
+      return false;
+    }
+
+    const updated = await client.query<{
+      id: string;
+      status: string;
+      startsAt: Date | null;
+      endsAt: Date | null;
+      notes: string | null;
+      updatedAt: Date;
+    }>(
+      `INSERT INTO "OrgEntitlement"
+         (id,"orgId",product,status,"startsAt","endsAt",notes,"createdAt","updatedAt")
+       VALUES ($1,$2,$3::"ProductKey",$4::"EntitlementStatus",$5,$6,$7,NOW(),NOW())
+       ON CONFLICT ("orgId",product)
+       DO UPDATE SET
+         status=EXCLUDED.status,
+         "startsAt"=EXCLUDED."startsAt",
+         "endsAt"=EXCLUDED."endsAt",
+         notes=EXCLUDED.notes,
+         "updatedAt"=NOW()
+       RETURNING id,status::text AS status,"startsAt","endsAt",notes,"updatedAt"`,
+      [
+        intent.entitlementId,
+        first.orgId,
+        intent.product,
+        intent.newStatus,
+        intent.startsAt,
+        intent.endsAt,
+        intent.notes,
+      ],
+    );
+
+    await client.query(
+      `INSERT INTO "AuditLog"
+        (id,"userId","orgId",action,"entityType","entityId",metadata,"createdAt")
+       VALUES ($1,$2,$3,'ORG_ENTITLEMENT_TRANSITION_APPLIED','org_entitlement',$4,$5::jsonb,NOW())`,
+      [
+        randomUUID(),
+        first.createdByActorId,
+        first.orgId,
+        intent.entitlementId,
+        JSON.stringify({
+          transitionId,
+          product: intent.product,
+          previousStatus: intent.previousStatus,
+          status: intent.newStatus,
+          jobs: jobs.rows.map((row) => row.id),
+          provisioningCompleted: true,
+        }),
+      ],
+    );
+
+    const entitlement = updated.rows[0]!;
+    await publishPlatformEvent(client, {
+      eventType: "entitlement.granted",
+      source: "migrateck-provisioning-worker",
+      orgId: first.orgId,
+      actorId: first.createdByActorId,
+      entityType: "org_entitlement",
+      entityId: intent.entitlementId,
+      payload: {
+        product: intent.product,
+        previous_status: intent.previousStatus,
+        status: intent.newStatus,
+        starts_at: entitlement.startsAt ?? null,
+        ends_at: entitlement.endsAt ?? null,
+        transition_id: transitionId,
+        provisioning_job_ids: jobs.rows.map((row) => row.id),
+      },
+    });
+
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function reconcileDeferredEntitlementTransitions(
+  limit = 25,
+): Promise<number> {
+  const candidates = await getDb().query<{ transitionId: string }>(
+    `WITH effective AS (
+       SELECT j.*
+       FROM "ProvisioningJob" j
+       WHERE j.source='MANUAL'::"ProvisioningJobSource"
+         AND j.payload->>'intent'='org_entitlement_transition'
+         AND j.payload->>'entitlementApplyMode'='after_all_jobs_succeed'
+         AND j.payload->>'transitionId' IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM "ProvisioningJob" replacement
+           WHERE replacement.payload->>'recoverySourceJobId'=j.id
+             AND replacement.payload->>'transitionId'=j.payload->>'transitionId'
+         )
+     ),
+     complete AS (
+       SELECT
+         payload->>'transitionId' AS transition_id,
+         min("createdAt") AS first_created
+       FROM effective
+       GROUP BY payload->>'transitionId'
+       HAVING bool_and(status='SUCCEEDED'::"ProvisioningJobStatus")
+     )
+     SELECT transition_id AS "transitionId"
+     FROM complete c
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM "AuditLog" a
+       WHERE a.action = ANY($2::text[])
+         AND a.metadata->>'transitionId'=c.transition_id
+     )
+     ORDER BY c.first_created ASC
+     LIMIT $1`,
+    [
+      Math.max(1, Math.min(limit, 100)),
+      ["ORG_ENTITLEMENT_TRANSITION_APPLIED", "ORG_ENTITLEMENT_TRANSITION_STALE"],
+    ],
+  );
+
+  let applied = 0;
+  for (const row of candidates.rows) {
+    if (await finalizeDeferredEntitlementTransition(row.transitionId)) {
+      applied += 1;
+    }
+  }
+  return applied;
+}
 
 async function appendEvent(
   jobId: string,
@@ -94,6 +462,10 @@ async function markDead(
       'UPDATE "ProvisioningJob" SET status=\'DEAD\'::"ProvisioningJobStatus","lastError"=$2,"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"finishedAt"=NOW(),"updatedAt"=NOW() WHERE id=$1',
       [job.id, message],
     );
+    await updateProvisioningTaskState(client, job, {
+      status: "FAILED",
+      lastError: message,
+    });
     await appendEvent(job.id, "DEAD", message, metadata, client);
     await writeAudit(
       {
@@ -146,6 +518,10 @@ async function markSucceeded(
       'UPDATE "ProvisioningJob" SET status=\'SUCCEEDED\'::"ProvisioningJobStatus","lastError"=NULL,"lastErrorAt"=NULL,"finishedAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE id=$1',
       [job.id],
     );
+    await updateProvisioningTaskState(client, job, {
+      status: "SUCCEEDED",
+      lastError: null,
+    });
     await appendEvent(
       job.id,
       "SUCCEEDED",
@@ -193,6 +569,11 @@ async function scheduleRetry(
       'UPDATE "ProvisioningJob" SET status=\'PENDING\'::"ProvisioningJobStatus","notBefore"=$2,"lastError"=$3,"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE id=$1',
       [job.id, notBefore, result.message],
     );
+    await updateProvisioningTaskState(client, job, {
+      status: "PENDING",
+      runAfter: notBefore,
+      lastError: result.message,
+    });
     await appendEvent(
       job.id,
       "PENDING",
@@ -257,12 +638,21 @@ export async function platformProvisioningPaused(): Promise<boolean> {
 }
 
 export async function recoverStaleProvisioningJobs(): Promise<number> {
-  const result = await getDb().query<{ id: string }>(
-    'UPDATE "ProvisioningJob" SET status=\'PENDING\'::"ProvisioningJobStatus","notBefore"=NOW(),"lastError"=\'stale_lock_recovered\',"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE status=\'RUNNING\'::"ProvisioningJobStatus" AND "lockedAt" IS NOT NULL AND "lockedAt" < NOW() - ($1::int * interval \'1 second\') RETURNING id',
+  const result = await getDb().query<{ id: string; orgId: string }>(
+    'UPDATE "ProvisioningJob" SET status=\'PENDING\'::"ProvisioningJobStatus","notBefore"=NOW(),"lastError"=\'stale_lock_recovered\',"lastErrorAt"=NOW(),"lockedAt"=NULL,"lockedBy"=NULL,"updatedAt"=NOW() WHERE status=\'RUNNING\'::"ProvisioningJobStatus" AND "lockedAt" IS NOT NULL AND "lockedAt" < NOW() - ($1::int * interval \'1 second\') RETURNING id,"orgId"',
     [staleLockSeconds()],
   );
   for (const row of result.rows) {
     await appendEvent(row.id, "PENDING", "stale_lock_recovered");
+    await getDb().query(
+      `UPDATE "ProvisioningTask"
+       SET status='PENDING'::"ProvisioningTaskStatus",
+           "runAfter"=NOW(),
+           "lastError"='stale_lock_recovered',
+           "updatedAt"=NOW()
+       WHERE "orgId"=$1 AND payload->>'jobId'=$2`,
+      [row.orgId, row.id],
+    );
   }
   return result.rowCount ?? 0;
 }
@@ -301,6 +691,12 @@ export async function claimProvisioningJobs(
        RETURNING j.*`,
       [Math.max(1, Math.min(limit, 100)), workerId, allowlist],
     );
+    for (const job of result.rows) {
+      await updateProvisioningTaskState(client, job, {
+        status: "PROCESSING",
+        lastError: null,
+      });
+    }
     await client.query("COMMIT");
     return result.rows;
   } catch (error) {
@@ -393,6 +789,15 @@ export async function processProvisioningBatch(
       }
     }
     processed += 1;
+  }
+
+  try {
+    await reconcileDeferredEntitlementTransitions(Math.max(limit, 25));
+  } catch (error) {
+    console.error(
+      "[migrateck-provisioning-worker] deferred entitlement reconciliation failed",
+      error,
+    );
   }
 
   return processed;

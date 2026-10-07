@@ -630,7 +630,13 @@ export function CatalogEntitlementsWorkspace() {
         throw new Error(body.error ?? "Unable to update product access");
       }
 
-      setEntitlementMessage("Access update committed and audited.");
+      setEntitlementMessage(
+        typeof body?.message === "string"
+          ? body.message
+          : body?.pending
+            ? "Provisioning queued. Product access remains restricted until every provisioning job succeeds."
+            : "Access update committed and audited.",
+      );
       setEntitlementEditor(null);
       await Promise.all([
         loadAccess(selectedOrgId),

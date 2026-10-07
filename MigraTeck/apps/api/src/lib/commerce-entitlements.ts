@@ -174,6 +174,15 @@ type CurrentEntitlement = {
   updatedAt: Date;
 };
 
+type DeferredEntitlementIntent = {
+  applyMode: "after_all_jobs_succeed" | "already_applied";
+  entitlementId: string;
+  expectedUpdatedAt: Date | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  notes: string | null;
+};
+
 type OrganizationRow = {
   id: string;
   name: string;
@@ -558,6 +567,7 @@ async function queueTransitionAction(
     transitionId: string;
     reason: string;
     context: EntitlementProvisioningContext;
+    entitlementIntent: DeferredEntitlementIntent;
   },
 ) {
   const taskId = randomUUID();
@@ -586,13 +596,22 @@ async function queueTransitionAction(
   }
 
   const payload = {
+    jobId,
     action: input.action,
     product: input.product,
     productLane: input.product,
     previousStatus: input.previousStatus,
     newStatus: input.newStatus,
+    intent: "org_entitlement_transition",
     transitionId: input.transitionId,
     operatorReason: input.reason,
+    entitlementApplyMode: input.entitlementIntent.applyMode,
+    entitlementId: input.entitlementIntent.entitlementId,
+    entitlementExpectedUpdatedAt:
+      input.entitlementIntent.expectedUpdatedAt?.toISOString() ?? null,
+    entitlementStartsAt: input.entitlementIntent.startsAt?.toISOString() ?? null,
+    entitlementEndsAt: input.entitlementIntent.endsAt?.toISOString() ?? null,
+    entitlementNotes: input.entitlementIntent.notes,
     ...persistableContext,
     ...(mailboxSecretRef ? { mailboxSecretRef } : {}),
   };
@@ -720,6 +739,45 @@ export async function mutateOrganizationEntitlement(input: {
     const current = currentResult.rows[0] ?? null;
     const previousStatus: EntitlementStatus = current?.status ?? "RESTRICTED";
 
+    const pendingTransition = await client.query<{
+      id: string;
+      transitionId: string | null;
+    }>(
+      `SELECT id,payload->>'transitionId' AS "transitionId"
+       FROM "ProvisioningJob"
+       WHERE "orgId"=$1
+         AND source='MANUAL'::"ProvisioningJobSource"
+         AND status::text = ANY($3::text[])
+         AND payload->>'intent'='org_entitlement_transition'
+         AND payload->>'entitlementApplyMode'='after_all_jobs_succeed'
+         AND payload->>'product'=$2
+         AND NOT EXISTS (
+           SELECT 1
+           FROM "AuditLog" a
+           WHERE a.action = ANY($4::text[])
+             AND a.metadata->>'transitionId'=payload->>'transitionId'
+         )
+       ORDER BY "createdAt" ASC
+       LIMIT 1`,
+      [
+        input.orgId,
+        input.product,
+        ["PENDING", "RUNNING", "SUCCEEDED"],
+        ["ORG_ENTITLEMENT_TRANSITION_APPLIED", "ORG_ENTITLEMENT_TRANSITION_STALE"],
+      ],
+    );
+    if (pendingTransition.rows[0]) {
+      throw Object.assign(
+        new Error(
+          "A provisioning-backed entitlement transition is already pending for this product. Resolve or finish it before starting another.",
+        ),
+        {
+          statusCode: 409,
+          transitionId: pendingTransition.rows[0].transitionId,
+        },
+      );
+    }
+
     const expected = input.expectedUpdatedAt ?? null;
     const actual = current ? new Date(current.updatedAt).toISOString() : null;
     if (expected !== actual) {
@@ -793,31 +851,50 @@ export async function mutateOrganizationEntitlement(input: {
           : current?.notes ?? null;
 
     const entitlementId = current?.id ?? randomUUID();
-    const updated = await client.query(
-      `INSERT INTO "OrgEntitlement"
-         (id,"orgId",product,status,"startsAt","endsAt",notes,"createdAt","updatedAt")
-       VALUES ($1,$2,$3::"ProductKey",$4::"EntitlementStatus",$5,$6,$7,NOW(),NOW())
-       ON CONFLICT ("orgId",product)
-       DO UPDATE SET
-         status=EXCLUDED.status,
-         "startsAt"=EXCLUDED."startsAt",
-         "endsAt"=EXCLUDED."endsAt",
-         notes=EXCLUDED.notes,
-         "updatedAt"=NOW()
-       RETURNING id,product::text AS product,status::text AS status,"startsAt","endsAt",notes,"updatedAt"`,
-      [
-        entitlementId,
-        input.orgId,
-        input.product,
-        input.newStatus,
-        startsAt,
-        endsAt,
-        notes,
-      ],
-    );
-
     const transitionId = randomUUID();
+    const deferUntilProvisioned =
+      becomingAllowed &&
+      availability.mode === "provisioning" &&
+      availability.actions.length > 0;
+
+    let updatedEntitlement: Record<string, unknown> | null = null;
+    if (!deferUntilProvisioned) {
+      const updated = await client.query(
+        `INSERT INTO "OrgEntitlement"
+           (id,"orgId",product,status,"startsAt","endsAt",notes,"createdAt","updatedAt")
+         VALUES ($1,$2,$3::"ProductKey",$4::"EntitlementStatus",$5,$6,$7,NOW(),NOW())
+         ON CONFLICT ("orgId",product)
+         DO UPDATE SET
+           status=EXCLUDED.status,
+           "startsAt"=EXCLUDED."startsAt",
+           "endsAt"=EXCLUDED."endsAt",
+           notes=EXCLUDED.notes,
+           "updatedAt"=NOW()
+         RETURNING id,product::text AS product,status::text AS status,"startsAt","endsAt",notes,"updatedAt"`,
+        [
+          entitlementId,
+          input.orgId,
+          input.product,
+          input.newStatus,
+          startsAt,
+          endsAt,
+          notes,
+        ],
+      );
+      updatedEntitlement = updated.rows[0] ?? null;
+    }
+
     const queued = [];
+    const entitlementIntent: DeferredEntitlementIntent = {
+      applyMode: deferUntilProvisioned
+        ? "after_all_jobs_succeed"
+        : "already_applied",
+      entitlementId,
+      expectedUpdatedAt: current?.updatedAt ?? null,
+      startsAt,
+      endsAt,
+      notes,
+    };
     for (const action of availability.actions) {
       queued.push(
         await queueTransitionAction(client, {
@@ -830,16 +907,30 @@ export async function mutateOrganizationEntitlement(input: {
           transitionId,
           reason: input.reason,
           context: input.context,
+          entitlementIntent,
         }),
       );
     }
 
+    const desiredEntitlement = {
+      id: entitlementId,
+      product: input.product,
+      status: input.newStatus,
+      startsAt,
+      endsAt,
+      notes,
+    };
+    const auditAction = deferUntilProvisioned
+      ? "ORG_ENTITLEMENT_TRANSITION_QUEUED"
+      : "ORG_ENTITLEMENT_MANUAL_UPDATE";
+
     await client.query(
-      'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,\'ORG_ENTITLEMENT_MANUAL_UPDATE\',\'org_entitlement\',$4,$5,$6,$7::jsonb,NOW())',
+      'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,$4,\'org_entitlement\',$5,$6,$7,$8::jsonb,NOW())',
       [
         randomUUID(),
         input.actorId,
         input.orgId,
+        auditAction,
         entitlementId,
         input.ip ?? null,
         input.userAgent ?? null,
@@ -855,20 +946,23 @@ export async function mutateOrganizationEntitlement(input: {
                 updatedAt: current.updatedAt,
               }
             : null,
-          after: updated.rows[0],
+          after: deferUntilProvisioned
+            ? desiredEntitlement
+            : updatedEntitlement,
           transitionId,
           actions: availability.actions,
           jobs: queued.map((job) => job.jobId),
+          pendingProvisioning: deferUntilProvisioned,
           billingOverrideAcknowledged: input.acknowledgeBillingOverride,
         }),
       ],
     );
 
-    if (becomingAllowed || becomingRestricted) {
-      const entitlement = updated.rows[0] as {
+    if (!deferUntilProvisioned && (becomingAllowed || becomingRestricted)) {
+      const entitlement = updatedEntitlement as {
         startsAt?: Date | string | null;
         endsAt?: Date | string | null;
-      };
+      } | null;
       await publishPlatformEvent(client, {
         eventType: becomingAllowed ? "entitlement.granted" : "entitlement.revoked",
         source: "migrateck-platform-api",
@@ -880,8 +974,8 @@ export async function mutateOrganizationEntitlement(input: {
           product: input.product,
           previous_status: previousStatus,
           status: input.newStatus,
-          starts_at: entitlement.startsAt ?? null,
-          ends_at: entitlement.endsAt ?? null,
+          starts_at: entitlement?.startsAt ?? null,
+          ends_at: entitlement?.endsAt ?? null,
           transition_id: transitionId,
           provisioning_job_ids: queued.map((job) => job.jobId),
         },
@@ -891,10 +985,15 @@ export async function mutateOrganizationEntitlement(input: {
     await client.query("COMMIT");
     return {
       organization,
-      entitlement: updated.rows[0],
+      entitlement: updatedEntitlement ?? current,
+      desiredEntitlement: deferUntilProvisioned ? desiredEntitlement : null,
       availability,
       transitionId,
       queued,
+      pending: deferUntilProvisioned,
+      message: deferUntilProvisioned
+        ? "Provisioning queued. Product access remains restricted until every provisioning job succeeds."
+        : "Access update committed and audited.",
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

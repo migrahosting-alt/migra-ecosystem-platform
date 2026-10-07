@@ -254,7 +254,7 @@ test("operator provisioning inputs are backend-described instead of hard-coded i
   );
 });
 
-test("entitlement mutation contract is concurrency-safe, billing-aware, atomic, signed and audited", () => {
+test("entitlement mutation contract is concurrency-safe, billing-aware, signed and audited", () => {
   const source = repoFile("apps/api/src/lib/commerce-entitlements.ts");
   const routes = repoFile("apps/api/src/routes/v1/modules/commerce-catalog.ts");
 
@@ -267,13 +267,20 @@ test("entitlement mutation contract is concurrency-safe, billing-aware, atomic, 
   assert.match(source, /Entitlement changed since it was loaded/);
   assert.match(source, /isStripeEvidence\(current\.notes\)/);
   assert.match(source, /Explicitly acknowledge the manual billing override/);
+  assert.match(
+    source,
+    /A provisioning-backed entitlement transition is already pending for this product/,
+  );
 
   assert.match(source, /signProvisioningEnvelope/);
   assert.match(source, /hashCanonicalPayload/);
   assert.match(source, /idempotencyKey/);
   assert.match(source, /ProvisioningJobEvent/);
+  assert.match(source, /entitlementExpectedUpdatedAt/);
+  assert.match(source, /intent: "org_entitlement_transition"/);
 
   assert.match(source, /ORG_ENTITLEMENT_MANUAL_UPDATE/);
+  assert.match(source, /ORG_ENTITLEMENT_TRANSITION_QUEUED/);
   assert.match(source, /billingOverrideAcknowledged/);
   assert.match(source, /publishPlatformEvent/);
   assert.match(source, /entitlement\.granted/);
@@ -281,4 +288,27 @@ test("entitlement mutation contract is concurrency-safe, billing-aware, atomic, 
   assert.match(source, /await publishPlatformEvent\(client/);
   assert.match(source, /await client\.query\("COMMIT"\)/);
   assert.match(source, /await client\.query\("ROLLBACK"\)/);
+});
+
+test("provisioning-backed grants remain restricted until the worker proves success", () => {
+  const source = repoFile("apps/api/src/lib/commerce-entitlements.ts");
+  const operatorUi = repoFile(
+    "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+  );
+
+  assert.match(source, /const deferUntilProvisioned =/);
+  assert.match(source, /becomingAllowed &&/);
+  assert.match(source, /availability\.mode === "provisioning"/);
+  assert.match(source, /applyMode: deferUntilProvisioned/);
+  assert.match(source, /"after_all_jobs_succeed"/);
+  assert.match(source, /pending: deferUntilProvisioned/);
+  assert.match(
+    source,
+    /Product access remains restricted until every provisioning job succeeds/,
+  );
+  assert.match(operatorUi, /body\?\.pending/);
+  assert.match(
+    operatorUi,
+    /Product access remains restricted until every provisioning job succeeds/,
+  );
 });

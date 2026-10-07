@@ -177,6 +177,34 @@ test("queue engine uses atomic claims, rollout filtering, stale-lock recovery, a
   );
 });
 
+test("deferred entitlement grants reconcile only after all signed jobs succeed", () => {
+  const engine = repoFile("apps/api/src/lib/provisioning-engine.ts");
+
+  assert.match(engine, /reconcileDeferredEntitlementTransitions/);
+  assert.match(engine, /pg_advisory_xact_lock\(hashtext\(\$1\)\)/);
+  assert.match(engine, /bool_and\(status='SUCCEEDED'::"ProvisioningJobStatus"\)/);
+  assert.match(engine, /ORG_ENTITLEMENT_TRANSITION_APPLIED/);
+  assert.match(engine, /ORG_ENTITLEMENT_TRANSITION_STALE/);
+  assert.match(engine, /entitlementExpectedUpdatedAt/);
+  assert.match(engine, /expectedUpdatedAt/);
+  assert.match(engine, /actualUpdatedAt/);
+  assert.match(engine, /recoverySourceJobId/);
+  assert.match(engine, /NOT EXISTS/);
+  assert.match(engine, /eventType: "entitlement\.granted"/);
+});
+
+test("ProvisioningTask telemetry follows the signed job lifecycle", () => {
+  const engine = repoFile("apps/api/src/lib/provisioning-engine.ts");
+
+  assert.match(engine, /updateProvisioningTaskState/);
+  assert.match(engine, /status: "PROCESSING"/);
+  assert.match(engine, /status: "SUCCEEDED"/);
+  assert.match(engine, /status: "FAILED"/);
+  assert.match(engine, /status: "PENDING"/);
+  assert.match(engine, /payload->>'jobId'/);
+  assert.match(engine, /stale_lock_recovered/);
+});
+
 test("worker closes its database pool on graceful stop and exposes runtime readiness", () => {
   const worker = repoFile("apps/api/src/provisioning-worker.ts");
   const unit = repoFile("deploy/migrateck-provisioning-worker.service");

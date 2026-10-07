@@ -40,13 +40,17 @@ test("recovery accepts only audited context fields and never mailbox credentials
   assert.doesNotMatch(routes, /payload:\s*z\.(record|unknown|any)/);
 });
 
-test("retry is a new signed MANUAL job and the original dead job is canceled", () => {
+test("retry is a new signed MANUAL job with a correlated task and the original dead job is canceled", () => {
   assert.match(service, /signProvisioningEnvelope/);
   assert.match(service, /dead-letter-retry:/);
   assert.match(service, /'MANUAL'::"ProvisioningJobSource"/);
   assert.match(service, /'PENDING'::"ProvisioningJobStatus"/);
+  assert.match(service, /retryTaskId/);
+  assert.match(service, /mergedPayload\.jobId = retryJobId/);
+  assert.match(service, /INSERT INTO "ProvisioningTask"/);
   assert.match(service, /queued_from_dead_letter/);
   assert.match(service, /dead_letter_retry_queued/);
+  assert.match(service, /superseded_by_retry:/);
   assert.match(service, /CANCELED.*ProvisioningJobStatus/);
   assert.doesNotMatch(
     service,
