@@ -1,0 +1,15 @@
+[Unit]
+Description=Prune old releases after a new one lands
+Documentation=file:///usr/local/sbin/release-retention.sh
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 300
+ExecStart=/usr/local/sbin/release-retention.sh --apply
+Environment=RELEASES_ROOT=/opt/migra/releases/migrateck
+Environment=ACTIVE_LINK=/opt/migra/apps/migrateck/current
+Environment=PREVIOUS_LINK=/opt/migra/apps/migrateck/previous
+Environment=RETENTION_DAYS=14
+Environment=MIN_KEEP=4
+StandardOutput=journal
+StandardError=journal

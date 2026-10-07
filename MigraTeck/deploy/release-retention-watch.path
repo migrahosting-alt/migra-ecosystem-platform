@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch MigraTeck releases and settle-prune old directories
+Documentation=file:///usr/local/sbin/release-retention.sh
+
+[Path]
+PathChanged=/opt/migra/releases/migrateck
+Unit=release-retention-settle.service
+
+[Install]
+WantedBy=paths.target
