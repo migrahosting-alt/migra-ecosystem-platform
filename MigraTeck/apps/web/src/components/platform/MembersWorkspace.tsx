@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 
@@ -486,12 +485,12 @@ export function MembersWorkspace({
               Existing MigraAuth identities are attached immediately. A new email creates a pending identity and sends a secure setup invitation.
             </p>
           </div>
-          <Link
-            href="/platform/trust"
+          <a
+            href="#platform-operator-access"
             className="shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700"
           >
-            Platform roles live in Trust Operations
-          </Link>
+            Platform operator roles are managed below
+          </a>
         </div>
         <form className="mt-5 grid gap-4 md:grid-cols-[1.3fr_0.7fr_auto]" onSubmit={handleInvite}>
           <input
