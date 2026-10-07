@@ -82,6 +82,7 @@ type EntitlementEditorState = {
     targetIp: string;
     plan: string;
     mailboxEmail: string;
+    mailboxPassword: string;
   };
 };
 
@@ -493,6 +494,7 @@ export function CatalogEntitlementsWorkspace() {
         targetIp: "",
         plan: "",
         mailboxEmail: "",
+        mailboxPassword: "",
       },
     });
     setEntitlementMessage(null);
@@ -526,7 +528,8 @@ export function CatalogEntitlementsWorkspace() {
 
     const context = Object.fromEntries(
       Object.entries(entitlementEditor.context).flatMap(([key, value]) => {
-        const normalized = value?.trim() ?? "";
+        const normalized =
+          key === "mailboxPassword" ? value ?? "" : value?.trim() ?? "";
         return normalized.length > 0 ? [[key, normalized]] : [];
       }),
     );
@@ -593,6 +596,17 @@ export function CatalogEntitlementsWorkspace() {
       );
     } finally {
       setEntitlementSaving(false);
+      setEntitlementEditor((currentEditor) =>
+        currentEditor
+          ? {
+              ...currentEditor,
+              context: {
+                ...currentEditor.context,
+                mailboxPassword: "",
+              },
+            }
+          : currentEditor,
+      );
     }
   }
 
@@ -2168,6 +2182,11 @@ function EntitlementEditorPanel({
       label: "Mailbox email",
       placeholder: "user@example.com",
       type: "email",
+    },
+    mailboxPassword: {
+      label: "Initial mailbox password",
+      placeholder: "At least 12 characters",
+      type: "password",
     },
   };
 

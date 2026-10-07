@@ -4,6 +4,11 @@ import {
   sha256Hex,
   signProvisioningDispatch,
 } from "./provisioning-crypto.js";
+import {
+  ProvisioningSecretError,
+  deleteProvisioningSecret,
+  readProvisioningSecret,
+} from "./provisioning-secrets.js";
 
 export type ProvisioningJobRecord = {
   id: string;
@@ -54,7 +59,7 @@ type MailContext = {
   productLane: string | null;
   domain: string | null;
   mailboxEmail: string | null;
-  mailboxPassword: string | null;
+  mailboxSecretRef: string | null;
   mailboxQuotaMb: number | null;
 };
 
@@ -148,7 +153,7 @@ function mailContext(job: ProvisioningJobRecord): MailContext {
       normalizeProductLane(payload.product),
     domain: asString(payload.domain),
     mailboxEmail: asString(payload.mailboxEmail),
-    mailboxPassword: asString(payload.mailboxPassword),
+    mailboxSecretRef: asString(payload.mailboxSecretRef),
     mailboxQuotaMb: asPositiveNumber(payload.mailboxQuotaMb),
   };
 }
@@ -351,14 +356,15 @@ async function executeMailProvision(
   job: ProvisioningJobRecord,
   context: MailContext,
 ): Promise<ProvisioningExecutionResult | null> {
-  void job;
-  if (context.productLane !== "MIGRAMAIL" || context.action !== "MAIL_PROVISION") return null;
+  if (context.productLane !== "MIGRAMAIL" || context.action !== "MAIL_PROVISION") {
+    return null;
+  }
 
   const baseUrl = normalizeUrl(process.env.MIGRAMAIL_CORE_URL);
   const apiKey = asString(process.env.MIGRAMAIL_CORE_API_KEY);
   if (!baseUrl || !apiKey) return null;
 
-  if (!context.domain || !context.mailboxEmail || !context.mailboxPassword) {
+  if (!context.domain || !context.mailboxEmail || !context.mailboxSecretRef) {
     return {
       kind: "FATAL_FAILURE",
       message: "missing_mail_context",
@@ -366,53 +372,124 @@ async function executeMailProvision(
         mode: "migramail_core",
         hasDomain: Boolean(context.domain),
         hasMailboxEmail: Boolean(context.mailboxEmail),
-        hasMailboxPassword: Boolean(context.mailboxPassword),
+        hasMailboxSecretRef: Boolean(context.mailboxSecretRef),
       },
     };
   }
 
+  const secretIdentity = {
+    secretId: context.mailboxSecretRef,
+    orgId: job.orgId,
+    jobId: job.id,
+  };
+  const discardSecret = async () => {
+    await deleteProvisioningSecret(secretIdentity).catch(() => undefined);
+  };
+
   const [localPart, mailboxDomain] = context.mailboxEmail.split("@");
-  if (!localPart || !mailboxDomain || mailboxDomain.toLowerCase() !== context.domain.toLowerCase()) {
+  if (
+    !localPart ||
+    !mailboxDomain ||
+    mailboxDomain.toLowerCase() !== context.domain.toLowerCase()
+  ) {
+    await discardSecret();
     return { kind: "FATAL_FAILURE", message: "mailbox_domain_mismatch" };
   }
 
   const domainUrl = joinUrl(baseUrl, "/v1/domains/ensure");
   const domainController = new AbortController();
-  const domainTimer = setTimeout(() => domainController.abort(), dispatchTimeoutMs());
+  const domainTimer = setTimeout(
+    () => domainController.abort(),
+    dispatchTimeoutMs(),
+  );
   try {
     const response = await fetch(domainUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer " + apiKey },
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + apiKey,
+      },
       body: JSON.stringify({ domain: context.domain }),
       signal: domainController.signal,
     });
     if (!(response.ok || response.status === 409)) {
-      const metadata = { mode: "migramail_core", phase: "domain", status: response.status, domain: context.domain };
+      const metadata = {
+        mode: "migramail_core",
+        phase: "domain",
+        status: response.status,
+        domain: context.domain,
+      };
       if (response.status === 429 || response.status >= 500) {
-        return { kind: "RETRYABLE_FAILURE", message: "migramail_domain_http_" + response.status, metadata };
+        return {
+          kind: "RETRYABLE_FAILURE",
+          message: "migramail_domain_http_" + response.status,
+          metadata,
+        };
       }
-      return { kind: "FATAL_FAILURE", message: "migramail_domain_http_" + response.status, metadata };
+      await discardSecret();
+      return {
+        kind: "FATAL_FAILURE",
+        message: "migramail_domain_http_" + response.status,
+        metadata,
+      };
     }
   } catch (error) {
     return {
       kind: "RETRYABLE_FAILURE",
       message: "migramail_domain_network_error",
-      metadata: { mode: "migramail_core", phase: "domain", error: error instanceof Error ? error.message : "unknown" },
+      metadata: {
+        mode: "migramail_core",
+        phase: "domain",
+        error: error instanceof Error ? error.message : "unknown",
+      },
     };
   } finally {
     clearTimeout(domainTimer);
   }
 
-  const mailboxUrl = joinUrl(baseUrl, "/v1/domains/" + encodeURIComponent(context.domain) + "/mailboxes");
+  let mailboxPassword: string;
+  try {
+    mailboxPassword = await readProvisioningSecret(secretIdentity);
+  } catch (error) {
+    if (error instanceof ProvisioningSecretError) {
+      return {
+        kind: error.retryable ? "RETRYABLE_FAILURE" : "FATAL_FAILURE",
+        message: error.code,
+        metadata: {
+          mode: "migramail_core",
+          phase: "secret_lookup",
+        },
+      };
+    }
+    return {
+      kind: "RETRYABLE_FAILURE",
+      message: "provisioning_secret_lookup_failed",
+      metadata: {
+        mode: "migramail_core",
+        phase: "secret_lookup",
+      },
+    };
+  }
+
+  const mailboxUrl = joinUrl(
+    baseUrl,
+    "/v1/domains/" + encodeURIComponent(context.domain) + "/mailboxes",
+  );
   const mailboxController = new AbortController();
-  const mailboxTimer = setTimeout(() => mailboxController.abort(), dispatchTimeoutMs());
+  const mailboxTimer = setTimeout(
+    () => mailboxController.abort(),
+    dispatchTimeoutMs(),
+  );
   try {
     const response = await fetch(mailboxUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer " + apiKey },
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + apiKey,
+      },
       body: JSON.stringify({
         localPart,
-        password: context.mailboxPassword,
+        password: mailboxPassword,
         quotaMb: context.mailboxQuotaMb || undefined,
       }),
       signal: mailboxController.signal,
@@ -424,19 +501,36 @@ async function executeMailProvision(
       domain: context.domain,
       mailboxEmail: context.mailboxEmail,
     };
-    if (response.ok || response.status === 409) return { kind: "SUCCESS", metadata };
-    if (response.status === 429 || response.status >= 500) {
-      return { kind: "RETRYABLE_FAILURE", message: "migramail_mailbox_http_" + response.status, metadata };
+    if (response.ok || response.status === 409) {
+      await discardSecret();
+      return { kind: "SUCCESS", metadata };
     }
-    return { kind: "FATAL_FAILURE", message: "migramail_mailbox_http_" + response.status, metadata };
+    if (response.status === 429 || response.status >= 500) {
+      return {
+        kind: "RETRYABLE_FAILURE",
+        message: "migramail_mailbox_http_" + response.status,
+        metadata,
+      };
+    }
+    await discardSecret();
+    return {
+      kind: "FATAL_FAILURE",
+      message: "migramail_mailbox_http_" + response.status,
+      metadata,
+    };
   } catch (error) {
     return {
       kind: "RETRYABLE_FAILURE",
       message: "migramail_mailbox_network_error",
-      metadata: { mode: "migramail_core", phase: "mailbox", error: error instanceof Error ? error.message : "unknown" },
+      metadata: {
+        mode: "migramail_core",
+        phase: "mailbox",
+        error: error instanceof Error ? error.message : "unknown",
+      },
     };
   } finally {
     clearTimeout(mailboxTimer);
+    mailboxPassword = "";
   }
 }
 

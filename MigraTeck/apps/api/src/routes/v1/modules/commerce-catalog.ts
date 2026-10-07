@@ -52,6 +52,14 @@ const entitlementContextSchema = z.object({
   plan: z.string().trim().min(1).max(255).optional(),
   limits: z.record(z.string(), z.unknown()).optional(),
   mailboxEmail: z.string().trim().email().max(320).optional(),
+  mailboxPassword: z
+    .string()
+    .min(12)
+    .max(256)
+    .refine((value) => value.trim().length >= 12, {
+      message: "Mailbox password must contain at least 12 non-whitespace characters",
+    })
+    .optional(),
   mailboxQuotaMb: z.number().int().positive().max(1_000_000).optional(),
 }).default({});
 

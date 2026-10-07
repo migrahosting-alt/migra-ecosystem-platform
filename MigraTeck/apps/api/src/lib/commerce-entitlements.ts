@@ -13,6 +13,7 @@ import {
   signProvisioningEnvelope,
 } from "./provisioning-crypto.js";
 import { publishPlatformEvent } from "./platform-events.js";
+import { createProvisioningSecret } from "./provisioning-secrets.js";
 
 const ACTIVE_LIKE = new Set<EntitlementStatus>([
   "ACTIVE",
@@ -46,6 +47,7 @@ export type EntitlementProvisioningContext = {
   plan?: string | undefined;
   limits?: Record<string, unknown> | undefined;
   mailboxEmail?: string | undefined;
+  mailboxPassword?: string | undefined;
   mailboxQuotaMb?: number | undefined;
 };
 
@@ -248,11 +250,16 @@ function readinessForAction(
   }
 
   if (product === "MIGRAMAIL" && action === "MAIL_PROVISION") {
+    const configured =
+      hasEnv("MIGRAMAIL_CORE_URL") &&
+      hasEnv("MIGRAMAIL_CORE_API_KEY") &&
+      hasEnv("PROVISIONING_SECRET_ENCRYPTION_KEY");
     return {
-      supported: false,
-      requiredFields: [],
-      reason:
-        "Manual MigraMail activation is locked until mailbox credentials use encrypted async secret transport",
+      supported: configured,
+      requiredFields: ["domain", "mailboxEmail", "mailboxPassword"],
+      reason: configured
+        ? null
+        : "MigraMail core or provisioning secret encryption is not fully configured",
     };
   }
 
@@ -444,6 +451,26 @@ async function queueTransitionAction(
   const createdAt = new Date();
   const expiresAt = new Date(createdAt.getTime() + 24 * 60 * 60 * 1000);
   const type = jobTypeForAction(input.action);
+
+  // Plaintext credentials are request-memory only. They must never enter the
+  // durable task/job payload, audit trail, or platform event stream.
+  const { mailboxPassword, ...persistableContext } = input.context;
+  let mailboxSecretRef: string | undefined;
+  if (input.action === "MAIL_PROVISION") {
+    if (!mailboxPassword || mailboxPassword.trim().length === 0) {
+      throw Object.assign(new Error("Mailbox password is required"), {
+        statusCode: 400,
+      });
+    }
+    mailboxSecretRef = await createProvisioningSecret(client, {
+      orgId: input.orgId,
+      actorId: input.actorId,
+      jobId,
+      plaintext: mailboxPassword,
+      expiresAt,
+    });
+  }
+
   const payload = {
     action: input.action,
     product: input.product,
@@ -452,7 +479,8 @@ async function queueTransitionAction(
     newStatus: input.newStatus,
     transitionId: input.transitionId,
     operatorReason: input.reason,
-    ...input.context,
+    ...persistableContext,
+    ...(mailboxSecretRef ? { mailboxSecretRef } : {}),
   };
   const payloadHash = hashCanonicalPayload(payload);
   const envelopeVersion = 1;

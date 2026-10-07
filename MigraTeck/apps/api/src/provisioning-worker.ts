@@ -6,6 +6,7 @@ import {
   processProvisioningBatch,
   recoverStaleProvisioningJobs,
 } from "./lib/provisioning-engine.js";
+import { cleanupExpiredProvisioningSecrets } from "./lib/provisioning-secrets.js";
 
 function workerId(): string {
   return process.env.WORKER_INSTANCE_ID || hostname() + ":" + process.pid;
@@ -85,11 +86,13 @@ async function main(): Promise<void> {
     const started = Date.now();
     try {
       const processed = await processProvisioningBatch(id, batchSize());
+      const cleanedSecrets = await cleanupExpiredProvisioningSecrets();
       await writeHeartbeat(id);
-      if (processed > 0) {
+      if (processed > 0 || cleanedSecrets > 0) {
         console.log("[migrateck-provisioning-worker] batch processed", {
           workerId: id,
           processed,
+          cleanedSecrets,
           durationMs: Date.now() - started,
         });
       }

@@ -99,19 +99,54 @@ test("MigraHosting activation exposes required context only when dispatchers are
   }
 });
 
-test("manual MigraMail activation remains blocked until secret transport is safe", async () => {
-  const result = await getEntitlementTransitionAvailability({
-    orgSlug: "customer-acme",
-    product: "MIGRAMAIL",
-    previousStatus: "RESTRICTED",
-    newStatus: "ACTIVE",
-    worker: readyWorker,
-  });
+test("manual MigraMail activation requires Mail Core and encrypted async secret transport", async () => {
+  const previous = {
+    MIGRAMAIL_CORE_URL: process.env.MIGRAMAIL_CORE_URL,
+    MIGRAMAIL_CORE_API_KEY: process.env.MIGRAMAIL_CORE_API_KEY,
+    PROVISIONING_SECRET_ENCRYPTION_KEY:
+      process.env.PROVISIONING_SECRET_ENCRYPTION_KEY,
+  };
 
-  assert.equal(result.available, false);
-  assert.equal(result.mode, "blocked");
-  assert.deepEqual(result.actions, ["MAIL_PROVISION"]);
-  assert.match(result.reason ?? "", /encrypted async secret transport/i);
+  try {
+    delete process.env.MIGRAMAIL_CORE_URL;
+    delete process.env.MIGRAMAIL_CORE_API_KEY;
+    delete process.env.PROVISIONING_SECRET_ENCRYPTION_KEY;
+
+    const blocked = await getEntitlementTransitionAvailability({
+      orgSlug: "customer-acme",
+      product: "MIGRAMAIL",
+      previousStatus: "RESTRICTED",
+      newStatus: "ACTIVE",
+      worker: readyWorker,
+    });
+    assert.equal(blocked.available, false);
+    assert.equal(blocked.mode, "blocked");
+    assert.match(blocked.reason ?? "", /not fully configured/i);
+
+    process.env.MIGRAMAIL_CORE_URL = "https://mailcore.invalid";
+    process.env.MIGRAMAIL_CORE_API_KEY = "test-mail-core-key";
+    process.env.PROVISIONING_SECRET_ENCRYPTION_KEY = "11".repeat(32);
+
+    const ready = await getEntitlementTransitionAvailability({
+      orgSlug: "customer-acme",
+      product: "MIGRAMAIL",
+      previousStatus: "RESTRICTED",
+      newStatus: "ACTIVE",
+      worker: readyWorker,
+    });
+    assert.equal(ready.available, true);
+    assert.equal(ready.mode, "provisioning");
+    assert.deepEqual(ready.actions, ["MAIL_PROVISION"]);
+    assert.deepEqual(
+      new Set(ready.requiredFields),
+      new Set(["domain", "mailboxEmail", "mailboxPassword"]),
+    );
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test("internal Migra organizations skip customer pod creation but still require DNS provisioning", async () => {

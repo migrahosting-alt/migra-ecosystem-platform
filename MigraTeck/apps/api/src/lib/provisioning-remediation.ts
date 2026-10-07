@@ -392,8 +392,11 @@ function mergeRecoveryContext(
     }
   }
 
-  // Dead-letter replay must never copy a mailbox credential from historical payloads.
+  // Dead-letter replay must never copy mailbox credentials or one-time secret
+  // references from historical payloads. A fresh access transition must create
+  // fresh secret material.
   delete payload.mailboxPassword;
+  delete payload.mailboxSecretRef;
   payload.recoverySourceJobId = metadata.sourceJobId;
   payload.recoveryActorId = metadata.actorId;
   payload.recoveryReason = metadata.reason;

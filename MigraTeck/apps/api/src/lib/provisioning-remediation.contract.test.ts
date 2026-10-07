@@ -23,14 +23,20 @@ test("dead-letter retry verifies immutable source evidence before replay", () =>
   assert.match(service, /FOR UPDATE OF j/);
 });
 
-test("recovery accepts only audited context fields and never mailbox passwords", () => {
+test("recovery accepts only audited context fields and never mailbox credentials", () => {
   assert.match(service, /domain/);
   assert.match(service, /tenantId/);
   assert.match(service, /serviceInstanceId/);
   assert.match(service, /targetIp/);
   assert.match(service, /mailboxEmail/);
   assert.match(service, /delete payload\.mailboxPassword/);
-  assert.doesNotMatch(routes, /mailboxPassword/);
+  assert.match(service, /delete payload\.mailboxSecretRef/);
+
+  const start = routes.indexOf("const deadLetterRecoveryContextSchema");
+  const end = routes.indexOf("const deadLetterRetrySchema");
+  assert.ok(start >= 0 && end > start);
+  const recoverySchema = routes.slice(start, end);
+  assert.doesNotMatch(recoverySchema, /mailboxPassword|mailboxSecretRef/);
   assert.doesNotMatch(routes, /payload:\s*z\.(record|unknown|any)/);
 });
 
