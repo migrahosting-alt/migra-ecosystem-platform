@@ -11,7 +11,12 @@ BUILD_CACHE_RELATIVE="${BUILD_CACHE_RELATIVE:-apps/web/.next/cache}"
 APPLY=0
 [[ "${1:-}" == "--apply" ]] && APPLY=1
 
-NAME_RE='^([0-9]{8})(T[0-9]{6}Z)?-.+$'
+# Release history contains three legitimate timestamp shapes:
+#   YYYYMMDD-name
+#   YYYYMMDDTHHMM-name       (legacy minute-stamped releases)
+#   YYYYMMDDTHHMMSS[Z]-name  (current second-stamped releases)
+# Unknown names remain fail-closed and are never auto-deleted.
+NAME_RE='^([0-9]{8})(T([0-9]{4}|[0-9]{6}Z?))?-.+$'
 
 die() { echo "ABORT: $*" >&2; exit 1; }
 note() { printf '  %s\n' "$*"; }
