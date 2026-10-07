@@ -2542,6 +2542,50 @@ model BuilderDeployment {
   @@index([status])
 }
 
+// ─── Tenant-native MigraIntake ─────────────────────────────────────────
+//
+// The legacy /opt/migra-intake runtime remains global and file-backed. These
+// tables are the organization-scoped replacement owned by MigraTeck Platform.
+// Submission payloads are encrypted by the application before persistence.
+model IntakeForm {
+  id          String   @id
+  orgId       String
+  name        String
+  slug        String
+  status      String   @default("DRAFT")
+  publicKey   String   @unique
+  schemaJson  Json     @default("{}")
+  settingsJson Json    @default("{}")
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([orgId, slug])
+  @@index([orgId, status])
+}
+
+model IntakeSubmission {
+  id                String   @id
+  orgId             String
+  formId            String
+  status            String   @default("NEW")
+  payloadCiphertext String
+  payloadIv         String
+  payloadTag        String
+  encryptionVersion Int      @default(1)
+  source            String   @default("public")
+  idempotencyKey    String?
+  metadataJson      Json     @default("{}")
+  submittedAt       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  reviewedAt        DateTime?
+  reviewedById      String?
+
+  @@unique([formId, idempotencyKey])
+  @@index([orgId, submittedAt])
+  @@index([formId, status, submittedAt])
+}
+
 // ─── Phase B: API Key Management ───────────────────────────────────────
 
 enum ApiKeyStatus {

@@ -16,6 +16,7 @@ import {
   getNumericEntitlement,
   hasProductAccess,
 } from "@/lib/platform/commercial";
+import { IntakeNativeWorkspace } from "./IntakeNativeWorkspace";
 import { IntakeRuntimeWorkspace } from "./IntakeRuntimeWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export default async function IntakePage() {
       <PlatformPageHeader
         eyebrow="Infrastructure / MigraIntake"
         title="Intake"
-        description="Operate the current MigraIntake reality without mixing scopes: global legacy runtime visibility for MigraTeck operators, and separate organization-level commercial readiness for the future tenant-native service."
+        description="Operate MigraIntake without mixing scopes: Platform-owned tenant-native forms and encrypted submissions for organizations, plus isolated visibility into the legacy global runtime during migration."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -79,28 +80,30 @@ export default async function IntakePage() {
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <Building2 size={18} className="text-violet-600" />
           <h2 className="mt-3 text-sm font-semibold text-slate-950">
-            Tenant-native target
+            Tenant-native control
           </h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            The newer Intake service already models tenant IDs, but it remains a
-            migration target until authentication and production persistence are
-            ready.
+            New forms and submissions are organization-scoped in the Platform,
+            entitlement-gated, audited, and separated from the legacy global store.
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <ShieldCheck size={18} className="text-emerald-600" />
           <h2 className="mt-3 text-sm font-semibold text-slate-950">
-            Read-only bridge
+            Encrypted submissions
           </h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            MigraTeck reads sanitized runtime metadata only. Submission answers,
-            attachment paths, public tokens, and legacy admin credentials never
-            enter this Platform surface.
+            Tenant-native answers are encrypted before persistence. Reading decrypted
+            content requires separate sensitive-data authority from ordinary Intake visibility.
           </p>
         </article>
       </div>
 
-      <IntakeRuntimeWorkspace />
+      <IntakeNativeWorkspace />
+
+      <div className="mt-7">
+        <IntakeRuntimeWorkspace />
+      </div>
 
       <section className="mt-7 rounded-3xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-5 sm:px-6">

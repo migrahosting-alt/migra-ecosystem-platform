@@ -19,6 +19,15 @@ export function requiresCsrf(request: FastifyRequest): boolean {
     return false;
   }
 
+  // Tenant-native Intake forms intentionally accept anonymous public
+  // submissions. They carry no cookie/bearer authority, so CSRF is not the
+  // relevant control; form state, entitlement checks, schema validation, and
+  // rate limiting are enforced by the route itself.
+  const route = request.routeOptions?.url ?? request.url.split("?")[0] ?? "";
+  if (route.startsWith("/v1/intake/public/")) {
+    return false;
+  }
+
   return true;
 }
 

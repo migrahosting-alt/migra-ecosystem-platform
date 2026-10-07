@@ -67,8 +67,12 @@ export const PLATFORM_PERMISSIONS = [
   "platform.hosting.read",
   /** Bind or unbind an organization to its authoritative MigraPanel tenant. */
   "platform.hosting.bindings.manage",
-  /** Read the global legacy MigraIntake runtime and migration posture. */
+  /** Read Intake runtime posture and tenant-native form metadata. */
   "platform.intake.read",
+  /** Read decrypted tenant-native Intake submission payloads. Sensitive customer data. */
+  "platform.intake.submissions.read",
+  /** Create and operate tenant-native Intake forms and submission lifecycle. */
+  "platform.intake.manage",
   /** Read the platform audit log. */
   "platform.audit.read",
   /** Grant and revoke platform roles — authority over authority. */
@@ -128,6 +132,8 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.commerce.entitlements.manage",
     "platform.hosting.read",
     "platform.intake.read",
+    "platform.intake.submissions.read",
+    "platform.intake.manage",
     "platform.audit.read",
   ],
   /*
