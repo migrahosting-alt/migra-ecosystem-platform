@@ -27,6 +27,19 @@ type SecurityPosture = {
   can_unlink_a_provider: boolean;
 };
 
+type LinkedProvider = {
+  provider: string;
+  email: string | null;
+  display_name: string | null;
+  linked_at: string;
+  last_used_at: string | null;
+};
+
+type AvailableProvider = {
+  id: string;
+  label: string;
+};
+
 type MfaStep = "idle" | "enrolling" | "verifying" | "enrolled";
 
 export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: string | number }) {
@@ -41,6 +54,14 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokeOthersPending, setRevokeOthersPending] = useState(false);
+
+  /* ── Linked providers ── */
+  const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
+  const [linkedProviders, setLinkedProviders] = useState<LinkedProvider[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
+  const [providersMessage, setProvidersMessage] = useState<string | null>(null);
+  const [unlinkingProvider, setUnlinkingProvider] = useState<string | null>(null);
 
   /* ── MFA ── */
   const [mfaStep, setMfaStep] = useState<MfaStep>("idle");
@@ -62,13 +83,20 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
   const [replacementRecoveryCodes, setReplacementRecoveryCodes] = useState<string[] | null>(null);
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
 
-  /* ── Password recovery ── */
+  /* ── Password management / recovery ── */
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [passwordCode, setPasswordCode] = useState("");
+  const [passwordPending, setPasswordPending] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [resetPending, setResetPending] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void loadSecurityPosture();
     void loadSessions();
+    void loadProviders();
   }, []);
 
   async function loadSecurityPosture() {
@@ -111,6 +139,143 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
       setSessionsError("Unable to reach session service.");
     } finally {
       setSessionsLoading(false);
+    }
+  }
+
+  async function loadProviders() {
+    setProvidersLoading(true);
+    setProvidersMessage(null);
+    try {
+      const res = await fetch("/api/platform/security/providers", {
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setProvidersMessage(
+          body?.error ?? "Unable to load connected sign-in providers.",
+        );
+        return;
+      }
+      setAvailableProviders(Array.isArray(body?.providers) ? body.providers : []);
+      setLinkedProviders(Array.isArray(body?.links) ? body.links : []);
+    } catch {
+      setProvidersMessage("Unable to reach the provider-link service.");
+    } finally {
+      setProvidersLoading(false);
+    }
+  }
+
+  async function revokeOtherSessions() {
+    setRevokeOthersPending(true);
+    setSessionMessage(null);
+    try {
+      const res = await fetch(
+        "/api/platform/security/sessions/revoke-others",
+        { method: "POST" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setSessionMessage(
+          body?.error ?? "Other sessions could not be revoked.",
+        );
+        return;
+      }
+      setSessionMessage(
+        String(body?.revoked_count ?? 0) +
+          " other session" +
+          (Number(body?.revoked_count ?? 0) === 1 ? "" : "s") +
+          " revoked.",
+      );
+      await loadSessions();
+    } catch {
+      setSessionMessage("Unable to reach the session service.");
+    } finally {
+      setRevokeOthersPending(false);
+    }
+  }
+
+  async function unlinkProvider(provider: string) {
+    if (
+      !window.confirm(
+        "Disconnect " +
+          provider +
+          " from this MigraAuth account? The last sign-in method cannot be removed.",
+      )
+    ) {
+      return;
+    }
+
+    setUnlinkingProvider(provider);
+    setProvidersMessage(null);
+    try {
+      const res = await fetch(
+        "/api/platform/security/providers/" + encodeURIComponent(provider),
+        { method: "DELETE" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setProvidersMessage(
+          body?.error ?? "Unable to disconnect this sign-in provider.",
+        );
+        return;
+      }
+      setProvidersMessage(provider + " disconnected.");
+      await Promise.all([loadProviders(), loadSecurityPosture()]);
+    } catch {
+      setProvidersMessage("Unable to reach the provider-link service.");
+    } finally {
+      setUnlinkingProvider(null);
+    }
+  }
+
+  async function managePassword(event: React.FormEvent) {
+    event.preventDefault();
+    setPasswordMessage(null);
+
+    if (newPassword.length < 10 || newPassword.length > 128) {
+      setPasswordMessage("Use a password between 10 and 128 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage("The new password and confirmation do not match.");
+      return;
+    }
+
+    setPasswordPending(true);
+    try {
+      const proof = {
+        new_password: newPassword,
+        ...(currentPassword.trim()
+          ? { current_password: currentPassword }
+          : {}),
+        ...(passwordCode.trim() ? { code: passwordCode.trim() } : {}),
+      };
+      const res = await fetch("/api/platform/security/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proof),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setPasswordMessage(
+          body?.error ?? "Unable to update the password.",
+        );
+        return;
+      }
+
+      setPasswordMessage(
+        body?.message ??
+          "Password updated. Re-authentication is required now.",
+      );
+      const target =
+        typeof body?.reauthenticate?.url === "string"
+          ? body.reauthenticate.url
+          : "/login";
+      window.location.assign(target);
+    } catch {
+      setPasswordMessage("Unable to reach the password service.");
+    } finally {
+      setPasswordPending(false);
     }
   }
 
@@ -377,11 +542,25 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
 
       {/* ── Active sessions ── */}
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">Active sessions</h2>
-          <span className="text-xs text-slate-400">
-            Platform session expires {new Date(sessionExpiresAt).toLocaleDateString()}
-          </span>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Active sessions</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Platform session expires {new Date(sessionExpiresAt).toLocaleDateString()}
+            </p>
+          </div>
+          {currentSession && remoteSessions.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => void revokeOtherSessions()}
+              disabled={revokeOthersPending}
+              className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-4 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+            >
+              {revokeOthersPending
+                ? "Revoking other sessions…"
+                : "Revoke all other sessions"}
+            </button>
+          ) : null}
         </div>
 
         {sessionMessage ? (
@@ -772,30 +951,251 @@ export function SecurityWorkspace({ sessionExpiresAt }: { sessionExpiresAt: stri
           </div>
         </div>
 
-        {resetMessage && (
-          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <p className="text-sm text-slate-700">{resetMessage}</p>
-          </div>
-        )}
+        <div className="mt-6 grid gap-5 xl:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  Connected sign-in providers
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  Add redundant sign-in methods or disconnect providers you no longer use.
+                  MigraAuth refuses any change that would remove the account&apos;s last way in.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadProviders()}
+                disabled={providersLoading}
+                className="shrink-0 text-xs font-semibold text-blue-600 disabled:opacity-50"
+              >
+                {providersLoading ? "Refreshing…" : "Refresh"}
+              </button>
+            </div>
 
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={requestPasswordReset}
-            disabled={resetPending || securityPosture?.email_verified === false}
-            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
-          >
-            {resetPending
-              ? "Sending…"
-              : securityPosture?.has_password
-                ? "Send password reset email"
-                : "Send password setup email"}
-          </button>
-          {securityPosture?.email_verified === false ? (
-            <p className="mt-2 text-xs text-amber-700">
-              Verify the account email before using email-based password recovery.
+            {providersMessage ? (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700">
+                {providersMessage}
+              </div>
+            ) : null}
+
+            {providersLoading && availableProviders.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">
+                Loading configured sign-in providers…
+              </p>
+            ) : availableProviders.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">
+                No external sign-in provider is configured on this MigraAuth deployment.
+              </p>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {availableProviders.map((provider) => {
+                  const linked = linkedProviders.find(
+                    (item) => item.provider === provider.id,
+                  );
+                  return (
+                    <div
+                      key={provider.id}
+                      className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {provider.label}
+                          </p>
+                          <span
+                            className={
+                              "rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] " +
+                              (linked
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-slate-50 text-slate-500")
+                            }
+                          >
+                            {linked ? "Linked" : "Available"}
+                          </span>
+                        </div>
+                        {linked ? (
+                          <p className="mt-1 truncate text-xs text-slate-500">
+                            {linked.email ??
+                              linked.display_name ??
+                              "Provider identity linked"}
+                            {linked.last_used_at
+                              ? " · last used " +
+                                new Date(linked.last_used_at).toLocaleDateString()
+                              : ""}
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Add {provider.label} as another way to sign in.
+                          </p>
+                        )}
+                      </div>
+
+                      {linked ? (
+                        <button
+                          type="button"
+                          onClick={() => void unlinkProvider(provider.id)}
+                          disabled={
+                            unlinkingProvider === provider.id ||
+                            securityPosture?.can_unlink_a_provider === false
+                          }
+                          title={
+                            securityPosture?.can_unlink_a_provider === false
+                              ? "Add another sign-in method before disconnecting this provider."
+                              : undefined
+                          }
+                          className="inline-flex shrink-0 items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          {unlinkingProvider === provider.id
+                            ? "Disconnecting…"
+                            : "Disconnect"}
+                        </button>
+                      ) : (
+                        <a
+                          href={
+                            "/api/platform/security/providers/" +
+                            encodeURIComponent(provider.id) +
+                            "/link"
+                          }
+                          className="inline-flex shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                        >
+                          Link provider
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+            <p className="text-sm font-semibold text-slate-900">
+              {securityPosture?.has_password ? "Change password" : "Set a password"}
             </p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              {securityPosture?.has_password
+                ? "Use your current password or an MFA code as proof. A successful change ends this session so the new password is immediately proven by signing in again."
+                : mfaEnabled
+                  ? "This account has no password yet. Prove the change with your authenticator or a recovery code."
+                  : "This account has no password yet. A recent provider sign-in can authorize adding one; stale sessions will be asked to sign in again."}
+            </p>
+
+            {passwordMessage ? (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700">
+                {passwordMessage}
+              </div>
+            ) : null}
+
+            <form onSubmit={managePassword} className="mt-4 space-y-3">
+              {securityPosture?.has_password ? (
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  placeholder="Current password"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                />
+              ) : null}
+
+              {mfaEnabled ? (
+                <input
+                  type="text"
+                  autoComplete="one-time-code"
+                  value={passwordCode}
+                  onChange={(event) =>
+                    setPasswordCode(event.target.value.trimStart().slice(0, 64))
+                  }
+                  placeholder="Authenticator or recovery code"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                />
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  minLength={10}
+                  maxLength={128}
+                  placeholder="New password"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  minLength={10}
+                  maxLength={128}
+                  placeholder="Confirm new password"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={
+                  passwordPending ||
+                  newPassword.length < 10 ||
+                  confirmPassword.length < 10 ||
+                  (securityPosture?.has_password === true &&
+                    !currentPassword.trim() &&
+                    !(mfaEnabled && passwordCode.trim())) ||
+                  (securityPosture?.has_password === false &&
+                    mfaEnabled &&
+                    !passwordCode.trim())
+                }
+                className="inline-flex items-center justify-center rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                {passwordPending
+                  ? "Updating…"
+                  : securityPosture?.has_password
+                    ? "Change password"
+                    : "Set password"}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+          <p className="text-sm font-semibold text-slate-900">
+            Email-based password recovery
+          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            Use this when you cannot complete the signed-in credential change above.
+            Recovery is only offered to a verified account email.
+          </p>
+
+          {resetMessage ? (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-sm text-slate-700">{resetMessage}</p>
+            </div>
           ) : null}
+
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={requestPasswordReset}
+              disabled={
+                resetPending || securityPosture?.email_verified === false
+              }
+              className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {resetPending
+                ? "Sending…"
+                : securityPosture?.has_password
+                  ? "Send password reset email"
+                  : "Send password setup email"}
+            </button>
+            {securityPosture?.email_verified === false ? (
+              <p className="mt-2 text-xs text-amber-700">
+                Verify the account email before using email-based password recovery.
+              </p>
+            ) : null}
+          </div>
         </div>
       </section>
     </div>
