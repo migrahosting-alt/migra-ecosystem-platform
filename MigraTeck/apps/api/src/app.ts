@@ -102,7 +102,14 @@ export async function buildApiApp(): Promise<FastifyInstance> {
           migraauth: "ready",
         },
       };
-    } catch {
+    } catch (error) {
+      logError("api.readiness_failed", {
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown readiness dependency failure",
+      });
+
       return reply.code(503).send({
         service: "migrateck-platform-api",
         status: "not_ready",
