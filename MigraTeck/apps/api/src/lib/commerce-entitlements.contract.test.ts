@@ -91,6 +91,10 @@ test("MigraHosting activation exposes required context only when dispatchers are
       new Set(result.requiredFields),
       new Set(["domain", "tenantId", "serviceInstanceId", "targetIp"]),
     );
+    assert.deepEqual(
+      new Set(result.requiredInputs.map((input) => input.key)),
+      new Set(["domain", "tenantId", "serviceInstanceId", "targetIp"]),
+    );
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
@@ -141,6 +145,16 @@ test("manual MigraMail activation requires Mail Core and encrypted async secret 
       new Set(ready.requiredFields),
       new Set(["domain", "mailboxEmail", "mailboxPassword"]),
     );
+    assert.deepEqual(
+      new Set(ready.requiredInputs.map((input) => input.key)),
+      new Set(["domain", "mailboxEmail", "mailboxPassword"]),
+    );
+    const passwordInput = ready.requiredInputs.find(
+      (input) => input.key === "mailboxPassword",
+    );
+    assert.equal(passwordInput?.kind, "password");
+    assert.equal(passwordInput?.sensitive, true);
+    assert.equal(passwordInput?.min, 12);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
@@ -175,6 +189,23 @@ test("internal Migra organizations skip customer pod creation but still require 
       else process.env[key] = value;
     }
   }
+});
+
+test("operator provisioning inputs are backend-described instead of hard-coded in the UI", () => {
+  const source = repoFile("apps/api/src/lib/commerce-entitlements.ts");
+  const operatorUi = repoFile(
+    "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+  );
+
+  assert.match(source, /ProvisioningInputDescriptor/);
+  assert.match(source, /getProvisioningInputDescriptors/);
+  assert.match(operatorUi, /requiredInputs\.map/);
+  assert.match(operatorUi, /input\.kind === "json"/);
+  assert.match(operatorUi, /input\.sensitive/);
+  assert.doesNotMatch(
+    operatorUi,
+    /This UI does not yet support required context field/,
+  );
 });
 
 test("entitlement mutation contract is concurrency-safe, billing-aware, atomic, signed and audited", () => {

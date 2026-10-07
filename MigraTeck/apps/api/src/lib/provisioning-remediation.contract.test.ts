@@ -61,6 +61,17 @@ test("dead-letter cancel preserves failure history and records operator evidence
   assert.match(service, /INSERT INTO "AuditLog"/);
 });
 
+test("dead-letter recovery reuses backend provisioning input descriptors", () => {
+  assert.match(service, /getProvisioningInputDescriptors/);
+  assert.match(service, /requiredInputs:\s*getProvisioningInputDescriptors/);
+  assert.match(operatorUi, /remediation\.retry\.requiredInputs/);
+  assert.match(operatorUi, /requiredInputs\.map/);
+  assert.doesNotMatch(
+    operatorUi,
+    /This UI does not support required recovery field/,
+  );
+});
+
 test("only audited recovery actions are replayable", () => {
   assert.match(service, /MIGRAHOSTING/);
   assert.match(service, /POD_CREATE/);
@@ -103,15 +114,15 @@ test("switching Hosting recovery candidates cannot retain another tenant's ambig
   assert.match(operatorUi, /tenantId: candidate\.tenantId/);
   assert.match(
     operatorUi,
-    /candidate\.suggestedContext\.domain \?\?[\s\S]*?sameTenant \? current\.domain : ""/,
+    /candidate\.suggestedContext\.domain \?\?[\s\S]*?sameTenant \? current\.domain \?\? "" : ""/,
   );
   assert.match(
     operatorUi,
-    /candidate\.suggestedContext\.serviceInstanceId \?\?[\s\S]*?sameTenant \? current\.serviceInstanceId : ""/,
+    /candidate\.suggestedContext\.serviceInstanceId \?\?[\s\S]*?sameTenant \? current\.serviceInstanceId \?\? "" : ""/,
   );
   assert.match(
     operatorUi,
-    /candidate\.suggestedContext\.targetIp \?\?[\s\S]*?sameTenant \? current\.targetIp : ""/,
+    /candidate\.suggestedContext\.targetIp \?\?[\s\S]*?sameTenant \? current\.targetIp \?\? "" : ""/,
   );
   assert.match(
     operatorUi,

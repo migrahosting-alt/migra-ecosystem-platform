@@ -51,6 +51,97 @@ export type EntitlementProvisioningContext = {
   mailboxQuotaMb?: number | undefined;
 };
 
+export type ProvisioningContextField = keyof EntitlementProvisioningContext;
+
+export type ProvisioningInputDescriptor = {
+  key: ProvisioningContextField;
+  label: string;
+  placeholder: string;
+  kind: "text" | "email" | "password" | "number" | "json";
+  sensitive: boolean;
+  min?: number | undefined;
+  max?: number | undefined;
+};
+
+const PROVISIONING_INPUTS: Record<
+  ProvisioningContextField,
+  ProvisioningInputDescriptor
+> = {
+  domain: {
+    key: "domain",
+    label: "Domain",
+    placeholder: "example.com",
+    kind: "text",
+    sensitive: false,
+  },
+  tenantId: {
+    key: "tenantId",
+    label: "Tenant ID",
+    placeholder: "tenant_...",
+    kind: "text",
+    sensitive: false,
+  },
+  serviceInstanceId: {
+    key: "serviceInstanceId",
+    label: "Service instance ID",
+    placeholder: "svc_...",
+    kind: "text",
+    sensitive: false,
+  },
+  targetIp: {
+    key: "targetIp",
+    label: "Target IP",
+    placeholder: "203.0.113.10",
+    kind: "text",
+    sensitive: false,
+  },
+  plan: {
+    key: "plan",
+    label: "Provisioning plan",
+    placeholder: "business",
+    kind: "text",
+    sensitive: false,
+  },
+  limits: {
+    key: "limits",
+    label: "Provisioning limits",
+    placeholder: '{"seats":10,"storageGb":100}',
+    kind: "json",
+    sensitive: false,
+  },
+  mailboxEmail: {
+    key: "mailboxEmail",
+    label: "Mailbox email",
+    placeholder: "user@example.com",
+    kind: "email",
+    sensitive: false,
+  },
+  mailboxPassword: {
+    key: "mailboxPassword",
+    label: "Initial mailbox password",
+    placeholder: "At least 12 characters",
+    kind: "password",
+    sensitive: true,
+    min: 12,
+    max: 256,
+  },
+  mailboxQuotaMb: {
+    key: "mailboxQuotaMb",
+    label: "Mailbox quota",
+    placeholder: "10240",
+    kind: "number",
+    sensitive: false,
+    min: 1,
+    max: 1_000_000,
+  },
+};
+
+export function getProvisioningInputDescriptors(
+  fields: readonly ProvisioningContextField[],
+): ProvisioningInputDescriptor[] {
+  return fields.map((field) => PROVISIONING_INPUTS[field]);
+}
+
 export type ProvisioningWorkerStatus = {
   ready: boolean;
   workerId: string | null;
@@ -67,7 +158,8 @@ export type EntitlementTransitionAvailability = {
   available: boolean;
   mode: "database_only" | "provisioning" | "blocked";
   actions: ProvisioningAction[];
-  requiredFields: string[];
+  requiredFields: ProvisioningContextField[];
+  requiredInputs: ProvisioningInputDescriptor[];
   reason: string | null;
 };
 
@@ -214,7 +306,7 @@ function actionsForTransition(
 
 type ActionReadiness = {
   supported: boolean;
-  requiredFields: string[];
+  requiredFields: ProvisioningContextField[];
   reason: string | null;
 };
 
@@ -308,6 +400,7 @@ export async function getEntitlementTransitionAvailability(input: {
       mode: "database_only",
       actions,
       requiredFields: [],
+      requiredInputs: [],
       reason: null,
     };
   }
@@ -322,11 +415,12 @@ export async function getEntitlementTransitionAvailability(input: {
       mode: "blocked",
       actions,
       requiredFields: [],
+      requiredInputs: [],
       reason: worker.reason ?? "managed provisioning worker is unavailable",
     };
   }
 
-  const required = new Set<string>();
+  const required = new Set<ProvisioningContextField>();
   for (const action of actions) {
     const actionReadiness = readinessForAction(input.product, action);
     if (!actionReadiness.supported) {
@@ -338,6 +432,7 @@ export async function getEntitlementTransitionAvailability(input: {
         mode: "blocked",
         actions,
         requiredFields: [...required],
+        requiredInputs: getProvisioningInputDescriptors([...required]),
         reason: actionReadiness.reason,
       };
     }
@@ -352,6 +447,7 @@ export async function getEntitlementTransitionAvailability(input: {
     mode: "provisioning",
     actions,
     requiredFields: [...required],
+    requiredInputs: getProvisioningInputDescriptors([...required]),
     reason: null,
   };
 }
@@ -388,9 +484,9 @@ export async function buildEntitlementTransitionMatrix(input: {
 
 function requiredContextValue(
   context: EntitlementProvisioningContext,
-  field: string,
+  field: ProvisioningContextField,
 ): unknown {
-  return context[field as keyof EntitlementProvisioningContext];
+  return context[field];
 }
 
 function validateContext(

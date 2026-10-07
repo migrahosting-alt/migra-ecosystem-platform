@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { getDb } from "./db.js";
-import { getProvisioningWorkerStatus } from "./commerce-entitlements.js";
+import {
+  getProvisioningInputDescriptors,
+  getProvisioningWorkerStatus,
+} from "./commerce-entitlements.js";
 import {
   getHostingRecoveryCandidates,
   type HostingRecoveryCandidate,
@@ -343,6 +346,7 @@ async function analyze(
       payloadHashValid: sourceVerification.payloadHashValid,
       signatureValid: sourceVerification.signatureValid,
       requiredFields: contract.requiredFields,
+      requiredInputs: getProvisioningInputDescriptors(contract.requiredFields),
       missingFields,
       currentContext,
       hostingCandidates,

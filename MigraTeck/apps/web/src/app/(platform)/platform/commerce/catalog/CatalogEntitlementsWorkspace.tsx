@@ -47,6 +47,16 @@ type WorkerStatus = {
   reason: string | null;
 };
 
+type ProvisioningInputDescriptor = {
+  key: string;
+  label: string;
+  placeholder: string;
+  kind: "text" | "email" | "password" | "number" | "json";
+  sensitive: boolean;
+  min?: number;
+  max?: number;
+};
+
 type EntitlementTransition = {
   product: ProductKey;
   fromStatus: EntitlementStatus;
@@ -55,6 +65,7 @@ type EntitlementTransition = {
   mode: "database_only" | "provisioning" | "blocked";
   actions: string[];
   requiredFields: string[];
+  requiredInputs: ProvisioningInputDescriptor[];
   reason: string | null;
 };
 
@@ -75,15 +86,7 @@ type EntitlementEditorState = {
   reason: string;
   notes: string;
   acknowledgeBillingOverride: boolean;
-  context: {
-    domain: string;
-    tenantId: string;
-    serviceInstanceId: string;
-    targetIp: string;
-    plan: string;
-    mailboxEmail: string;
-    mailboxPassword: string;
-  };
+  context: Record<string, string>;
 };
 
 type CatalogPrice = {
@@ -190,14 +193,7 @@ type CatalogPayload = {
   };
 };
 
-type DeadLetterRecoveryContext = {
-  domain: string;
-  tenantId: string;
-  serviceInstanceId: string;
-  targetIp: string;
-  plan: string;
-  mailboxEmail: string;
-};
+type DeadLetterRecoveryContext = Record<string, string>;
 
 type HostingRecoveryCandidate = {
   tenantId: string;
@@ -256,6 +252,7 @@ type DeadLetterRemediation = {
     payloadHashValid: boolean;
     signatureValid: boolean;
     requiredFields: string[];
+    requiredInputs: ProvisioningInputDescriptor[];
     missingFields: string[];
     currentContext: Partial<DeadLetterRecoveryContext>;
     hostingCandidates?: HostingRecoveryCandidate[];
@@ -487,15 +484,7 @@ export function CatalogEntitlementsWorkspace() {
       reason: "",
       notes: entitlement.notes ?? "",
       acknowledgeBillingOverride: false,
-      context: {
-        domain: "",
-        tenantId: "",
-        serviceInstanceId: "",
-        targetIp: "",
-        plan: "",
-        mailboxEmail: "",
-        mailboxPassword: "",
-      },
+      context: {},
     });
     setEntitlementMessage(null);
   }
@@ -526,18 +515,76 @@ export function CatalogEntitlementsWorkspace() {
       return;
     }
 
-    const context = Object.fromEntries(
-      Object.entries(entitlementEditor.context).flatMap(([key, value]) => {
-        const normalized =
-          key === "mailboxPassword" ? value ?? "" : value?.trim() ?? "";
-        return normalized.length > 0 ? [[key, normalized]] : [];
-      }),
+    const descriptorKeys = new Set(
+      transition.requiredInputs.map((input) => input.key),
     );
+    const missingDescriptors = transition.requiredFields.filter(
+      (field) => !descriptorKeys.has(field),
+    );
+    if (missingDescriptors.length > 0) {
+      setEntitlementMessage(
+        "Provisioning input metadata is incomplete for: " +
+          missingDescriptors.join(", ") +
+          ". Refresh before retrying.",
+      );
+      return;
+    }
 
-    const missingContext = transition.requiredFields.filter((field) => {
-      const value = context[field];
-      return typeof value !== "string" || value.trim().length === 0;
-    });
+    const context: Record<string, unknown> = {};
+    for (const input of transition.requiredInputs) {
+      const raw = entitlementEditor.context[input.key] ?? "";
+      const normalized = input.kind === "password" ? raw : raw.trim();
+      if (!normalized.length) continue;
+
+      if (input.kind === "number") {
+        const numeric = Number(normalized);
+        if (!Number.isFinite(numeric)) {
+          setEntitlementMessage(input.label + " must be a valid number.");
+          return;
+        }
+        if (input.min !== undefined && numeric < input.min) {
+          setEntitlementMessage(
+            input.label + " must be at least " + input.min + ".",
+          );
+          return;
+        }
+        if (input.max !== undefined && numeric > input.max) {
+          setEntitlementMessage(
+            input.label + " must be no more than " + input.max + ".",
+          );
+          return;
+        }
+        context[input.key] = numeric;
+        continue;
+      }
+
+      if (input.kind === "json") {
+        try {
+          const parsed = JSON.parse(normalized) as unknown;
+          if (
+            parsed === null ||
+            typeof parsed !== "object" ||
+            Array.isArray(parsed)
+          ) {
+            setEntitlementMessage(
+              input.label + " must be a JSON object.",
+            );
+            return;
+          }
+          context[input.key] = parsed;
+        } catch {
+          setEntitlementMessage(input.label + " must contain valid JSON.");
+          return;
+        }
+        continue;
+      }
+
+      context[input.key] = normalized;
+    }
+
+    const missingContext = transition.requiredInputs
+      .filter((input) => context[input.key] === undefined)
+      .map((input) => input.label);
     if (missingContext.length > 0) {
       setEntitlementMessage(
         "Required provisioning context is missing: " + missingContext.join(", "),
@@ -596,14 +643,21 @@ export function CatalogEntitlementsWorkspace() {
       );
     } finally {
       setEntitlementSaving(false);
+      const sensitiveKeys = new Set(
+        transition.requiredInputs
+          .filter((input) => input.sensitive)
+          .map((input) => input.key),
+      );
       setEntitlementEditor((currentEditor) =>
         currentEditor
           ? {
               ...currentEditor,
-              context: {
-                ...currentEditor.context,
-                mailboxPassword: "",
-              },
+              context: Object.fromEntries(
+                Object.entries(currentEditor.context).map(([key, value]) => [
+                  key,
+                  sensitiveKeys.has(key) ? "" : value,
+                ]),
+              ),
             }
           : currentEditor,
       );
@@ -1352,13 +1406,13 @@ function DeadLetterRemediationPanel({
       tenantId: candidate.tenantId,
       domain:
         candidate.suggestedContext.domain ??
-        (sameTenant ? current.domain : ""),
+        (sameTenant ? current.domain ?? "" : ""),
       serviceInstanceId:
         candidate.suggestedContext.serviceInstanceId ??
-        (sameTenant ? current.serviceInstanceId : ""),
+        (sameTenant ? current.serviceInstanceId ?? "" : ""),
       targetIp:
         candidate.suggestedContext.targetIp ??
-        (sameTenant ? current.targetIp : ""),
+        (sameTenant ? current.targetIp ?? "" : ""),
     };
   }
 
@@ -1377,35 +1431,15 @@ function DeadLetterRemediationPanel({
     }));
   }
 
-  const fieldMeta: Record<
-    keyof DeadLetterRecoveryContext,
-    { label: string; placeholder: string; type?: string }
-  > = {
-    domain: { label: "Domain", placeholder: "example.com" },
-    tenantId: { label: "Tenant ID", placeholder: "tenant_..." },
-    serviceInstanceId: {
-      label: "Service instance ID",
-      placeholder: "svc_...",
-    },
-    targetIp: { label: "Target IP", placeholder: "203.0.113.10" },
-    plan: { label: "Provisioning plan", placeholder: "business" },
-    mailboxEmail: {
-      label: "Mailbox email",
-      placeholder: "user@example.com",
-      type: "email",
-    },
-  };
-
-  const requiredFields = remediation.retry.requiredFields.filter(
-    (field): field is keyof DeadLetterRecoveryContext =>
-      Object.prototype.hasOwnProperty.call(fieldMeta, field),
+  const requiredFields = remediation.retry.requiredFields;
+  const requiredInputs = remediation.retry.requiredInputs ?? [];
+  const descriptorKeys = new Set(requiredInputs.map((input) => input.key));
+  const missingDescriptors = requiredFields.filter(
+    (field) => !descriptorKeys.has(field),
   );
-  const unsupportedFields = remediation.retry.requiredFields.filter(
-    (field) => !Object.prototype.hasOwnProperty.call(fieldMeta, field),
-  );
-  const missingFields = requiredFields.filter(
-    (field) => !context[field].trim(),
-  );
+  const missingFields = requiredInputs
+    .filter((input) => !(context[input.key] ?? "").trim())
+    .map((input) => input.label);
   const hostingSearchEnabled =
     remediation.job.productLane === "MIGRAHOSTING" && requiredFields.length > 0;
 
@@ -1507,7 +1541,7 @@ function DeadLetterRemediationPanel({
   const retryReady =
     canManage &&
     remediation.retry.available &&
-    unsupportedFields.length === 0 &&
+    missingDescriptors.length === 0 &&
     missingFields.length === 0 &&
     reason.trim().length >= 3 &&
     saving === null;
@@ -1966,36 +2000,62 @@ function DeadLetterRemediationPanel({
                 Correct the missing or stale fields required by this specific dispatcher.
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {requiredFields.map((field) => {
-                  const meta = fieldMeta[field];
-                  return (
-                    <label
-                      key={field}
-                      className="text-xs font-semibold text-slate-700"
-                    >
-                      {meta.label}
-                      <input
-                        type={meta.type ?? "text"}
-                        value={context[field]}
+                {requiredInputs.map((input) => (
+                  <label
+                    key={input.key}
+                    className={
+                      "text-xs font-semibold text-slate-700 " +
+                      (input.kind === "json" ? "sm:col-span-2" : "")
+                    }
+                  >
+                    {input.label}
+                    {input.kind === "json" ? (
+                      <textarea
+                        rows={4}
+                        value={context[input.key] ?? ""}
                         onChange={(event) =>
                           setContext((current) => ({
                             ...current,
-                            [field]: event.target.value,
+                            [input.key]: event.target.value,
                           }))
                         }
-                        placeholder={meta.placeholder}
+                        placeholder={input.placeholder}
+                        spellCheck={false}
+                        disabled={!canManage || saving !== null}
+                        className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-xs font-normal text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 disabled:bg-slate-100"
+                      />
+                    ) : (
+                      <input
+                        type={
+                          input.kind === "email"
+                            ? "email"
+                            : input.kind === "password"
+                              ? "password"
+                              : input.kind === "number"
+                                ? "number"
+                                : "text"
+                        }
+                        min={input.kind === "number" ? input.min : undefined}
+                        max={input.kind === "number" ? input.max : undefined}
+                        value={context[input.key] ?? ""}
+                        onChange={(event) =>
+                          setContext((current) => ({
+                            ...current,
+                            [input.key]: event.target.value,
+                          }))
+                        }
+                        placeholder={input.placeholder}
                         disabled={!canManage || saving !== null}
                         className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 disabled:bg-slate-100"
                       />
-                    </label>
-                  );
-                })}
+                    )}
+                  </label>
+                ))}
               </div>
-              {unsupportedFields.length > 0 ? (
+              {missingDescriptors.length > 0 ? (
                 <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-                  This UI does not support required recovery field
-                  {unsupportedFields.length === 1 ? " " : "s "}
-                  {unsupportedFields.join(", ")}. Retry remains locked.
+                  Backend recovery metadata is incomplete for{" "}
+                  {missingDescriptors.join(", ")}. Retry remains locked.
                 </div>
               ) : null}
               {missingFields.length > 0 && remediation.retry.available ? (
@@ -2154,53 +2214,18 @@ function EntitlementEditorPanel({
   onCancel: () => void;
   onSave: () => void;
 }) {
-  const fieldMeta: Record<
-    keyof EntitlementEditorState["context"],
-    { label: string; placeholder: string; type?: string }
-  > = {
-    domain: {
-      label: "Domain",
-      placeholder: "example.com",
-    },
-    tenantId: {
-      label: "Tenant ID",
-      placeholder: "tenant_...",
-    },
-    serviceInstanceId: {
-      label: "Service instance ID",
-      placeholder: "svc_...",
-    },
-    targetIp: {
-      label: "Target IP",
-      placeholder: "203.0.113.10",
-    },
-    plan: {
-      label: "Provisioning plan",
-      placeholder: "business",
-    },
-    mailboxEmail: {
-      label: "Mailbox email",
-      placeholder: "user@example.com",
-      type: "email",
-    },
-    mailboxPassword: {
-      label: "Initial mailbox password",
-      placeholder: "At least 12 characters",
-      type: "password",
-    },
-  };
-
-  const supportedFields = new Set(Object.keys(fieldMeta));
   const requiredFields = selectedTransition?.requiredFields ?? [];
-  const unsupportedFields = requiredFields.filter(
-    (field) => !supportedFields.has(field),
+  const requiredInputs = selectedTransition?.requiredInputs ?? [];
+  const descriptorKeys = new Set(requiredInputs.map((input) => input.key));
+  const missingDescriptors = requiredFields.filter(
+    (field) => !descriptorKeys.has(field),
   );
   const isStripeOverride =
     entitlement.evidence === "stripe_sync" &&
     entitlement.status !== editor.status;
   const canSave =
     Boolean(selectedTransition?.available) &&
-    unsupportedFields.length === 0 &&
+    missingDescriptors.length === 0 &&
     !saving;
 
   return (
@@ -2348,39 +2373,76 @@ function EntitlementEditorPanel({
             These fields were requested by the backend preflight for this exact transition.
           </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {requiredFields
-              .filter((field): field is keyof EntitlementEditorState["context"] =>
-                supportedFields.has(field),
-              )
-              .map((field) => {
-                const meta = fieldMeta[field];
-                return (
-                  <label key={field} className="text-xs font-semibold text-slate-700">
-                    {meta.label}
-                    <input
-                      type={meta.type ?? "text"}
-                      value={editor.context[field]}
-                      onChange={(event) =>
-                        onChange({
-                          ...editor,
-                          context: {
-                            ...editor.context,
-                            [field]: event.target.value,
-                          },
-                        })
-                      }
-                      placeholder={meta.placeholder}
-                      className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
-                    />
-                  </label>
-                );
-              })}
+            {requiredInputs.map((input) => (
+              <label
+                key={input.key}
+                className={
+                  "text-xs font-semibold text-slate-700 " +
+                  (input.kind === "json" ? "sm:col-span-2" : "")
+                }
+              >
+                {input.label}
+                {input.kind === "json" ? (
+                  <textarea
+                    rows={4}
+                    value={editor.context[input.key] ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        ...editor,
+                        context: {
+                          ...editor.context,
+                          [input.key]: event.target.value,
+                        },
+                      })
+                    }
+                    placeholder={input.placeholder}
+                    spellCheck={false}
+                    className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-xs font-normal text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
+                  />
+                ) : (
+                  <input
+                    type={
+                      input.kind === "email"
+                        ? "email"
+                        : input.kind === "password"
+                          ? "password"
+                          : input.kind === "number"
+                            ? "number"
+                            : "text"
+                    }
+                    min={input.kind === "number" ? input.min : undefined}
+                    max={input.kind === "number" ? input.max : undefined}
+                    autoComplete={
+                      input.kind === "password" ? "new-password" : undefined
+                    }
+                    value={editor.context[input.key] ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        ...editor,
+                        context: {
+                          ...editor.context,
+                          [input.key]: event.target.value,
+                        },
+                      })
+                    }
+                    placeholder={input.placeholder}
+                    className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10"
+                  />
+                )}
+                {input.sensitive ? (
+                  <span className="mt-1 block text-[10px] font-normal leading-5 text-slate-500">
+                    Sensitive value. It is scrubbed from the editor after each
+                    submission attempt and is never written to the durable
+                    provisioning payload.
+                  </span>
+                ) : null}
+              </label>
+            ))}
           </div>
-          {unsupportedFields.length > 0 ? (
+          {missingDescriptors.length > 0 ? (
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-              This UI does not yet support required context field
-              {unsupportedFields.length === 1 ? " " : "s "}
-              {unsupportedFields.join(", ")}. The operation stays locked.
+              Backend provisioning metadata is incomplete for{" "}
+              {missingDescriptors.join(", ")}. The operation stays locked.
             </div>
           ) : null}
         </div>
