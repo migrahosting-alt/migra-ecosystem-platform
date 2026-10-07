@@ -104,3 +104,32 @@ test("legacy Intake runtime bridge is global platform authority and read-only", 
   assert.match(source.slice(nativeStart), /app\.post\("\/intake\/native\/organizations\/:orgId\/forms"/);
   assert.match(source.slice(nativeStart), /app\.patch\("\/intake\/native\/forms\/:formId"/);
 });
+
+test("legacy Intake migration status follows deployed native readiness instead of stale blockers", () => {
+  const integration = readFileSync(
+    new URL("./intake-integration.ts", import.meta.url),
+    "utf8",
+  );
+  const routes = readFileSync(
+    new URL("../routes/v1/modules/intake.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(integration, /getIntakeNativeReadiness/);
+  assert.match(integration, /nativeServiceReady/);
+  assert.match(integration, /legacyDataMigrationReady/);
+  assert.match(integration, /explicit organization attribution before migration/);
+  assert.doesNotMatch(
+    integration,
+    /tenant-native service has no production authentication boundary/,
+  );
+  assert.doesNotMatch(
+    integration,
+    /PlatformOperation persistence is not deployed in the production database/,
+  );
+  assert.doesNotMatch(
+    integration,
+    /dedicated Intake domain models are still pending/,
+  );
+  assert.match(routes, /getIntakeRuntimeSnapshot\(tenantNative\)/);
+});

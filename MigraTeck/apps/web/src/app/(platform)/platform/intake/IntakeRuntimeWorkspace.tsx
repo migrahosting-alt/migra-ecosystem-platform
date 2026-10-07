@@ -75,6 +75,8 @@ type IntakeRuntimePayload = {
     writes: string;
     migrationTarget: string;
     migrationTargetReady: boolean;
+    nativeServiceReady: boolean;
+    legacyDataMigrationReady: boolean;
     migrationBlockers: string[];
   };
 };
@@ -401,7 +403,7 @@ export function IntakeRuntimeWorkspace() {
                 ok
               />
               <PostureRow
-                label="Tenant isolation"
+                label="Legacy tenant isolation"
                 value="not present"
                 ok={false}
               />
@@ -431,34 +433,101 @@ export function IntakeRuntimeWorkspace() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-amber-200 bg-amber-50 shadow-sm">
+          <section
+            className={
+              "rounded-3xl border shadow-sm " +
+              (data.boundary.legacyDataMigrationReady
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-amber-200 bg-amber-50")
+            }
+          >
             <div className="p-5 sm:p-6">
               <div className="flex items-start gap-3">
-                <ShieldAlert
-                  size={19}
-                  className="mt-0.5 shrink-0 text-amber-700"
-                />
-                <div>
-                  <h2 className="text-sm font-semibold text-amber-950">
+                {data.boundary.legacyDataMigrationReady ? (
+                  <ShieldCheck
+                    size={19}
+                    className="mt-0.5 shrink-0 text-emerald-700"
+                  />
+                ) : (
+                  <ShieldAlert
+                    size={19}
+                    className="mt-0.5 shrink-0 text-amber-700"
+                  />
+                )}
+                <div className="min-w-0 flex-1">
+                  <h2
+                    className={
+                      "text-sm font-semibold " +
+                      (data.boundary.legacyDataMigrationReady
+                        ? "text-emerald-950"
+                        : "text-amber-950")
+                    }
+                  >
                     Migration boundary
                   </h2>
-                  <p className="mt-2 text-sm leading-6 text-amber-900">
+                  <p
+                    className={
+                      "mt-2 text-sm leading-6 " +
+                      (data.boundary.legacyDataMigrationReady
+                        ? "text-emerald-900"
+                        : "text-amber-900")
+                    }
+                  >
                     {data.boundary.attribution}
                   </p>
-                  <p className="mt-2 text-sm leading-6 text-amber-900">
+                  <p
+                    className={
+                      "mt-2 text-sm leading-6 " +
+                      (data.boundary.legacyDataMigrationReady
+                        ? "text-emerald-900"
+                        : "text-amber-900")
+                    }
+                  >
                     {data.boundary.writes}
                   </p>
+
                   <div className="mt-4 space-y-2">
-                    {data.boundary.migrationBlockers.map((blocker) => (
-                      <div
-                        key={blocker}
-                        className="flex items-start gap-2 text-xs leading-5 text-amber-800"
-                      >
-                        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
-                        <span>{blocker}</span>
-                      </div>
-                    ))}
+                    <PostureRow
+                      label="Tenant-native service"
+                      value={data.boundary.nativeServiceReady ? "ready" : "blocked"}
+                      ok={data.boundary.nativeServiceReady}
+                    />
+                    <PostureRow
+                      label="Legacy data migration"
+                      value={
+                        data.boundary.legacyDataMigrationReady
+                          ? "complete"
+                          : "pending attribution"
+                      }
+                      ok={data.boundary.legacyDataMigrationReady}
+                    />
                   </div>
+
+                  {data.boundary.migrationBlockers.length ? (
+                    <div className="mt-4 space-y-2">
+                      {data.boundary.migrationBlockers.map((blocker) => (
+                        <div
+                          key={blocker}
+                          className={
+                            "flex items-start gap-2 text-xs leading-5 " +
+                            (data.boundary.legacyDataMigrationReady
+                              ? "text-emerald-800"
+                              : "text-amber-800")
+                          }
+                        >
+                          <span
+                            className={
+                              "mt-2 h-1.5 w-1.5 shrink-0 rounded-full " +
+                              (data.boundary.legacyDataMigrationReady
+                                ? "bg-emerald-500"
+                                : "bg-amber-500")
+                            }
+                          />
+                          <span>{blocker}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

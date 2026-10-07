@@ -115,6 +115,7 @@ export async function registerIntakeRoutes(app: FastifyInstance): Promise<void> 
     const authority = await requirePlatformAuthority(request, [
       "platform.intake.read",
     ]);
+    const tenantNative = await getIntakeNativeReadiness();
 
     return {
       authority: {
@@ -124,8 +125,8 @@ export async function registerIntakeRoutes(app: FastifyInstance): Promise<void> 
         ),
         viaBootstrap: authority.viaBootstrap,
       },
-      ...(await getIntakeRuntimeSnapshot()),
-      tenantNative: await getIntakeNativeReadiness(),
+      ...(await getIntakeRuntimeSnapshot(tenantNative)),
+      tenantNative,
     };
   });
 

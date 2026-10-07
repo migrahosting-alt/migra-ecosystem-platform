@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { getIntakeNativeReadiness } from "./intake-native.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -221,17 +222,55 @@ async function fetchLegacyHealth(healthUrl: string) {
   }
 }
 
-export async function getIntakeRuntimeSnapshot() {
+export async function getIntakeRuntimeSnapshot(
+  tenantNative?: Awaited<ReturnType<typeof getIntakeNativeReadiness>>,
+) {
   const rootPath =
     process.env.MIGRAINTAKE_LEGACY_ROOT?.trim() || "/opt/migra-intake";
   const healthUrl =
     process.env.MIGRAINTAKE_LEGACY_HEALTH_URL?.trim() ||
     "http://127.0.0.1:4000/health";
 
-  const [health, files] = await Promise.all([
+  const readinessPromise = tenantNative
+    ? Promise.resolve(tenantNative)
+    : getIntakeNativeReadiness();
+  const [health, files, nativeReadiness] = await Promise.all([
     fetchLegacyHealth(healthUrl),
     readLegacyIntakeFiles(rootPath),
+    readinessPromise,
   ]);
+
+  const nativeServiceReady =
+    nativeReadiness.ready && nativeReadiness.encryptionConfigured;
+  const legacyDataMigrationReady =
+    nativeServiceReady &&
+    files.counts.projects === 0 &&
+    files.counts.submissions === 0 &&
+    files.counts.uploads === 0;
+
+  const migrationBlockers: string[] = [];
+  if (!nativeReadiness.tables.IntakeForm) {
+    migrationBlockers.push("tenant-native IntakeForm persistence is not deployed");
+  }
+  if (!nativeReadiness.tables.IntakeSubmission) {
+    migrationBlockers.push(
+      "tenant-native IntakeSubmission persistence is not deployed",
+    );
+  }
+  if (!nativeReadiness.encryptionConfigured) {
+    migrationBlockers.push(
+      "INTAKE_PAYLOAD_ENCRYPTION_KEY is not configured for encrypted submissions",
+    );
+  }
+  if (!legacyDataMigrationReady) {
+    const legacyRecords =
+      files.counts.projects + files.counts.submissions + files.counts.uploads;
+    if (legacyRecords > 0) {
+      migrationBlockers.push(
+        "legacy global Intake data still requires explicit organization attribution before migration",
+      );
+    }
+  }
 
   return {
     runtime: {
@@ -249,15 +288,14 @@ export async function getIntakeRuntimeSnapshot() {
     boundary: {
       attribution:
         "Projects and submissions belong to the global legacy MigraIntake runtime and are not assigned to the active customer organization.",
-      writes:
-        "Read-only from MigraTeck Platform. Operational changes stay in the legacy MigraIntake portal until the tenant-native service is production-ready.",
+      writes: nativeServiceReady
+        ? "The legacy runtime remains read-only from MigraTeck Platform. New organization-scoped forms and submissions are operated through the tenant-native Platform Intake workspace."
+        : "Read-only from MigraTeck Platform. Operational changes stay in the legacy MigraIntake portal until the tenant-native service is production-ready.",
       migrationTarget: "@migrateck/intake-service",
-      migrationTargetReady: false,
-      migrationBlockers: [
-        "tenant-native service has no production authentication boundary",
-        "PlatformOperation persistence is not deployed in the production database",
-        "dedicated Intake domain models are still pending",
-      ],
+      migrationTargetReady: nativeServiceReady,
+      nativeServiceReady,
+      legacyDataMigrationReady,
+      migrationBlockers,
     },
   };
 }
