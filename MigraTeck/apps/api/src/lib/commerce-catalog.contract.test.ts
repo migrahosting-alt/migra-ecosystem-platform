@@ -122,18 +122,19 @@ test("manual entitlement mutation is permission-gated and transition-preflighted
   assert.match(model, /await client\.query\("ROLLBACK"\)/);
 });
 
-test("manual entitlement API never accepts a mailbox password", () => {
-  assert.doesNotMatch(routes, /mailboxPassword/);
+test("manual MigraMail password is transient and replaced by an opaque secret reference", () => {
+  assert.match(routes, /mailboxPassword/);
 
   const model = repoFile("apps/api/src/lib/commerce-entitlements.ts");
-  const contextBlock = model.match(
-    /export type EntitlementProvisioningContext = \{([\s\S]*?)\n\};/,
-  );
-  assert.ok(contextBlock);
-  assert.doesNotMatch(contextBlock[1] ?? "", /mailboxPassword/);
   assert.match(
     model,
-    /Manual MigraMail activation is locked until mailbox credentials use encrypted async secret transport/,
+    /const \{ mailboxPassword, \.\.\.persistableContext \} = input\.context/,
+  );
+  assert.match(model, /createProvisioningSecret\(client/);
+  assert.match(model, /mailboxSecretRef/);
+  assert.doesNotMatch(
+    model,
+    /operatorReason: input\.reason,[\s\S]{0,120}\.\.\.input\.context/,
   );
 });
 
@@ -229,10 +230,15 @@ test("unsafe Hosting restriction stays locked until its manual deprovision contr
 });
 
 test("MigraMail activation is secret-safe while restriction can use mailbox identity", async () => {
-  const keys = ["MIGRAMAIL_CORE_URL", "MIGRAMAIL_CORE_API_KEY"] as const;
+  const keys = [
+    "MIGRAMAIL_CORE_URL",
+    "MIGRAMAIL_CORE_API_KEY",
+    "PROVISIONING_SECRET_ENCRYPTION_KEY",
+  ] as const;
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   process.env.MIGRAMAIL_CORE_URL = "http://127.0.0.1:9080";
   process.env.MIGRAMAIL_CORE_API_KEY = "contract-key";
+  process.env.PROVISIONING_SECRET_ENCRYPTION_KEY = "42".repeat(32);
 
   const worker = {
     ready: true,
@@ -251,8 +257,18 @@ test("MigraMail activation is secret-safe while restriction can use mailbox iden
       newStatus: "ACTIVE",
       worker,
     });
-    assert.equal(activation.available, false);
-    assert.match(activation.reason ?? "", /encrypted async secret transport/);
+    assert.equal(activation.available, true);
+    assert.equal(activation.mode, "provisioning");
+    assert.deepEqual(activation.actions, ["MAIL_PROVISION"]);
+    assert.deepEqual(
+      activation.requiredFields,
+      ["domain", "mailboxEmail", "mailboxPassword"],
+    );
+    assert.equal(
+      activation.requiredInputs.find((input) => input.key === "mailboxPassword")
+        ?.sensitive,
+      true,
+    );
 
     const restriction = await getEntitlementTransitionAvailability({
       orgSlug: "customer-example",
