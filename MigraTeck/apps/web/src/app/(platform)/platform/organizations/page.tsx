@@ -1,6 +1,7 @@
 import { requirePermission } from "@migrateck/auth-client";
 import { fetchAuthApi } from "@/lib/auth/api";
 import { OrganizationsWorkspace } from "@/components/platform/OrganizationsWorkspace";
+import { OrganizationOperatorWorkspace } from "@/components/platform/OrganizationOperatorWorkspace";
 import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
 import { PlatformStatCard } from "@/components/platform/PlatformStatCard";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
@@ -48,7 +49,7 @@ export default async function OrganizationsPage() {
       <PlatformPageHeader
         eyebrow="Organization management"
         title="Organizations"
-        description="Organizations are the operating containers for members, billing, permissions, and product access across MigraTeck."
+        description="Manage your organization context and, with MigraTeck operator authority, reconcile the global tenant directory across identity, billing, hosting, provisioning, and product access."
       />
 
       <div className="mb-8 grid gap-4 md:grid-cols-3">
@@ -76,6 +77,8 @@ export default async function OrganizationsPage() {
         organizationStats={organizationStats}
         {...(session.activeOrgId ? { activeOrgId: session.activeOrgId } : {})}
       />
+
+      <OrganizationOperatorWorkspace />
     </div>
   );
 }

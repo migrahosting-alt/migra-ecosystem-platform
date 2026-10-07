@@ -53,6 +53,10 @@ export const PLATFORM_PERMISSIONS = [
   "platform.users.mfa_reset",
   /** Read OAuth client configuration. */
   "platform.clients.read",
+  /** Read the global organization directory and identity-linkage state. */
+  "platform.organizations.read",
+  /** Reconcile organization metadata/classification across platform boundaries. */
+  "platform.organizations.manage",
   /** Read global commerce catalog, price bindings, organization access, usage, and reconciliation state. */
   "platform.commerce.read",
   /** Manage usage quotas and retry commercial meter exports. */
@@ -119,6 +123,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
   SUPPORT: [
     "platform.self.read",
     "platform.users.read",
+    "platform.organizations.read",
     "platform.commerce.read",
     "platform.hosting.read",
     "platform.downloads.read",
@@ -133,6 +138,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.users.sessions.manage",
     "platform.users.mfa_reset",
     "platform.clients.read",
+    "platform.organizations.read",
     "platform.commerce.read",
     "platform.commerce.usage.manage",
     "platform.commerce.billing.manage",

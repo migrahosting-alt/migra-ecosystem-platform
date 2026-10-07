@@ -120,9 +120,9 @@ export function OrganizationsWorkspace({
       <div className="grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-6 py-5">
-            <h2 className="text-sm font-semibold text-slate-900">Organizations</h2>
+            <h2 className="text-sm font-semibold text-slate-900">My organizations</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Every organization gets its own billing, members, and product access boundary.
+              Membership-scoped workspaces you can enter directly. Global tenant operations are separated below.
             </p>
           </div>
 

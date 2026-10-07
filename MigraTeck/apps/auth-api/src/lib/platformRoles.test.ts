@@ -101,6 +101,24 @@ test("OPERATOR can act on accounts but cannot widen authority", () => {
   assert.ok(!p.has("platform.roles.manage"), "only OWNER may grant roles");
 });
 
+test("organization authority separates global visibility from reconciliation", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.organizations.read"));
+  assert.ok(!support.has("platform.organizations.manage"));
+
+  assert.ok(operator.has("platform.organizations.read"));
+  assert.ok(
+    !operator.has("platform.organizations.manage"),
+    "identity linkage and client classification remain OWNER-only",
+  );
+
+  assert.ok(owner.has("platform.organizations.read"));
+  assert.ok(owner.has("platform.organizations.manage"));
+});
+
 test("commerce authority separates reading, usage, billing, org access, and global catalog mappings", () => {
   const support = permissionsForRoles(["SUPPORT"]);
   const operator = permissionsForRoles(["OPERATOR"]);

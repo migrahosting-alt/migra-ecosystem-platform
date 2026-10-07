@@ -4,6 +4,7 @@
  * nobody when unset. Previously these were open to any signed-in user.
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { z } from "zod";
 import {
   adminActionSchema,
   adminAuditQuerySchema,
@@ -42,6 +43,12 @@ import {
   rolesForUser,
 } from "../modules/authorization/platformRoles.js";
 import type { PlatformRole } from "../prisma-client.js";
+
+const adminOrganizationListQuerySchema = z.object({
+  q: z.string().trim().max(160).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
 
 function serializeAuditLog(log: {
   id: string;
@@ -488,6 +495,82 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       recent_audit: recentAudit.map(serializeAuditLog),
     });
   });
+
+  // ── GET /v1/admin/organizations ───────────────────────────────────
+  app.get(
+    "/v1/admin/organizations",
+    { preHandler: requirePermission("platform.organizations.read") },
+    async (request, reply) => {
+      const query = adminOrganizationListQuerySchema.parse(request.query);
+      const where = query.q
+        ? {
+            OR: [
+              { name: { contains: query.q, mode: "insensitive" as const } },
+              { slug: { contains: query.q, mode: "insensitive" as const } },
+            ],
+          }
+        : {};
+
+      const [organizations, total] = await Promise.all([
+        db.organization.findMany({
+          where,
+          include: {
+            owner: {
+              select: {
+                id: true,
+                email: true,
+                displayName: true,
+                status: true,
+                lastLoginAt: true,
+              },
+            },
+            members: {
+              select: {
+                role: true,
+                status: true,
+              },
+            },
+            _count: {
+              select: {
+                oauthClients: true,
+              },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          take: query.limit,
+          skip: query.offset,
+        }),
+        db.organization.count({ where }),
+      ]);
+
+      return reply.code(200).send({
+        organizations: organizations.map((organization) => ({
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          owner_user_id: organization.ownerUserId,
+          owner: {
+            id: organization.owner.id,
+            email: organization.owner.email,
+            display_name: organization.owner.displayName,
+            status: organization.owner.status,
+            last_login_at: organization.owner.lastLoginAt?.toISOString() ?? null,
+          },
+          member_count: organization.members.length,
+          active_member_count: organization.members.filter((member) => member.status === "ACTIVE").length,
+          owner_count: organization.members.filter(
+            (member) => member.status === "ACTIVE" && ["OWNER"].includes(member.role),
+          ).length,
+          oauth_client_count: organization._count.oauthClients,
+          created_at: organization.createdAt.toISOString(),
+          updated_at: organization.updatedAt.toISOString(),
+        })),
+        total,
+        limit: query.limit,
+        offset: query.offset,
+      });
+    },
+  );
 
   // ── GET /v1/admin/clients ─────────────────────────────────────────
   app.get("/v1/admin/clients", { preHandler: requirePermission("platform.clients.read") }, async (request, reply) => {

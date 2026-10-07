@@ -34,6 +34,33 @@ type PlatformAuthorityResponse = {
   via_bootstrap: boolean;
 };
 
+export type AuthPlatformOrganization = {
+  id: string;
+  name: string;
+  slug: string;
+  owner_user_id: string;
+  owner: {
+    id: string;
+    email: string | null;
+    display_name: string | null;
+    status: string;
+    last_login_at: string | null;
+  };
+  member_count: number;
+  active_member_count: number;
+  owner_count: number;
+  oauth_client_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type PlatformOrganizationsResponse = {
+  organizations: AuthPlatformOrganization[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type PlatformAuthorityPrincipal = {
   authUser: AuthUser;
   platformUserId: string;
@@ -205,6 +232,46 @@ export async function requirePlatformAuthority(
     permissions: authority.permissions,
     viaBootstrap: authority.via_bootstrap,
   };
+}
+
+export async function listAuthPlatformOrganizations(
+  request: FastifyRequest,
+  input: { q?: string; limit?: number; offset?: number } = {},
+): Promise<PlatformOrganizationsResponse> {
+  const token = bearerToken(request);
+  const params = new URLSearchParams();
+  if (input.q?.trim()) params.set("q", input.q.trim());
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  if (input.offset !== undefined) params.set("offset", String(input.offset));
+
+  const response = await fetch(
+    authBaseUrl() +
+      "/v1/admin/organizations" +
+      (params.size ? "?" + params.toString() : ""),
+    {
+      headers: { Authorization: "Bearer " + token },
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+
+  if (response.status === 401) {
+    throw Object.assign(new Error("MigraAuth session is invalid or expired"), {
+      statusCode: 401,
+    });
+  }
+  if (response.status === 403) {
+    throw Object.assign(
+      new Error("Platform organization directory authority is required"),
+      { statusCode: 403 },
+    );
+  }
+  if (!response.ok) {
+    throw Object.assign(new Error("Identity organization directory is temporarily unavailable"), {
+      statusCode: 503,
+    });
+  }
+
+  return response.json() as Promise<PlatformOrganizationsResponse>;
 }
 
 export async function requireOrganizationPrincipal(
