@@ -85,6 +85,12 @@ export const PLATFORM_PERMISSIONS = [
   "platform.intake.manage",
   /** Read the platform audit log. */
   "platform.audit.read",
+  /** Read governance incidents, runbooks, retention posture, and immutable-audit rules. */
+  "platform.compliance.read",
+  /** Create and update governance incidents and runbooks. */
+  "platform.compliance.manage",
+  /** Change or execute data-retention and immutable-audit policy. Destructive/high-risk. */
+  "platform.compliance.retention.manage",
   /** Grant and revoke platform roles — authority over authority. */
   "platform.roles.manage",
   /**
@@ -129,6 +135,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.downloads.read",
     "platform.intake.read",
     "platform.audit.read",
+    "platform.compliance.read",
   ],
   OPERATOR: [
     "platform.self.read",
@@ -150,6 +157,8 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.intake.submissions.read",
     "platform.intake.manage",
     "platform.audit.read",
+    "platform.compliance.read",
+    "platform.compliance.manage",
   ],
   /*
    * OWNER holds everything, including model qualification. A narrower

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requirePermission } from "@migrateck/auth-client";
 import { ComplianceWorkspace } from "@/components/platform/ComplianceWorkspace";
+import { ComplianceGovernanceWorkspace } from "@/components/platform/ComplianceGovernanceWorkspace";
 import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
 import { PlatformStatCard } from "@/components/platform/PlatformStatCard";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
@@ -56,7 +57,7 @@ export default async function CompliancePage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-base font-semibold text-slate-900">Operating posture</h2>
           <p className="mt-3 text-sm leading-6 text-slate-500">
-            Governance is currently anchored to the active organization and shared legal policy set. Dedicated incident and retention services are not exposed yet, so this surface stays explicit about the controls that are live today.
+            Governance combines MigraAuth audit evidence with native incident cases, reviewed runbooks, immutable audit-retention rules, and bounded retention execution. MigraGuard remains the attack-detection and automated response engine.
           </p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -70,6 +71,10 @@ export default async function CompliancePage() {
       {/* Real audit log */}
       <div className="mb-6">
         <ComplianceWorkspace />
+      </div>
+
+      <div className="mb-7">
+        <ComplianceGovernanceWorkspace />
       </div>
 
       {/* Policy links */}

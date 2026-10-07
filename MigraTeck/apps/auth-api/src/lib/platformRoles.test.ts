@@ -194,6 +194,27 @@ test("Intake authority separates metadata, sensitive submissions, and mutations"
   assert.ok(owner.has("platform.intake.manage"));
 });
 
+test("compliance authority separates review, case management, and destructive retention policy", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.compliance.read"));
+  assert.ok(!support.has("platform.compliance.manage"));
+  assert.ok(!support.has("platform.compliance.retention.manage"));
+
+  assert.ok(operator.has("platform.compliance.read"));
+  assert.ok(operator.has("platform.compliance.manage"));
+  assert.ok(
+    !operator.has("platform.compliance.retention.manage"),
+    "destructive retention policy remains OWNER-only",
+  );
+
+  assert.ok(owner.has("platform.compliance.read"));
+  assert.ok(owner.has("platform.compliance.manage"));
+  assert.ok(owner.has("platform.compliance.retention.manage"));
+});
+
 test("OWNER holds every permission, including future ones", () => {
   const p = permissionsForRoles(["OWNER"]);
   for (const perm of PLATFORM_PERMISSIONS) {
