@@ -82,16 +82,25 @@ test("legacy Intake adapter fails soft when optional runtime files are absent", 
   }
 });
 
-test("Intake platform route is global platform authority and read-only", () => {
+test("legacy Intake runtime bridge is global platform authority and read-only", () => {
   const routePath = new URL(
     "../routes/v1/modules/intake.ts",
     import.meta.url,
   );
   const source = readFileSync(routePath, "utf8");
+  const legacyStart = source.indexOf('app.get("/intake/runtime"');
+  const nativeStart = source.indexOf('app.get("/intake/native/status"');
 
-  assert.match(source, /requirePlatformAuthority/);
-  assert.match(source, /platform\.intake\.read/);
-  assert.match(source, /app\.get\("\/intake\/runtime"/);
-  assert.doesNotMatch(source, /app\.(post|put|patch|delete)\(/);
-  assert.doesNotMatch(source, /requireOrganizationPrincipal/);
+  assert.ok(legacyStart >= 0, "legacy runtime route is missing");
+  assert.ok(nativeStart > legacyStart, "tenant-native routes must remain separate");
+  const legacyBridge = source.slice(legacyStart, nativeStart);
+
+  assert.match(legacyBridge, /requirePlatformAuthority/);
+  assert.match(legacyBridge, /platform\.intake\.read/);
+  assert.doesNotMatch(legacyBridge, /app\.(post|put|patch|delete)\(/);
+  assert.doesNotMatch(legacyBridge, /requireOrganizationPrincipal/);
+
+  // Tenant-native Intake intentionally owns audited form/submission mutations.
+  assert.match(source.slice(nativeStart), /app\.post\("\/intake\/native\/organizations\/:orgId\/forms"/);
+  assert.match(source.slice(nativeStart), /app\.patch\("\/intake\/native\/forms\/:formId"/);
 });

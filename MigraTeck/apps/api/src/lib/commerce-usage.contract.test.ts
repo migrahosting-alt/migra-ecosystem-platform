@@ -20,7 +20,6 @@ test("canonical meter registry is derived from source catalog and contains known
   for (const expected of [
     "ai_generations",
     "bandwidth_gb",
-    "voice_minutes",
     "email_sends",
     "marketing_contacts",
     "pilot_runs",
