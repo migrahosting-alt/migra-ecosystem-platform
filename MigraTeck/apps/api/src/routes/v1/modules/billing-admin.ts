@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { requirePlatformAuthority } from "../../../lib/migraauth.js";
 import { createBillingContext, type BillingContext } from "@migrateck/billing-core";
 import {
   issueAdjustment,
@@ -35,17 +36,11 @@ function getBillingCtx(): BillingContext {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-function requireAdminAuth(request: FastifyRequest): string {
-  const role = request.headers["x-user-role"] as string | undefined;
-  if (role !== "PLATFORM_ADMIN" && role !== "SUPPORT") {
-    throw Object.assign(new Error("Forbidden: admin access required"), {
-      statusCode: 403,
-    });
-  }
-  const userId = request.headers["x-user-id"] as string | undefined;
-  if (!userId)
-    throw Object.assign(new Error("Missing x-user-id header"), { statusCode: 400 });
-  return userId;
+async function requireAdminAuth(
+  request: FastifyRequest,
+  permissions: readonly string[],
+) {
+  return requirePlatformAuthority(request, permissions);
 }
 
 // ─── Admin Routes ───────────────────────────────────────────────────
@@ -58,7 +53,7 @@ export async function registerBillingAdminRoutes(
   app.get<{ Params: { orgId: string } }>(
     "/admin/billing/orgs/:orgId",
     async (request) => {
-      requireAdminAuth(request);
+      await requireAdminAuth(request, ["platform.commerce.read"]);
       const ctx = getBillingCtx();
       const { orgId } = request.params;
 
@@ -77,7 +72,7 @@ export async function registerBillingAdminRoutes(
   app.post<{ Params: { orgId: string } }>(
     "/admin/billing/orgs/:orgId/credits",
     async (request) => {
-      const userId = requireAdminAuth(request);
+      const authority = await requireAdminAuth(request, ["platform.commerce.billing.manage"]);
       const ctx = getBillingCtx();
       const body = issueCreditsSchema.parse(request.body);
 
@@ -87,7 +82,7 @@ export async function registerBillingAdminRoutes(
         amount: body.amount,
         currency: body.currency,
         reason: body.reason,
-        createdByUserId: userId,
+        createdByUserId: authority.platformUserId,
         stripeInvoiceId: body.stripeInvoiceId,
       });
     },
@@ -98,7 +93,7 @@ export async function registerBillingAdminRoutes(
   app.post<{ Params: { orgId: string } }>(
     "/admin/billing/orgs/:orgId/override-entitlements",
     async (request) => {
-      const userId = requireAdminAuth(request);
+      const authority = await requireAdminAuth(request, ["platform.commerce.entitlements.manage"]);
       const ctx = getBillingCtx();
       const body = overrideEntitlementsSchema.parse(request.body);
 
@@ -107,7 +102,7 @@ export async function registerBillingAdminRoutes(
         entitlements: body.entitlements,
         reason: body.reason,
         expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-        createdByUserId: userId,
+        createdByUserId: authority.platformUserId,
       });
 
       return { ok: true };
@@ -119,7 +114,7 @@ export async function registerBillingAdminRoutes(
   app.post<{ Params: { orgId: string } }>(
     "/admin/billing/orgs/:orgId/reconcile",
     async (request) => {
-      requireAdminAuth(request);
+      await requireAdminAuth(request, ["platform.commerce.billing.manage"]);
       const ctx = getBillingCtx();
       return reconcileOrg(ctx, request.params.orgId);
     },
@@ -130,7 +125,7 @@ export async function registerBillingAdminRoutes(
   app.post<{ Params: { orgId: string } }>(
     "/admin/billing/orgs/:orgId/resolve-entitlements",
     async (request) => {
-      requireAdminAuth(request);
+      await requireAdminAuth(request, ["platform.commerce.entitlements.manage"]);
       const ctx = getBillingCtx();
       return resolveAndSnapshotEntitlements(ctx, request.params.orgId);
     },
@@ -139,7 +134,7 @@ export async function registerBillingAdminRoutes(
   // ── Retry failed webhooks ──────────────────────────────────────
 
   app.post("/admin/billing/retry-webhooks", async (request) => {
-    requireAdminAuth(request);
+    await requireAdminAuth(request, ["platform.commerce.billing.manage"]);
     const ctx = getBillingCtx();
     return retryFailedWebhooks(ctx);
   });

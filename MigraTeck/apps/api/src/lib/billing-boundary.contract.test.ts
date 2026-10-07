@@ -10,6 +10,8 @@ function repoFile(path: string): string {
 }
 
 const billingRoutes = repoFile("apps/api/src/routes/v1/modules/billing.ts");
+const billingAdminRoutes = repoFile("apps/api/src/routes/v1/modules/billing-admin.ts");
+const routeRegistry = repoFile("apps/api/src/routes/v1/index.ts");
 
 test("billing organization identity comes from MigraAuth, not caller-controlled org headers", () => {
   assert.match(billingRoutes, /requireOrganizationPrincipal/);
@@ -57,6 +59,20 @@ test("billing resources addressed by ID are ownership checked before use", () =>
 test("legacy billing runtime fails closed with 503 when its adapter is unavailable", () => {
   assert.match(billingRoutes, /Billing runtime database adapter is not initialized/);
   assert.match(billingRoutes, /statusCode: 503/);
+});
+
+test("legacy billing admin surface cannot trust caller-controlled identity headers", () => {
+  assert.match(billingAdminRoutes, /requirePlatformAuthority/);
+  assert.doesNotMatch(billingAdminRoutes, /x-user-role/);
+  assert.doesNotMatch(billingAdminRoutes, /x-user-id/);
+  assert.match(billingAdminRoutes, /platform\.commerce\.billing\.manage/);
+  assert.match(billingAdminRoutes, /platform\.commerce\.entitlements\.manage/);
+});
+
+test("legacy billing admin surface stays unregistered until its adapter is production-ready", () => {
+  assert.doesNotMatch(routeRegistry, /registerBillingAdminRoutes/);
+  assert.doesNotMatch(routeRegistry, /billing-admin/);
+  assert.match(routeRegistry, /registerCommerceBillingRoutes/);
 });
 
 test("only catalog and signed Stripe webhook remain intentionally public", () => {
