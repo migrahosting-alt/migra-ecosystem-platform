@@ -11,6 +11,7 @@ import {
   type ProvisioningExecutionResult,
   type ProvisioningJobRecord,
 } from "./provisioning-provider.js";
+import { provisioningProductAllowlist } from "./provisioning-policy.js";
 
 function backoffBaseSeconds(): number {
   const parsed = Number(process.env.PROVISIONING_JOB_BACKOFF_BASE_SECONDS ?? 30);
@@ -273,12 +274,17 @@ export async function claimProvisioningJobs(
   const client = await getDb().connect();
   try {
     await client.query("BEGIN");
+    const allowlist = provisioningProductAllowlist();
     const result = await client.query<ProvisioningJobRecord>(
       `WITH candidates AS (
          SELECT id
          FROM "ProvisioningJob"
          WHERE status='PENDING'::"ProvisioningJobStatus"
            AND ("notBefore" IS NULL OR "notBefore" <= NOW())
+           AND (
+             cardinality($3::text[]) = 0
+             OR UPPER(COALESCE(payload->>'productLane',payload->>'product','')) = ANY($3::text[])
+           )
          ORDER BY "createdAt" ASC
          FOR UPDATE SKIP LOCKED
          LIMIT $1
@@ -293,7 +299,7 @@ export async function claimProvisioningJobs(
        FROM candidates c
        WHERE j.id=c.id
        RETURNING j.*`,
-      [Math.max(1, Math.min(limit, 100)), workerId],
+      [Math.max(1, Math.min(limit, 100)), workerId, allowlist],
     );
     await client.query("COMMIT");
     return result.rows;

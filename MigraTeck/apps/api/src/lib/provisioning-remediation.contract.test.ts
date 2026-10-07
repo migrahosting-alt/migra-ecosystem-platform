@@ -61,6 +61,11 @@ test("dead-letter cancel preserves failure history and records operator evidence
   assert.match(service, /INSERT INTO "AuditLog"/);
 });
 
+test("dead-letter recovery shares the managed worker rollout policy", () => {
+  assert.match(service, /provisioningProductAllowed/);
+  assert.doesNotMatch(service, /PROVISIONING_WORKER_PRODUCT_ALLOWLIST/);
+});
+
 test("dead-letter recovery reuses backend provisioning input descriptors", () => {
   assert.match(service, /getProvisioningInputDescriptors/);
   assert.match(service, /requiredInputs:\s*getProvisioningInputDescriptors/);

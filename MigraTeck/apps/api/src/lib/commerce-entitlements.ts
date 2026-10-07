@@ -14,6 +14,7 @@ import {
 } from "./provisioning-crypto.js";
 import { publishPlatformEvent } from "./platform-events.js";
 import { createProvisioningSecret } from "./provisioning-secrets.js";
+import { provisioningProductAllowed } from "./provisioning-policy.js";
 
 const ACTIVE_LIKE = new Set<EntitlementStatus>([
   "ACTIVE",
@@ -417,6 +418,23 @@ export async function getEntitlementTransitionAvailability(input: {
       requiredFields: [],
       requiredInputs: [],
       reason: worker.reason ?? "managed provisioning worker is unavailable",
+    };
+  }
+
+  if (!provisioningProductAllowed(input.product)) {
+    return {
+      product: input.product,
+      fromStatus: input.previousStatus,
+      toStatus: input.newStatus,
+      available: false,
+      mode: "blocked",
+      actions,
+      requiredFields: [],
+      requiredInputs: [],
+      reason:
+        "Managed provisioning rollout policy does not allow the " +
+        input.product +
+        " product lane.",
     };
   }
 

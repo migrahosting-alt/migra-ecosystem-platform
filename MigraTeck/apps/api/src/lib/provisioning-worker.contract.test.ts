@@ -156,9 +156,12 @@ test("configured hosting agent still requires complete service context before ne
   }
 });
 
-test("queue engine uses atomic claims, stale-lock recovery, and payload tamper detection", () => {
+test("queue engine uses atomic claims, rollout filtering, stale-lock recovery, and payload tamper detection", () => {
   const engine = repoFile("apps/api/src/lib/provisioning-engine.ts");
   assert.match(engine, /FOR UPDATE SKIP LOCKED/);
+  assert.match(engine, /provisioningProductAllowlist/);
+  assert.match(engine, /cardinality\(\$3::text\[\]\) = 0/);
+  assert.match(engine, /ANY\(\$3::text\[\]\)/);
   assert.match(engine, /stale_lock_recovered/);
   assert.match(engine, /payload_hash_mismatch/);
   assert.match(engine, /verifyProvisioningEnvelope/);

@@ -103,6 +103,52 @@ test("MigraHosting activation exposes required context only when dispatchers are
   }
 });
 
+test("managed worker rollout policy blocks provisioning lanes outside the allowlist", async () => {
+  const keys = [
+    "PROVISIONING_WORKER_PRODUCT_ALLOWLIST",
+    "MIGRAMAIL_CORE_URL",
+    "MIGRAMAIL_CORE_API_KEY",
+    "PROVISIONING_SECRET_ENCRYPTION_KEY",
+  ] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+
+  process.env.MIGRAMAIL_CORE_URL = "https://mailcore.invalid";
+  process.env.MIGRAMAIL_CORE_API_KEY = "test-mail-core-key";
+  process.env.PROVISIONING_SECRET_ENCRYPTION_KEY = "11".repeat(32);
+
+  try {
+    process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST = "MIGRAHOSTING";
+    const blocked = await getEntitlementTransitionAvailability({
+      orgSlug: "customer-acme",
+      product: "MIGRAMAIL",
+      previousStatus: "RESTRICTED",
+      newStatus: "ACTIVE",
+      worker: readyWorker,
+    });
+    assert.equal(blocked.available, false);
+    assert.equal(blocked.mode, "blocked");
+    assert.match(blocked.reason ?? "", /rollout policy/i);
+
+    process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST =
+      "MIGRAHOSTING,MIGRAMAIL";
+    const allowed = await getEntitlementTransitionAvailability({
+      orgSlug: "customer-acme",
+      product: "MIGRAMAIL",
+      previousStatus: "RESTRICTED",
+      newStatus: "ACTIVE",
+      worker: readyWorker,
+    });
+    assert.equal(allowed.available, true);
+    assert.equal(allowed.mode, "provisioning");
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("manual MigraMail activation requires Mail Core and encrypted async secret transport", async () => {
   const previous = {
     MIGRAMAIL_CORE_URL: process.env.MIGRAMAIL_CORE_URL,

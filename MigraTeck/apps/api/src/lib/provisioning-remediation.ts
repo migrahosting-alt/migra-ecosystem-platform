@@ -14,6 +14,7 @@ import {
   signProvisioningEnvelope,
   verifyProvisioningEnvelope,
 } from "./provisioning-crypto.js";
+import { provisioningProductAllowed } from "./provisioning-policy.js";
 
 export type DeadLetterRecoveryContext = {
   domain?: string | undefined;
@@ -190,20 +191,6 @@ async function isMalformed(client: PoolClient, jobId: string): Promise<boolean> 
   return Boolean(result.rows[0]?.malformed);
 }
 
-function workerAllowsProduct(product: string | null): boolean {
-  const raw = process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST?.trim();
-  if (!raw) return true;
-  if (!product) return false;
-
-  const allowlist = new Set(
-    raw
-      .split(",")
-      .map((item) => item.trim().toUpperCase())
-      .filter(Boolean),
-  );
-  return allowlist.has(product.toUpperCase());
-}
-
 async function provisioningPaused(client: PoolClient): Promise<boolean> {
   const result = await client.query<{
     maintenanceMode: boolean;
@@ -313,7 +300,7 @@ async function analyze(
     reason = "Platform provisioning is currently paused.";
   } else if (!worker.ready) {
     reason = worker.reason ?? "The managed provisioning worker is unavailable.";
-  } else if (!workerAllowsProduct(product)) {
+  } else if (!provisioningProductAllowed(product)) {
     reason =
       "The managed provisioning worker is not configured to claim the " +
       (product ?? "unknown") +
