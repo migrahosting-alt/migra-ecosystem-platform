@@ -7,6 +7,7 @@ ACTIVE_LINK="${ACTIVE_LINK:-/opt/migra/apps/migrateck/current}"
 PREVIOUS_LINK="${PREVIOUS_LINK:-/opt/migra/apps/migrateck/previous}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 MIN_KEEP="${MIN_KEEP:-4}"
+BUILD_CACHE_RELATIVE="${BUILD_CACHE_RELATIVE:-apps/web/.next/cache}"
 APPLY=0
 [[ "${1:-}" == "--apply" ]] && APPLY=1
 
@@ -19,6 +20,9 @@ note() { printf '  %s\n' "$*"; }
 [[ "$MIN_KEEP" =~ ^[0-9]+$ ]] || die "MIN_KEEP must be numeric"
 (( RETENTION_DAYS >= 1 )) || die "RETENTION_DAYS must be at least 1"
 (( MIN_KEEP >= 2 )) || die "MIN_KEEP must be at least 2"
+[[ -n "$BUILD_CACHE_RELATIVE" ]] || die "BUILD_CACHE_RELATIVE cannot be empty"
+[[ "$BUILD_CACHE_RELATIVE" != /* ]] || die "BUILD_CACHE_RELATIVE must be relative"
+[[ "$BUILD_CACHE_RELATIVE" != *".."* ]] || die "BUILD_CACHE_RELATIVE cannot contain '..'"
 
 [[ -d "$RELEASES_ROOT" ]] || die "releases root does not exist: $RELEASES_ROOT"
 case "$RELEASES_ROOT" in
@@ -147,6 +151,7 @@ scan_live_references
 
 KEEP=()
 DELETE=()
+CACHE_PRUNE=()
 for name in "${VALID[@]}"; do
   day="${RELEASE_DAY[$name]}"
   if [[ "$name" == "$ACTIVE" ]]; then
@@ -155,6 +160,12 @@ for name in "${VALID[@]}"; do
     KEEP+=("$name (PREVIOUS)")
   elif [[ "$day" -ge "$CUTOFF" ]]; then
     KEEP+=("$name (inside $RETENTION_DAYS-day window)")
+    if ! is_referenced "$name"; then
+      cache_path="$RELEASES_ROOT/$name/$BUILD_CACHE_RELATIVE"
+      if [[ -d "$cache_path" && ! -L "$cache_path" ]]; then
+        CACHE_PRUNE+=("$name")
+      fi
+    fi
   elif is_referenced "$name"; then
     KEEP+=("$name (REFERENCED)")
   else
@@ -170,6 +181,18 @@ fi
 echo
 echo "=== KEEP (${#KEEP[@]})"
 for item in "${KEEP[@]}"; do note "keep   $item"; done
+
+echo
+echo "=== BUILD CACHE prune candidates (${#CACHE_PRUNE[@]})"
+if (( ${#CACHE_PRUNE[@]} == 0 )); then
+  note "none"
+else
+  for name in "${CACHE_PRUNE[@]}"; do
+    cache_path="$RELEASES_ROOT/$name/$BUILD_CACHE_RELATIVE"
+    cache_size="$(du -sh "$cache_path" 2>/dev/null | awk '{print $1}' || true)"
+    printf '  prune  %s/%s%s\n' "$name" "$BUILD_CACHE_RELATIVE" "${cache_size:+ ($cache_size)}"
+  done
+fi
 
 echo
 echo "=== DELETE candidates (${#DELETE[@]})"
@@ -196,9 +219,32 @@ done
 
 if (( APPLY == 0 )); then
   echo
-  echo "DRY RUN — nothing deleted. Re-run with --apply after reviewing the candidate list."
+  echo "DRY RUN — nothing deleted or pruned. Re-run with --apply after reviewing the candidate list."
   exit 0
 fi
+
+# Build caches are not part of the runtime rollback artifact. Prune only from
+# recognized, retained, non-pinned releases that still have no live reference
+# at the moment of deletion.
+for name in "${CACHE_PRUNE[@]}"; do
+  [[ "$name" =~ $NAME_RE ]] || die "cache candidate '$name' no longer matches release pattern"
+  [[ "$name" != "$ACTIVE" ]] || die "cache candidate is ACTIVE"
+  [[ -z "$PREVIOUS" || "$name" != "$PREVIOUS" ]] || die "cache candidate is PREVIOUS"
+  if is_referenced "$name"; then
+    note "skipped cache prune for $name (became REFERENCED)"
+    continue
+  fi
+
+  cache_path="$RELEASES_ROOT/$name/$BUILD_CACHE_RELATIVE"
+  case "$cache_path" in
+    "$RELEASES_ROOT/$name/"*) : ;;
+    *) die "cache candidate escapes release directory: $cache_path" ;;
+  esac
+  if [[ -d "$cache_path" && ! -L "$cache_path" ]]; then
+    rm -rf -- "$cache_path"
+    note "pruned $name/$BUILD_CACHE_RELATIVE"
+  fi
+done
 
 for name in "${DELETE[@]}"; do
   rm -rf -- "$RELEASES_ROOT/$name"
