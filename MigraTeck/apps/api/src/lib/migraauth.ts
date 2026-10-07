@@ -61,6 +61,27 @@ type PlatformOrganizationsResponse = {
   offset: number;
 };
 
+export type AuthPlatformUser = {
+  id: string;
+  email: string | null;
+  status: string;
+  email_verified: boolean;
+  display_name: string | null;
+  created_at: string;
+  last_login_at: string | null;
+};
+
+type PlatformUsersResponse = {
+  users: AuthPlatformUser[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+type CreatePlatformOrganizationResponse = {
+  organization: AuthPlatformOrganization;
+};
+
 export type PlatformAuthorityPrincipal = {
   authUser: AuthUser;
   platformUserId: string;
@@ -272,6 +293,116 @@ export async function listAuthPlatformOrganizations(
   }
 
   return response.json() as Promise<PlatformOrganizationsResponse>;
+}
+
+
+export async function listAuthPlatformUsers(
+  request: FastifyRequest,
+  input: { q?: string; limit?: number; offset?: number } = {},
+): Promise<PlatformUsersResponse> {
+  const token = bearerToken(request);
+  const params = new URLSearchParams();
+  if (input.q?.trim()) params.set("q", input.q.trim());
+  if (input.limit !== undefined) params.set("limit", String(input.limit));
+  if (input.offset !== undefined) params.set("offset", String(input.offset));
+
+  const response = await fetch(
+    authBaseUrl() +
+      "/v1/admin/users" +
+      (params.size ? "?" + params.toString() : ""),
+    {
+      headers: { Authorization: "Bearer " + token },
+      signal: AbortSignal.timeout(5_000),
+    },
+  );
+
+  if (response.status === 401) {
+    throw Object.assign(new Error("MigraAuth session is invalid or expired"), {
+      statusCode: 401,
+    });
+  }
+  if (response.status === 403) {
+    throw Object.assign(
+      new Error("Platform user-directory authority is required"),
+      { statusCode: 403 },
+    );
+  }
+  if (!response.ok) {
+    throw Object.assign(
+      new Error("Identity user directory is temporarily unavailable"),
+      { statusCode: 503 },
+    );
+  }
+
+  return response.json() as Promise<PlatformUsersResponse>;
+}
+
+export async function createAuthPlatformOrganization(
+  request: FastifyRequest,
+  input: { name: string; slug: string; ownerUserId: string },
+): Promise<AuthPlatformOrganization> {
+  const token = bearerToken(request);
+  const response = await fetch(authBaseUrl() + "/v1/admin/organizations", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: input.name,
+      slug: input.slug,
+      owner_user_id: input.ownerUserId,
+    }),
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  const body = await response.json().catch(() => null) as
+    | CreatePlatformOrganizationResponse
+    | { error?: { code?: string; message?: string }; message?: string }
+    | null;
+
+  if (response.status === 401) {
+    throw Object.assign(new Error("MigraAuth session is invalid or expired"), {
+      statusCode: 401,
+    });
+  }
+  if (response.status === 403) {
+    throw Object.assign(
+      new Error("Platform organization-management authority is required"),
+      { statusCode: 403 },
+    );
+  }
+  if (!response.ok) {
+    const message =
+      body && "error" in body
+        ? body.error?.message
+        : body && "message" in body
+          ? body.message
+          : null;
+    throw Object.assign(
+      new Error(
+        message ??
+          (response.status >= 500
+            ? "Identity organization creation is temporarily unavailable"
+            : "Identity organization could not be created"),
+      ),
+      {
+        statusCode:
+          response.status >= 400 && response.status < 500
+            ? response.status
+            : 503,
+      },
+    );
+  }
+
+  if (!body || !("organization" in body) || !body.organization) {
+    throw Object.assign(
+      new Error("Identity authority returned an invalid organization response"),
+      { statusCode: 503 },
+    );
+  }
+
+  return body.organization;
 }
 
 export async function requireOrganizationPrincipal(

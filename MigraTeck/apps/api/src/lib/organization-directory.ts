@@ -295,6 +295,58 @@ async function audit(
   );
 }
 
+
+export async function getOrganizationIdentityCreationSeed(platformOrgId: string) {
+  const result = await getDb().query<{
+    id: string;
+    name: string;
+    slug: string;
+    authOrganizationId: string | null;
+  }>(
+    'SELECT id,name,slug,"authOrganizationId" FROM "Organization" WHERE id=$1',
+    [platformOrgId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw Object.assign(new Error("Platform organization not found"), {
+      statusCode: 404,
+    });
+  }
+  if (row.authOrganizationId) {
+    throw Object.assign(
+      new Error(
+        "Platform organization already has a MigraAuth organization link. Refresh the directory instead of creating another identity organization.",
+      ),
+      { statusCode: 409 },
+    );
+  }
+
+  return row;
+}
+
+export async function auditOrganizationIdentityCreateLinkFailure(input: {
+  actorId: string;
+  platformOrgId: string;
+  authOrganizationId: string;
+  ownerUserId: string;
+  request: FastifyRequest;
+  reason: string;
+}) {
+  await audit(getDb(), {
+    actorId: input.actorId,
+    action: "ORGANIZATION_IDENTITY_CREATE_LINK_FAILED",
+    entityId: input.platformOrgId,
+    request: input.request,
+    metadata: {
+      authOrganizationId: input.authOrganizationId,
+      ownerUserId: input.ownerUserId,
+      reason: input.reason,
+      remediation:
+        "Refresh the tenant directory. The created identity organization will appear as AUTH_ONLY and can be linked manually after resolving the conflict.",
+    },
+  });
+}
+
 export async function linkOrganizationIdentity(input: {
   actorId: string;
   platformOrgId: string;

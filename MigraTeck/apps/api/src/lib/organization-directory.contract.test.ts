@@ -20,6 +20,15 @@ const authRoles = repoFile(
 const webProxy = repoFile(
   "apps/web/src/app/api/platform/organization-directory/route.ts",
 );
+const identityUsersProxy = repoFile(
+  "apps/web/src/app/api/platform/organization-directory/identity-users/route.ts",
+);
+const identityCreateProxy = repoFile(
+  "apps/web/src/app/api/platform/organization-directory/[orgId]/create-identity/route.ts",
+);
+const workspace = repoFile(
+  "apps/web/src/components/platform/OrganizationOperatorWorkspace.tsx",
+);
 
 test("global organization directory is platform-authority scoped", () => {
   assert.match(
@@ -113,4 +122,67 @@ test("reconciliation state and its audit commit in the same transaction", () => 
       "audit must be written before transaction commit",
     );
   }
+});
+
+
+test("identity organization creation requires explicit existing owner and OWNER reconciliation authority", () => {
+  assert.match(
+    authAdmin,
+    /app\.post\([\s\S]{0,180}"\/v1\/admin\/organizations"[\s\S]{0,180}"platform\.organizations\.manage"/,
+  );
+  assert.match(authAdmin, /owner_user_id/);
+  assert.match(authAdmin, /\["ACTIVE", "PENDING"\]\.includes\(owner\.status\)/);
+  assert.match(authAdmin, /eventType: "ADMIN_ORGANIZATION_CREATED"/);
+  assert.match(authAdmin, /db\.\$transaction/);
+
+  assert.match(
+    routes,
+    /"\/organizations\/identity-users"[\s\S]{0,220}"platform\.organizations\.manage"/,
+  );
+  assert.match(
+    routes,
+    /"\/organizations\/:orgId\/create-identity"[\s\S]{0,260}"platform\.organizations\.manage"/,
+  );
+});
+
+test("create-and-link is recoverable across the two identity databases", () => {
+  const createStart = routes.indexOf(
+    'app.post("/organizations/:orgId/create-identity"',
+  );
+  const linkStart = routes.indexOf(
+    'app.post("/organizations/:orgId/link-identity"',
+  );
+  const block = routes.slice(createStart, linkStart);
+
+  assert.ok(createStart >= 0 && linkStart > createStart);
+  assert.match(block, /getOrganizationIdentityCreationSeed\(orgId\)/);
+  assert.match(block, /createAuthPlatformOrganization/);
+  assert.match(block, /linkOrganizationIdentity/);
+  assert.ok(
+    block.indexOf("createAuthPlatformOrganization") <
+      block.indexOf("linkOrganizationIdentity"),
+    "identity organization is created before the cross-database Platform link",
+  );
+  assert.match(block, /auditOrganizationIdentityCreateLinkFailure/);
+  assert.match(block, /identity_created_link_failed/);
+  assert.match(block, /identity-only and can be linked/);
+  assert.doesNotMatch(block, /delete.*organization/i);
+});
+
+test("identity creation refuses already-linked Platform tenants before remote creation", () => {
+  assert.match(
+    model,
+    /getOrganizationIdentityCreationSeed[\s\S]*?authOrganizationId[\s\S]*?already has a MigraAuth organization link/,
+  );
+});
+
+test("web reconciliation requires explicit owner selection and never infers ownership", () => {
+  assert.match(identityUsersProxy, /fetchPlatformAuthorityApi/);
+  assert.match(identityCreateProxy, /fetchPlatformAuthorityApi/);
+  assert.match(identityCreateProxy, /\/create-identity/);
+  assert.match(workspace, /JSON\.stringify\(\{ ownerUserId \}\)/);
+  assert.match(workspace, /Select explicit identity owner/);
+  assert.match(workspace, /ownership is never inferred from an email or runtime membership/);
+  assert.match(workspace, /href="\/platform\/users"/);
+  assert.match(workspace, /Create identity organization & link tenant/);
 });

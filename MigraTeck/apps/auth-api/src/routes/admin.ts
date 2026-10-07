@@ -9,6 +9,7 @@ import {
   adminActionSchema,
   adminAuditQuerySchema,
   adminClientListQuerySchema,
+  createOrganizationSchema,
   adminUserIdSchema,
   adminUserSessionParamsSchema,
   adminUserListQuerySchema,
@@ -48,6 +49,10 @@ const adminOrganizationListQuerySchema = z.object({
   q: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
+});
+
+const adminCreateOrganizationSchema = createOrganizationSchema.extend({
+  owner_user_id: z.string().uuid(),
 });
 
 function serializeAuditLog(log: {
@@ -495,6 +500,151 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       recent_audit: recentAudit.map(serializeAuditLog),
     });
   });
+
+  // ── POST /v1/admin/organizations ──────────────────────────────────
+  app.post(
+    "/v1/admin/organizations",
+    { preHandler: requirePermission("platform.organizations.manage") },
+    async (request, reply) => {
+      const actor = request.authUser!;
+      const body = adminCreateOrganizationSchema.parse(request.body ?? {});
+      const ip = getClientIp(request);
+      const ua = request.headers["user-agent"];
+
+      try {
+        const organization = await db.$transaction(async (tx) => {
+          const owner = await tx.user.findUnique({
+            where: { id: body.owner_user_id },
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              status: true,
+              lastLoginAt: true,
+            },
+          });
+
+          if (!owner) {
+            throw Object.assign(new Error("Owner identity not found."), {
+              statusCode: 404,
+              code: "owner_not_found",
+            });
+          }
+
+          if (!["ACTIVE", "PENDING"].includes(owner.status)) {
+            throw Object.assign(
+              new Error(
+                "The selected owner identity is locked or disabled. Restore the identity before assigning organization ownership.",
+              ),
+              { statusCode: 409, code: "owner_unavailable" },
+            );
+          }
+
+          const existing = await tx.organization.findUnique({
+            where: { slug: body.slug },
+            select: { id: true },
+          });
+          if (existing) {
+            throw Object.assign(new Error("Organization slug already in use."), {
+              statusCode: 409,
+              code: "slug_taken",
+            });
+          }
+
+          const created = await tx.organization.create({
+            data: {
+              name: body.name,
+              slug: body.slug,
+              ownerUserId: owner.id,
+              members: {
+                create: {
+                  userId: owner.id,
+                  role: "OWNER",
+                  status: "ACTIVE",
+                },
+              },
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              actorUserId: actor.id,
+              actorType: "USER",
+              targetUserId: owner.id,
+              eventType: "ADMIN_ORGANIZATION_CREATED",
+              eventData: {
+                organization_id: created.id,
+                name: created.name,
+                slug: created.slug,
+                owner_user_id: owner.id,
+                owner_status: owner.status,
+              },
+              ipAddress: ip ?? null,
+              userAgent: ua ?? null,
+            },
+          });
+
+          return { created, owner };
+        });
+
+        return reply.code(201).send({
+          organization: {
+            id: organization.created.id,
+            name: organization.created.name,
+            slug: organization.created.slug,
+            owner_user_id: organization.created.ownerUserId,
+            owner: {
+              id: organization.owner.id,
+              email: organization.owner.email,
+              display_name: organization.owner.displayName,
+              status: organization.owner.status,
+              last_login_at:
+                organization.owner.lastLoginAt?.toISOString() ?? null,
+            },
+            member_count: 1,
+            active_member_count: 1,
+            owner_count: 1,
+            oauth_client_count: 0,
+            created_at: organization.created.createdAt.toISOString(),
+            updated_at: organization.created.updatedAt.toISOString(),
+          },
+        });
+      } catch (error) {
+        const structured = error as {
+          statusCode?: number;
+          code?: string;
+          message?: string;
+        };
+
+        if (structured.statusCode) {
+          return reply.code(structured.statusCode).send({
+            error: {
+              code: structured.code ?? "organization_create_failed",
+              message:
+                structured.message ?? "Unable to create identity organization.",
+            },
+          });
+        }
+
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          (error as { code?: string }).code === "P2002"
+        ) {
+          return reply.code(409).send({
+            error: {
+              code: "organization_conflict",
+              message:
+                "Organization creation conflicted with an existing identity record. Refresh the directory and reconcile the existing organization instead.",
+            },
+          });
+        }
+
+        throw error;
+      }
+    },
+  );
 
   // ── GET /v1/admin/organizations ───────────────────────────────────
   app.get(
