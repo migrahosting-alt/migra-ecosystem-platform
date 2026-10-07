@@ -67,6 +67,12 @@ export const PLATFORM_PERMISSIONS = [
   "platform.hosting.read",
   /** Bind or unbind an organization to its authoritative MigraPanel tenant. */
   "platform.hosting.bindings.manage",
+  /** Read release inventory, storage readiness, and distribution integrity evidence. */
+  "platform.downloads.read",
+  /** Re-hash stored release objects and record integrity evidence. */
+  "platform.downloads.verify",
+  /** Register, activate, or deactivate release artifacts. Supply-chain mutation. */
+  "platform.downloads.manage",
   /** Read Intake runtime posture and tenant-native form metadata. */
   "platform.intake.read",
   /** Read decrypted tenant-native Intake submission payloads. Sensitive customer data. */
@@ -115,6 +121,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.users.read",
     "platform.commerce.read",
     "platform.hosting.read",
+    "platform.downloads.read",
     "platform.intake.read",
     "platform.audit.read",
   ],
@@ -131,6 +138,8 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.commerce.billing.manage",
     "platform.commerce.entitlements.manage",
     "platform.hosting.read",
+    "platform.downloads.read",
+    "platform.downloads.verify",
     "platform.intake.read",
     "platform.intake.submissions.read",
     "platform.intake.manage",

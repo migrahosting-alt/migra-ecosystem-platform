@@ -312,12 +312,17 @@ Useful flags:
    - `allowPublicSignup=true|false`
    - `allowOrgCreate=true|false`
    - `waitlistMode=true|false`
-2. Publish download artifacts (`DownloadArtifact`) for each product/version you want visible in `/app/downloads`.
+2. Publish release artifacts through `/platform/distribution`:
+   - upload the immutable object to the configured S3/MinIO bucket first
+   - register its object key in the Platform; SHA-256 and byte size are derived from storage and the row starts inactive
+   - activate only after the Platform re-streams the object and verifies the exact registered digest and size
+   - deactivate a compromised or superseded artifact instead of deleting its historical evidence
 3. Configure signing provider env for production:
    - `DOWNLOAD_STORAGE_PROVIDER=s3|minio`
    - `UPLOAD_STORAGE_PROVIDER=s3|minio`
    - `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`
-   - In the Migra ecosystem, prefer the generated `migrateck-app.env` fragment from `infra/enterprise/storage/bootstrap-migradrive-ecosystem.sh` so production points at `https://s3.migradrive.com` with the scoped `migrateck-app` credential.
+   - MigraTeck production uses the public signing hostname `https://s3.migradrive.com`; keep scoped object-storage credentials in the protected service environment.
+   - On `app-core`, run `sudo scripts/configure-app-core-s3-split-dns.sh apply` so that public hostname resolves internally to `10.10.0.2` (NGINX-PROXY-CORE). This avoids the public-IP hairpin while preserving the TLS/SigV4 hostname. Use `check` instead of `apply` for a non-mutating deployment verification.
 4. Configure MigraDrive production storage separately from generic download artifacts when using the multi-bucket profile:
    - `MIGRADRIVE_S3_ENDPOINT`, `MIGRADRIVE_S3_REGION`, `MIGRADRIVE_S3_ACCESS_KEY_ID`, `MIGRADRIVE_S3_SECRET_ACCESS_KEY`
    - `MIGRADRIVE_S3_BUCKET_PRIMARY`, `MIGRADRIVE_S3_BUCKET_DERIVATIVES`, `MIGRADRIVE_S3_BUCKET_ARCHIVE`, `MIGRADRIVE_S3_BUCKET_LOGS`
@@ -353,7 +358,7 @@ Useful flags:
 
 1. Configure Stripe billing intelligence:
    - `STRIPE_BILLING_ENABLED=true`
-   - `STRIPE_SECRET_KEY=sk_live_...` (production) or `sk_test_...` (test environments)
+   - `STRIPE_SECRET_KEY=sk_live_...` (production) or `sk_test_...` (test environments) <!-- secret-scan:allow: documentation placeholders only -->
    - `STRIPE_WEBHOOK_SECRET=...`
    - Ensure Stripe subscriptions include `metadata.orgId`
    - Webhook mode mismatch (live/test) is rejected when `STRIPE_SECRET_KEY` is set

@@ -90,19 +90,19 @@ export function downloadAccessReason(input: {
   return "ENTITLEMENT_REQUIRED";
 }
 
-function downloadStorageProvider(): "s3" | "minio" | "mock" | null {
+export function downloadStorageProvider(): "s3" | "minio" | "mock" | null {
   const value = process.env.DOWNLOAD_STORAGE_PROVIDER?.trim().toLowerCase();
   if (value === "s3" || value === "minio" || value === "mock") return value;
   return null;
 }
 
-function downloadTtlSeconds(): number {
+export function downloadTtlSeconds(): number {
   const raw = Number(process.env.DOWNLOAD_URL_TTL_SECONDS ?? 300);
   if (!Number.isFinite(raw)) return 300;
   return Math.max(30, Math.min(Math.floor(raw), 3600));
 }
 
-function getSignerConfig() {
+export function getDownloadSignerConfig() {
   const provider = downloadStorageProvider();
 
   if (provider === "mock" && process.env.NODE_ENV === "production") {
@@ -351,7 +351,7 @@ export async function signDownloadArtifact(input: {
     });
   }
 
-  const config = getSignerConfig();
+  const config = getDownloadSignerConfig();
   const ttlSeconds = downloadTtlSeconds();
   const client = new S3Client({
     region: config.region,

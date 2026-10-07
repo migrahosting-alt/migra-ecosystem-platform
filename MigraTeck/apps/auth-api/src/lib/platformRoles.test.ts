@@ -140,6 +140,24 @@ test("hosting authority separates read-only topology inspection from tenant bind
   assert.ok(owner.has("platform.hosting.bindings.manage"));
 });
 
+test("download distribution separates inventory, integrity verification, and release mutation", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.downloads.read"));
+  assert.ok(!support.has("platform.downloads.verify"));
+  assert.ok(!support.has("platform.downloads.manage"));
+
+  assert.ok(operator.has("platform.downloads.read"));
+  assert.ok(operator.has("platform.downloads.verify"));
+  assert.ok(!operator.has("platform.downloads.manage"), "release publishing remains OWNER-only");
+
+  assert.ok(owner.has("platform.downloads.read"));
+  assert.ok(owner.has("platform.downloads.verify"));
+  assert.ok(owner.has("platform.downloads.manage"));
+});
+
 test("Intake authority separates metadata, sensitive submissions, and mutations", () => {
   const support = permissionsForRoles(["SUPPORT"]);
   const operator = permissionsForRoles(["OPERATOR"]);
