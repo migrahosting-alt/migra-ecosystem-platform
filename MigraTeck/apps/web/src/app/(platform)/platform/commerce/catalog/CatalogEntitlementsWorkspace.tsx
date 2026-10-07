@@ -38,6 +38,12 @@ type EntitlementStatus =
   | "RESTRICTED"
   | "INTERNAL_ONLY";
 
+type DriftClassification =
+  | "active_access_needs_verification"
+  | "superseded_by_success"
+  | "access_not_active"
+  | "unmapped_legacy_job";
+
 type WorkerStatus = {
   ready: boolean;
   workerId: string | null;
@@ -171,6 +177,24 @@ type CatalogPayload = {
       createdAt: string;
       updatedAt: string;
     }>;
+    drift: {
+      needsVerification: number;
+      rows: Array<{
+        orgId: string;
+        orgName: string | null;
+        orgSlug: string | null;
+        product: string | null;
+        entitlementStatus: string | null;
+        entitlementUpdatedAt: string | null;
+        deadJobs: number;
+        latestDeadAt: string | null;
+        lastDeadError: string | null;
+        succeededJobs: number;
+        latestSuccessAt: string | null;
+        subscriptionCount: number;
+        classification: DriftClassification;
+      }>;
+    };
   };
   metrics: {
     catalogProducts: number;
@@ -184,6 +208,7 @@ type CatalogPayload = {
     provisioningFailed: number;
     provisioningDead: number;
     provisioningCanceled: number;
+    provisioningDriftNeedsVerification: number;
   };
   mutationReadiness: {
     bindings: boolean;
@@ -366,6 +391,32 @@ function statusClass(status: string) {
   return "bg-slate-100 text-slate-600";
 }
 
+function driftLabel(classification: DriftClassification) {
+  switch (classification) {
+    case "active_access_needs_verification":
+      return "Needs verification";
+    case "superseded_by_success":
+      return "Later success found";
+    case "access_not_active":
+      return "Access not active";
+    case "unmapped_legacy_job":
+      return "Legacy lane unmapped";
+  }
+}
+
+function driftClass(classification: DriftClassification) {
+  switch (classification) {
+    case "active_access_needs_verification":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    case "superseded_by_success":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "access_not_active":
+      return "border-slate-200 bg-slate-50 text-slate-700";
+    case "unmapped_legacy_job":
+      return "border-violet-200 bg-violet-50 text-violet-800";
+  }
+}
+
 export function CatalogEntitlementsWorkspace() {
   const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -467,6 +518,15 @@ export function CatalogEntitlementsWorkspace() {
     setEntitlementEditor(null);
     setEntitlementMessage(null);
     await loadAccess(orgId);
+  }
+
+  async function inspectDriftOrganization(orgId: string) {
+    await selectOrganization(orgId);
+    window.setTimeout(() => {
+      document
+        .getElementById("organization-access")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   }
 
   function transitionFor(
@@ -788,6 +848,19 @@ export function CatalogEntitlementsWorkspace() {
         (item) => item.product === entitlementEditor.product,
       )?.targets ?? []
     : [];
+  const driftRows = catalog.provisioning.drift.rows;
+  const driftAttention = driftRows.filter(
+    (row) => row.classification === "active_access_needs_verification",
+  );
+  const driftSuperseded = driftRows.filter(
+    (row) => row.classification === "superseded_by_success",
+  ).length;
+  const driftInactive = driftRows.filter(
+    (row) => row.classification === "access_not_active",
+  ).length;
+  const driftUnmapped = driftRows.filter(
+    (row) => row.classification === "unmapped_legacy_job",
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -828,6 +901,89 @@ export function CatalogEntitlementsWorkspace() {
           <MetricCard label="Dead letters" value={catalog.metrics.provisioningDead} detail="unresolved terminal failures" />
           <MetricCard label="Resolved" value={catalog.metrics.provisioningCanceled} detail="operator-canceled or superseded" />
         </div>
+
+        {driftRows.length > 0 ? (
+          <div className="border-t border-amber-100 bg-[linear-gradient(180deg,#fffbeb,#ffffff)] px-5 py-5 sm:px-6">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-100 text-amber-700">
+                  <AlertTriangle size={18} />
+                </span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Historical reconciliation</p>
+                  <h3 className="mt-1 text-base font-semibold text-slate-950">Dead provisioning vs current access</h3>
+                  <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                    Legacy dead jobs are correlated with the organization&apos;s current entitlement and later successful provisioning evidence. This is a verification queue, not an automatic revoke list.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[31rem]">
+                {[
+                  ["Verify", driftAttention.length],
+                  ["Later success", driftSuperseded],
+                  ["Inactive", driftInactive],
+                  ["Unmapped", driftUnmapped],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl border border-white/80 bg-white/80 px-3 py-2.5 shadow-sm">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {driftRows.map((row) => (
+                <article key={row.orgId + ":" + (row.product ?? "legacy")} className={"rounded-2xl border p-4 " + driftClass(row.classification)}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-950">
+                          {row.orgName ?? row.orgSlug ?? row.orgId}
+                        </span>
+                        <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em]">
+                          {driftLabel(row.classification)}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="rounded-lg border border-white/80 bg-white/70 px-2 py-1 text-[10px] font-semibold">
+                          {row.product ?? "unknown product"}
+                        </span>
+                        <span className="rounded-lg border border-white/80 bg-white/70 px-2 py-1 text-[10px] font-semibold">
+                          access {row.entitlementStatus ?? "missing"}
+                        </span>
+                        <span className="rounded-lg border border-white/80 bg-white/70 px-2 py-1 text-[10px] font-semibold">
+                          {row.deadJobs} dead job{row.deadJobs === 1 ? "" : "s"}
+                        </span>
+                        <span className="rounded-lg border border-white/80 bg-white/70 px-2 py-1 text-[10px] font-semibold">
+                          {row.subscriptionCount} subscription{row.subscriptionCount === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs leading-5">
+                        {row.lastDeadError ?? "No terminal error recorded."}
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] opacity-80">
+                        <span>Dead evidence: {formatDate(row.latestDeadAt)}</span>
+                        <span>
+                          Later success: {row.latestSuccessAt ? formatDate(row.latestSuccessAt) : "none"}
+                        </span>
+                      </div>
+                    </div>
+                    {row.classification === "active_access_needs_verification" ? (
+                      <button
+                        type="button"
+                        onClick={() => void inspectDriftOrganization(row.orgId)}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-50"
+                      >
+                        <Layers3 size={13} /> Inspect access
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {deadLetterMessage ? (
           <div className="border-t border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-medium text-emerald-800 sm:px-6">
@@ -1115,7 +1271,7 @@ export function CatalogEntitlementsWorkspace() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <section id="organization-access" className="scroll-mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600">Organization access</p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">Effective product access</h2>

@@ -99,6 +99,28 @@ test("catalog snapshot exposes global provisioning health and dead-letter eviden
   assert.doesNotMatch(workspace, /Retry all dead/i);
 });
 
+test("historical dead letters are reconciled against current access before operator action", () => {
+  const model = repoFile("apps/api/src/lib/commerce-catalog.ts");
+  const workspace = repoFile(
+    "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+  );
+
+  assert.match(model, /WITH dead AS/);
+  assert.match(model, /success AS/);
+  assert.match(model, /e\.status::text AS "entitlementStatus"/);
+  assert.match(model, /"subscriptionCount"/);
+  assert.match(model, /active_access_needs_verification/);
+  assert.match(model, /superseded_by_success/);
+  assert.match(model, /access_not_active/);
+  assert.match(model, /unmapped_legacy_job/);
+
+  assert.match(workspace, /Historical reconciliation/);
+  assert.match(workspace, /Dead provisioning vs current access/);
+  assert.match(workspace, /verification queue, not an automatic revoke list/);
+  assert.match(workspace, /Inspect access/);
+  assert.doesNotMatch(workspace, />Revoke all</i);
+});
+
 test("manual entitlement mutation is permission-gated and transition-preflighted", () => {
   assert.match(
     routes,
