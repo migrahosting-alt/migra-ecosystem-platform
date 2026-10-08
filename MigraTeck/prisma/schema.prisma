@@ -469,6 +469,7 @@ model Organization {
   name                          String
   slug                          String                             @unique
   isMigraHostingClient          Boolean                            @default(false)
+  isPlatformInternal             Boolean                            @default(false)
   createdById                   String?
   createdAt                     DateTime                           @default(now())
   updatedAt                     DateTime                           @updatedAt
