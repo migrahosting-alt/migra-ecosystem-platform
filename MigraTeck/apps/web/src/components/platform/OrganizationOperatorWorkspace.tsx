@@ -64,6 +64,7 @@ type PlatformOrganization = {
   slug: string;
   authOrganizationId: string | null;
   isMigraHostingClient: boolean;
+  isPlatformInternal: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -193,6 +194,8 @@ export function OrganizationOperatorWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [classificationPending, setClassificationPending] = useState(false);
+  const [classificationMessage, setClassificationMessage] = useState<string | null>(null);
   const [linkIdentityId, setLinkIdentityId] = useState("");
   const [identityUserQuery, setIdentityUserQuery] = useState("");
   const [identityUsers, setIdentityUsers] = useState<IdentityUser[]>([]);
@@ -451,6 +454,45 @@ export function OrganizationOperatorWorkspace() {
       );
     } finally {
       setActionPending(false);
+    }
+  }
+
+  async function setPlatformInternal(value: boolean) {
+    if (!selected?.platform) return;
+    setClassificationPending(true);
+    setClassificationMessage(null);
+
+    try {
+      const response = await fetch(
+        "/api/platform/organization-directory/" +
+          encodeURIComponent(selected.platform.id) +
+          "/classification",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isPlatformInternal: value }),
+        },
+      );
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          body?.error ?? "Unable to change internal organization classification",
+        );
+      }
+      setClassificationMessage(
+        value
+          ? "Organization marked MigraTeck-internal. INTERNAL_ONLY download eligibility may now apply when an internal entitlement is present."
+          : "Internal classification removed. INTERNAL_ONLY download eligibility is now denied for this organization.",
+      );
+      await load(query, true);
+    } catch (err) {
+      setClassificationMessage(
+        err instanceof Error
+          ? err.message
+          : "Unable to change internal organization classification",
+      );
+    } finally {
+      setClassificationPending(false);
     }
   }
 
@@ -745,6 +787,42 @@ export function OrganizationOperatorWorkspace() {
                   </div>
                 ) : null}
 
+                {selected.platform ? (
+                  <div className={"rounded-2xl border p-4 " + (selected.platform.isPlatformInternal ? "border-violet-200 bg-violet-50" : "border-slate-200 bg-slate-50")}>
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="max-w-3xl">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <ShieldCheck size={16} className={selected.platform.isPlatformInternal ? "text-violet-700" : "text-slate-500"} />
+                          <h5 className="text-sm font-semibold text-slate-900">
+                            MigraTeck internal organization
+                          </h5>
+                          <span className={"rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] " + (selected.platform.isPlatformInternal ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-600")}>
+                            {selected.platform.isPlatformInternal ? "Internal" : "External"}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-slate-600">
+                          This is a security classification, not a branding label. Only organizations explicitly marked internal can satisfy INTERNAL_ONLY product/download access when the matching entitlement is present.
+                        </p>
+                      </div>
+                      {data.authority.canManage ? (
+                        <button
+                          onClick={() => void setPlatformInternal(!selected.platform!.isPlatformInternal)}
+                          disabled={classificationPending}
+                          className={"inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 " + (selected.platform.isPlatformInternal ? "border border-rose-200 bg-white text-rose-700 hover:bg-rose-50" : "bg-violet-600 text-white hover:bg-violet-700")}
+                        >
+                          {classificationPending ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+                          {selected.platform.isPlatformInternal ? "Remove internal status" : "Mark as internal"}
+                        </button>
+                      ) : null}
+                    </div>
+                    {classificationMessage ? (
+                      <div className="mt-3 rounded-xl border border-white/70 bg-white px-3 py-2 text-xs font-medium text-slate-700">
+                        {classificationMessage}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {data.authority.canManage ? (
                   <ReconciliationActions
                     entry={selected}
@@ -857,6 +935,12 @@ function PlatformCard({ entry }: { entry: DirectoryEntry }) {
             <code className="ml-2 text-[10px] text-slate-400">{platform.slug}</code>
           </div>
           <p>Hosting client: <span className="font-semibold text-slate-800">{platform.isMigraHostingClient ? "Yes" : "No"}</span></p>
+          <p>
+            Platform internal:{" "}
+            <span className={platform.isPlatformInternal ? "font-semibold text-violet-700" : "font-semibold text-slate-800"}>
+              {platform.isPlatformInternal ? "Yes" : "No"}
+            </span>
+          </p>
           <p>Updated: {formatDate(platform.updatedAt)}</p>
           <p>Created: {formatDate(platform.createdAt)}</p>
           <code className="block break-all text-[10px] text-slate-400">{platform.id}</code>

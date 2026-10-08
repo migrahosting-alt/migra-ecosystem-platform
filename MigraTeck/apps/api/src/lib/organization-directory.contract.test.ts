@@ -26,6 +26,9 @@ const identityUsersProxy = repoFile(
 const identityCreateProxy = repoFile(
   "apps/web/src/app/api/platform/organization-directory/[orgId]/create-identity/route.ts",
 );
+const classificationProxy = repoFile(
+  "apps/web/src/app/api/platform/organization-directory/[orgId]/classification/route.ts",
+);
 const workspace = repoFile(
   "apps/web/src/components/platform/OrganizationOperatorWorkspace.tsx",
 );
@@ -61,15 +64,31 @@ test("reconciliation is stronger than directory visibility", () => {
   assert.doesNotMatch(operatorBundle, /platform\.organizations\.manage/);
 });
 
-test("organization directory has no unlink, delete, or classification mutation route", () => {
+test("internal classification is a narrow audited security mutation", () => {
   assert.doesNotMatch(routes, /unlink-identity/);
   assert.doesNotMatch(routes, /app\.delete\(/);
   assert.doesNotMatch(routes, /isMigraHostingClient/);
 
+  assert.match(
+    routes,
+    /"\/organizations\/:orgId\/classification"[\s\S]{0,260}"platform\.organizations\.manage"/,
+  );
+  assert.match(model, /export async function setOrganizationPlatformInternal/);
+  assert.match(model, /SELECT id,name,"isPlatformInternal" FROM "Organization" WHERE id=\$1 FOR UPDATE/);
+  assert.match(model, /ORGANIZATION_INTERNAL_CLASSIFICATION_CHANGED/);
+  assert.match(model, /client\.query\("BEGIN"\)/);
+  assert.match(model, /await audit\(client,/);
+  assert.match(model, /client\.query\("COMMIT"\)/);
+
+  assert.match(classificationProxy, /fetchPlatformAuthorityApi/);
+  assert.match(classificationProxy, /method: "PATCH"/);
+  assert.match(workspace, /MigraTeck internal organization/);
+  assert.match(workspace, /This is a security classification, not a branding label/);
+
   const updates = [...model.matchAll(/UPDATE "Organization" SET ([^']+)/g)].map(
     (match) => match[1] ?? "",
   );
-  assert.ok(updates.length >= 2);
+  assert.ok(updates.length >= 3);
   for (const update of updates) {
     assert.doesNotMatch(update, /isMigraHostingClient/);
   }

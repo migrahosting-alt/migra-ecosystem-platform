@@ -10,6 +10,7 @@ type PlatformOrganizationRow = {
   slug: string;
   authOrganizationId: string | null;
   isMigraHostingClient: boolean;
+  isPlatformInternal: boolean;
   createdAt: Date;
   updatedAt: Date;
   memberCount: number;
@@ -110,6 +111,7 @@ async function platformOrganizationRows(query: string, limit: number, offset: nu
        o.slug,
        o."authOrganizationId",
        o."isMigraHostingClient",
+       o."isPlatformInternal",
        o."createdAt",
        o."updatedAt",
        (SELECT count(*)::int
@@ -201,6 +203,7 @@ export async function getOrganizationDirectory(input: {
         slug: row.slug,
         authOrganizationId: row.authOrganizationId,
         isMigraHostingClient: row.isMigraHostingClient,
+        isPlatformInternal: row.isPlatformInternal,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       },
@@ -295,6 +298,62 @@ async function audit(
   );
 }
 
+export async function setOrganizationPlatformInternal(input: {
+  actorId: string;
+  platformOrgId: string;
+  isPlatformInternal: boolean;
+  request: FastifyRequest;
+}) {
+  const db = getDb();
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{
+      id: string;
+      name: string;
+      isPlatformInternal: boolean;
+    }>(
+      'SELECT id,name,"isPlatformInternal" FROM "Organization" WHERE id=$1 FOR UPDATE',
+      [input.platformOrgId],
+    );
+    const row = current.rows[0];
+    if (!row) {
+      throw Object.assign(new Error("Platform organization not found"), {
+        statusCode: 404,
+      });
+    }
+
+    if (row.isPlatformInternal !== input.isPlatformInternal) {
+      await client.query(
+        'UPDATE "Organization" SET "isPlatformInternal"=$1,"updatedAt"=NOW() WHERE id=$2',
+        [input.isPlatformInternal, input.platformOrgId],
+      );
+      await audit(client, {
+        actorId: input.actorId,
+        action: "ORGANIZATION_INTERNAL_CLASSIFICATION_CHANGED",
+        entityId: input.platformOrgId,
+        request: input.request,
+        metadata: {
+          organizationName: row.name,
+          before: row.isPlatformInternal,
+          after: input.isPlatformInternal,
+        },
+      });
+    }
+
+    await client.query("COMMIT");
+    return {
+      organizationId: input.platformOrgId,
+      isPlatformInternal: input.isPlatformInternal,
+      changed: row.isPlatformInternal !== input.isPlatformInternal,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 export async function getOrganizationIdentityCreationSeed(platformOrgId: string) {
   const result = await getDb().query<{

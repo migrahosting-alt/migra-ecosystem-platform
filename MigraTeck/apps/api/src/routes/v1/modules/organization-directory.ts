@@ -12,6 +12,7 @@ import {
   getOrganizationDirectory,
   getOrganizationIdentityCreationSeed,
   linkOrganizationIdentity,
+  setOrganizationPlatformInternal,
   syncOrganizationIdentityMetadata,
 } from "../../../lib/organization-directory.js";
 
@@ -37,6 +38,10 @@ const identityUserQuerySchema = z.object({
 
 const identityCreateBodySchema = z.object({
   ownerUserId: z.string().uuid(),
+});
+
+const organizationClassificationSchema = z.object({
+  isPlatformInternal: z.boolean(),
 });
 
 async function loadAllIdentityOrganizations(
@@ -176,6 +181,21 @@ export async function registerOrganizationDirectoryRoutes(
         },
       });
     }
+  });
+
+  app.patch("/organizations/:orgId/classification", async (request) => {
+    const authority = await requirePlatformAuthority(request, [
+      "platform.organizations.manage",
+    ]);
+    const { orgId } = organizationParamsSchema.parse(request.params);
+    const body = organizationClassificationSchema.parse(request.body);
+
+    return setOrganizationPlatformInternal({
+      actorId: authority.platformUserId,
+      platformOrgId: orgId,
+      isPlatformInternal: body.isPlatformInternal,
+      request,
+    });
   });
 
   app.post("/organizations/:orgId/link-identity", async (request) => {
