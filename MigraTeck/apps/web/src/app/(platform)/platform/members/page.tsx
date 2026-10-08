@@ -1,7 +1,8 @@
 import { requirePermission } from "@migrateck/auth-client";
-import { Building2, ShieldCheck } from "lucide-react";
+import { BriefcaseBusiness, Building2, ShieldCheck } from "lucide-react";
 import { MembersWorkspace } from "@/components/platform/MembersWorkspace";
 import { PlatformOperatorAccessWorkspace } from "@/components/platform/PlatformOperatorAccessWorkspace";
+import { WorkforceAccessWorkspace } from "@/components/platform/WorkforceAccessWorkspace";
 import { PlatformEmptyState } from "@/components/platform/PlatformEmptyState";
 import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
 import { PlatformStatCard } from "@/components/platform/PlatformStatCard";
@@ -19,10 +20,10 @@ export default async function MembersPage() {
       <PlatformPageHeader
         eyebrow="Organization / Authority"
         title="Members & Access"
-        description="Manage two deliberately separate access planes: membership inside the selected organization, and MigraTeck-wide operator authority issued by MigraAuth."
+        description="Manage three deliberately separate authority planes: tenant membership, MigraTeck Workforce identity/product access, and MigraTeck-wide operator authority issued by MigraAuth."
       />
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+      <div className="mb-6 grid gap-4 xl:grid-cols-3">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
@@ -38,6 +39,26 @@ export default async function MembersPage() {
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 OWNER, ADMIN, BILLING_ADMIN, and MEMBER apply only inside one
                 organization. They never grant MigraTeck-wide operator power.
+              </p>
+            </div>
+          </div>
+        </article>
+
+        <article className="rounded-2xl border border-cyan-200 bg-[linear-gradient(135deg,#ffffff,#ecfeff)] p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cyan-100 text-cyan-800">
+              <BriefcaseBusiness size={18} />
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-800">
+                Workforce access
+              </p>
+              <h2 className="mt-1 text-base font-semibold text-slate-950">
+                Staff identity & product roles
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Canonical staff IDs, employment lifecycle, manager hierarchy,
+                and downstream product-role grants live in MigraAuth Workforce.
               </p>
             </div>
           </div>
@@ -124,6 +145,23 @@ export default async function MembersPage() {
             actionHref="/platform/organizations"
           />
         )}
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
+            Workforce authority plane
+          </p>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
+            MigraTeck staff identities & downstream product roles
+          </h2>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-slate-600">
+            Workforce authority is global to the company, not scoped to a customer
+            organization. Staff employment state and downstream product roles are
+            managed here and provisioned by MigraAuth.
+          </p>
+        </div>
+        <WorkforceAccessWorkspace />
       </section>
 
       <PlatformOperatorAccessWorkspace />
