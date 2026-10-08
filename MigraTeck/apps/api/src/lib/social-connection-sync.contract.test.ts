@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  assessSocialConnectionHealth,
+  socialConnectionRetryBackoffActive,
+} from "./social-connection-sync.js";
 
 function repoFile(path: string): string {
   const cwd = process.cwd();
@@ -98,4 +102,94 @@ test("managed worker has heartbeat and graceful shutdown", () => {
   assert.ok(worker.includes("SIGINT"));
   assert.ok(worker.includes("await closeDb()"));
   assert.ok(worker.includes("SOCIAL_CONNECTION_SYNC_INTERVAL_MS"));
+});
+
+
+test("invalid token wording is terminal even when token and invalid are separated", () => {
+  const health = assessSocialConnectionHealth(
+    {
+      platform: "x",
+      accessModel: "oauth",
+      status: "ready",
+      externalAccountId: "123",
+      metadata: {
+        lastSyncError: "Value passed for the token was invalid.",
+      },
+      tokenExpiresAt: null,
+      credentialCiphertext: "encrypted-placeholder",
+      lastVerifiedAt: new Date("2026-10-08T09:00:00Z"),
+    },
+    new Date("2026-10-08T09:15:00Z"),
+  );
+
+  assert.equal(health.requiresReconnect, true);
+  assert.equal(health.state, "reconnect_required");
+  assert.equal(health.recommendedAction, "reconnect");
+});
+
+test("sync and refresh failures honor the configured retry backoff window", () => {
+  const previous = process.env.SOCIAL_CONNECTION_SYNC_ERROR_RETRY_MINUTES;
+  process.env.SOCIAL_CONNECTION_SYNC_ERROR_RETRY_MINUTES = "60";
+
+  try {
+    const syncConnection = {
+      metadata: {
+        lastSyncAttemptAt: "2026-10-08T09:00:00.000Z",
+      },
+    };
+    assert.equal(
+      socialConnectionRetryBackoffActive(
+        syncConnection,
+        "sync",
+        new Date("2026-10-08T09:59:59.000Z"),
+      ),
+      true,
+    );
+    assert.equal(
+      socialConnectionRetryBackoffActive(
+        syncConnection,
+        "sync",
+        new Date("2026-10-08T10:00:01.000Z"),
+      ),
+      false,
+    );
+
+    const refreshConnection = {
+      metadata: {
+        lastTokenRefreshAttemptAt: "2026-10-08T09:30:00.000Z",
+      },
+    };
+    assert.equal(
+      socialConnectionRetryBackoffActive(
+        refreshConnection,
+        "refresh",
+        new Date("2026-10-08T10:00:00.000Z"),
+      ),
+      true,
+    );
+    assert.equal(
+      socialConnectionRetryBackoffActive(
+        refreshConnection,
+        "reconnect",
+        new Date("2026-10-08T10:00:00.000Z"),
+      ),
+      false,
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.SOCIAL_CONNECTION_SYNC_ERROR_RETRY_MINUTES;
+    } else {
+      process.env.SOCIAL_CONNECTION_SYNC_ERROR_RETRY_MINUTES = previous;
+    }
+  }
+});
+
+test("worker skips reconnect-only connections and persists terminal state before provider calls", () => {
+  assert.match(
+    core,
+    /health\.recommendedAction === "reconnect"[\s\S]*?candidate\.status !== "reconnect_required"[\s\S]*?status: "reconnect_required"/,
+  );
+  assert.match(core, /socialConnectionRetryBackoffActive/);
+  assert.match(core, /lastSyncAttemptAt/);
+  assert.match(core, /lastTokenRefreshAttemptAt/);
 });

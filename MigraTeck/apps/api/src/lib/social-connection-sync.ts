@@ -109,6 +109,13 @@ function verificationStaleHours(): number {
   );
 }
 
+function errorRetryMinutes(): number {
+  return parsePositiveInt(
+    process.env.SOCIAL_CONNECTION_SYNC_ERROR_RETRY_MINUTES,
+    60,
+  );
+}
+
 export function socialConnectionSyncBatchSize(): number {
   return Math.min(
     parsePositiveInt(process.env.SOCIAL_CONNECTION_SYNC_BATCH_SIZE, 25),
@@ -154,9 +161,36 @@ function readMetadataString(metadata: unknown, key: string): string | null {
 }
 
 function shouldRequireReconnect(message: string): boolean {
-  return /reconnect|invalid[_\s-]?grant|invalid[_\s-]?token|expired|revoked|unauthoriz|authorization|oauth/i.test(
+  return /reconnect|invalid[_\s-]?grant|invalid[_\s-]?token|token.{0,32}invalid|invalid.{0,32}token|access[_\s-]?denied|expired|revoked|unauthoriz|authorization|oauth/i.test(
     message,
   );
+}
+
+function metadataDate(metadata: unknown, key: string): Date | null {
+  const value = readMetadataString(metadata, key);
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+export function socialConnectionRetryBackoffActive(
+  connection: Pick<SocialConnectionRecord, "metadata">,
+  action: RecommendedAction,
+  now = new Date(),
+): boolean {
+  if (action !== "refresh" && action !== "sync") return false;
+
+  const attemptedAt =
+    action === "refresh"
+      ? metadataDate(connection.metadata, "lastTokenRefreshAttemptAt") ??
+        metadataDate(connection.metadata, "lastSyncAttemptAt")
+      : metadataDate(connection.metadata, "lastSyncAttemptAt");
+
+  if (!attemptedAt) return false;
+
+  const retryAt =
+    attemptedAt.getTime() + errorRetryMinutes() * 60 * 1000;
+  return retryAt > now.getTime();
 }
 
 export function assessSocialConnectionHealth(
@@ -512,6 +546,7 @@ async function recordConnectionSyncError(
     metadata: {
       ...asRecord(connection.metadata),
       lastSyncError: message,
+      lastSyncAttemptAt: new Date().toISOString(),
     },
     lastVerifiedAt: new Date(),
   });
@@ -1192,6 +1227,7 @@ async function refreshConnectionAccessTokenIfNeeded(
       {
         lastTokenRefreshError: message,
         lastSyncError: message,
+        lastTokenRefreshAttemptAt: new Date().toISOString(),
       },
       shouldRequireReconnect(message)
         ? "reconnect_required"
@@ -1343,7 +1379,35 @@ export async function processSocialConnectionSyncQueue(
   for (const candidate of candidates) {
     if (stats.processed >= limit) break;
     const health = assessSocialConnectionHealth(candidate);
+
     if (health.recommendedAction === "monitor") {
+      stats.skipped += 1;
+      continue;
+    }
+
+    if (
+      health.recommendedAction === "reconnect" ||
+      health.recommendedAction === "connect"
+    ) {
+      if (
+        health.recommendedAction === "reconnect" &&
+        candidate.status !== "reconnect_required"
+      ) {
+        await updateConnection(candidate.id, {
+          status: "reconnect_required",
+        });
+      }
+      stats.reconnectRequired += 1;
+      stats.skipped += 1;
+      continue;
+    }
+
+    if (
+      socialConnectionRetryBackoffActive(
+        candidate,
+        health.recommendedAction,
+      )
+    ) {
       stats.skipped += 1;
       continue;
     }
