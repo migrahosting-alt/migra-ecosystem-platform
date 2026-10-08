@@ -136,6 +136,7 @@ export async function getInfrastructureHealthSnapshot() {
     usageExports,
     entitlements,
     socialConnections,
+    socialConnectionCoverage,
   ] = await Promise.all([
     Promise.all(WORKERS.map((worker) => readHeartbeat(worker, now))),
     db.query(
@@ -184,18 +185,39 @@ export async function getInfrastructureHealthSnapshot() {
        FROM "OrgEntitlement"`,
     ),
     analyzeSocialConnectionSyncQueue(100),
+    db.query(
+      `SELECT
+         count(*)::int AS total,
+         count(*) FILTER (WHERE "credentialCiphertext" IS NOT NULL)::int AS credentialed,
+         count(*) FILTER (WHERE "credentialCiphertext" IS NULL)::int AS "missingCredential",
+         count(*) FILTER (
+           WHERE "credentialCiphertext" IS NULL AND status='reconnect_required'
+         )::int AS "missingCredentialReconnect"
+       FROM "MigraMarketSocialConnection"
+       WHERE "accessModel"='oauth' AND status<>'paused'`,
+    ),
   ]);
 
   const allWorkers = workers;
   const unhealthyWorkers = allWorkers.filter((worker) => worker.state !== "healthy");
+  const socialCoverage = socialConnectionCoverage.rows[0] ?? {};
+  const missingCredential = Number(socialCoverage.missingCredential ?? 0);
+  const missingCredentialReconnect = Number(
+    socialCoverage.missingCredentialReconnect ?? 0,
+  );
   const socialConnectionHealth = {
-    total: socialConnections.length,
-    needsAttention: socialConnections.filter(
-      (connection) => connection.recommendedAction !== "monitor",
-    ).length,
-    reconnectRequired: socialConnections.filter(
-      (connection) => connection.requiresReconnect,
-    ).length,
+    total: Number(socialCoverage.total ?? socialConnections.length),
+    credentialed: Number(
+      socialCoverage.credentialed ?? socialConnections.length,
+    ),
+    missingCredential,
+    needsAttention:
+      socialConnections.filter(
+        (connection) => connection.recommendedAction !== "monitor",
+      ).length + missingCredential,
+    reconnectRequired:
+      socialConnections.filter((connection) => connection.requiresReconnect)
+        .length + missingCredentialReconnect,
     tokenExpired: socialConnections.filter((connection) => connection.tokenExpired)
       .length,
     tokenExpiresSoon: socialConnections.filter(

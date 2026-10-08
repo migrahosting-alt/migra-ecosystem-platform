@@ -59,3 +59,13 @@ test("usage health reads the real UsageEvent export lifecycle", () => {
   assert.match(health, /"exportStatus"='FAILED'/);
   assert.doesNotMatch(health, /UsageExportJob/);
 });
+
+
+test("social infrastructure health includes uncredentialed reconnect-required connections", () => {
+  const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
+  assert.match(health, /FROM "MigraMarketSocialConnection"/);
+  assert.match(health, /"credentialCiphertext" IS NULL/);
+  assert.match(health, /"missingCredentialReconnect"/);
+  assert.match(health, /missingCredentialReconnect/);
+  assert.match(health, /socialConnectionHealth/);
+});
