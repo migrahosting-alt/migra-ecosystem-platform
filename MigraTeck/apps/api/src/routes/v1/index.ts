@@ -14,6 +14,7 @@ import { registerOrganizationDirectoryRoutes } from "./modules/organization-dire
 import { registerComplianceRoutes } from "./modules/compliance.js";
 import { registerPlatformSearchRoutes } from "./modules/search.js";
 import { registerAuthRoutes } from "./modules/auth.js";
+import { registerInfrastructureRoutes } from "./modules/infrastructure.js";
 
 export async function registerV1Routes(app: FastifyInstance): Promise<void> {
   await app.register(async (instance) => {
@@ -32,6 +33,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     await registerComplianceRoutes(instance);
     await registerPlatformSearchRoutes(instance);
     await registerAuthRoutes(instance);
+    await registerInfrastructureRoutes(instance);
   }, {
     prefix: "/v1",
   });

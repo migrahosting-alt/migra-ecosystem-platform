@@ -28,6 +28,7 @@ import {
   fetchPlatformApi,
   fetchPlatformAuthorityApi,
 } from "@/lib/auth/api";
+import { InfrastructureHealthPanel } from "@/components/platform/InfrastructureHealthPanel";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
 import { getPlatformOrganizations } from "@/lib/platform";
 import { getCommercialSnapshot } from "@/lib/platform/commercial";
@@ -599,6 +600,8 @@ export default async function PlatformOverviewPage() {
           tone={metricAttentionTone}
         />
       </div>
+
+      <InfrastructureHealthPanel />
 
       <div className="mt-6 grid gap-5 2xl:grid-cols-[1.35fr_.65fr]">
         <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
