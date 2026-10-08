@@ -14,10 +14,10 @@ APPLY=0
 
 # Release history contains three legitimate timestamp shapes:
 #   YYYYMMDD-name
-#   YYYYMMDDTHHMM-name       (legacy minute-stamped releases)
+#   YYYYMMDDTHHMM[Z]-name    (legacy minute-stamped releases)
 #   YYYYMMDDTHHMMSS[Z]-name  (current second-stamped releases)
 # Unknown names remain fail-closed and are never auto-deleted.
-NAME_RE='^([0-9]{8})(T([0-9]{4}|[0-9]{6}Z?))?-.+$'
+NAME_RE='^([0-9]{8})(T([0-9]{4}Z?|[0-9]{6}Z?))?-.+$'
 
 die() { echo "ABORT: $*" >&2; exit 1; }
 note() { printf '  %s\n' "$*"; }

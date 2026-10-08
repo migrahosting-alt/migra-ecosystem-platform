@@ -11,6 +11,7 @@ mkdir -p "$RELEASES" "$APP"
 old1="20260101T010101Z-old-one"
 old2="20260102-old-two"
 oldLegacyMinute="20260103T0740-old-minute"
+oldLegacyMinuteZ="20260104T0740Z-old-minute-z"
 recent="$(date -u +%Y%m%d)-recent"
 recent2="$(date -u +%Y%m%d)-recent-two"
 recent3="$(date -u +%Y%m%d)-recent-three"
@@ -19,7 +20,7 @@ previous="$(date -u +%Y%m%d)T0740-previous"
 unknown="manual-backup"
 malformedTimestamp="20260103T074-bad-timestamp"
 
-for name in "$old1" "$old2" "$oldLegacyMinute" "$recent" "$recent2" "$recent3" "$active" "$previous" "$unknown" "$malformedTimestamp"; do
+for name in "$old1" "$old2" "$oldLegacyMinute" "$oldLegacyMinuteZ" "$recent" "$recent2" "$recent3" "$active" "$previous" "$unknown" "$malformedTimestamp"; do
   mkdir -p "$RELEASES/$name"
 done
 
@@ -50,6 +51,8 @@ bash "$(dirname "$0")/release-retention.sh" >"$OUT"
 grep -q "delete $old1" "$OUT"
 grep -q "delete $old2" "$OUT"
 grep -q "delete $oldLegacyMinute" "$OUT"
+grep -q "delete $oldLegacyMinuteZ" "$OUT"
+! grep -q "SKIP unknown-name directory (never auto-delete): $oldLegacyMinuteZ" "$OUT"
 grep -q "keep   $active (ACTIVE)" "$OUT"
 grep -q "keep   $previous (PREVIOUS)" "$OUT"
 grep -q "delete $recent" "$OUT"
@@ -76,6 +79,7 @@ bash "$(dirname "$0")/release-retention.sh" --apply >/dev/null
 [[ ! -e "$RELEASES/$old1" ]]
 [[ ! -e "$RELEASES/$old2" ]]
 [[ ! -e "$RELEASES/$oldLegacyMinute" ]]
+[[ ! -e "$RELEASES/$oldLegacyMinuteZ" ]]
 [[ -d "$RELEASES/$active" ]]
 [[ -d "$RELEASES/$previous" ]]
 [[ ! -e "$RELEASES/$recent" ]]
