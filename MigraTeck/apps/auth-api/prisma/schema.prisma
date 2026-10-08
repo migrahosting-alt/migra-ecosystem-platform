@@ -60,6 +60,51 @@ enum PlatformRole {
   @@map("platform_role")
 }
 
+enum WorkforceEmploymentStatus {
+  INVITED    @map("invited")
+  ACTIVE     @map("active")
+  LEAVE      @map("leave")
+  SUSPENDED  @map("suspended")
+  TERMINATED @map("terminated")
+
+  @@map("workforce_employment_status")
+}
+
+enum WorkforceEmploymentType {
+  EMPLOYEE   @map("employee")
+  CONTRACTOR @map("contractor")
+  INTERN     @map("intern")
+  VENDOR     @map("vendor")
+
+  @@map("workforce_employment_type")
+}
+
+enum WorkforceProduct {
+  FRENDELO     @map("frendelo")
+  MIGRATECK    @map("migrateck")
+  MIGRAHOSTING @map("migrahosting")
+  MIGRAPANEL   @map("migrapanel")
+  PALE         @map("pale")
+  MIGRAMAIL    @map("migramail")
+  MIGRAVOICE   @map("migravoice")
+  MIGRADRIVE   @map("migradrive")
+  MIGRAPILOT   @map("migrapilot")
+  MIGRAINTAKE  @map("migraintake")
+  MIGRAMARKET  @map("migremarket")
+  MIGRAINVOICE @map("migrainvoice")
+  MIGRABUILDER @map("migrabuilder")
+
+  @@map("workforce_product")
+}
+
+enum WorkforceProvisioningState {
+  PENDING @map("pending")
+  SYNCED  @map("synced")
+  ERROR   @map("error")
+
+  @@map("workforce_provisioning_state")
+}
+
 enum MemberRole {
   OWNER         @map("owner")
   ADMIN         @map("admin")
@@ -154,6 +199,11 @@ model User {
   platformRoleGrants   PlatformRoleGrant[] @relation("PlatformRoleSubject")
   platformRolesGranted PlatformRoleGrant[] @relation("PlatformRoleGranter")
   platformRolesRevoked PlatformRoleGrant[] @relation("PlatformRoleRevoker")
+  workforceProfile WorkforceProfile? @relation("WorkforceProfileSubject")
+  workforceProfilesCreated WorkforceProfile[] @relation("WorkforceProfileCreator")
+  workforceProfilesUpdated WorkforceProfile[] @relation("WorkforceProfileUpdater")
+  workforceProductAccessGranted WorkforceProductAccessGrant[] @relation("WorkforceProductAccessGranter")
+  workforceProductAccessRevoked WorkforceProductAccessGrant[] @relation("WorkforceProductAccessRevoker")
 }
 
 model UserIdentifier {
@@ -275,6 +325,95 @@ model PlatformRoleGrant {
 
   @@index([userId])
   @@map("platform_role_grants")
+}
+
+model WorkforceProfile {
+  id                String                    @id @default(uuid()) @db.Uuid
+  userId            String                    @unique @map("user_id") @db.Uuid
+  staffId           String                    @unique @map("staff_id") @db.VarChar(48)
+  employmentStatus  WorkforceEmploymentStatus @default(INVITED) @map("employment_status")
+  employmentType    WorkforceEmploymentType   @default(EMPLOYEE) @map("employment_type")
+  jobTitle          String?                   @map("job_title") @db.VarChar(120)
+  department        String?                   @db.VarChar(120)
+  team              String?                   @db.VarChar(120)
+  managerProfileId  String?                   @map("manager_profile_id") @db.Uuid
+  startsAt          DateTime?                 @map("starts_at") @db.Timestamptz
+  endsAt            DateTime?                 @map("ends_at") @db.Timestamptz
+  createdByUserId   String?                   @map("created_by_user_id") @db.Uuid
+  updatedByUserId   String?                   @map("updated_by_user_id") @db.Uuid
+  entitlementRevision Int                     @default(1) @map("entitlement_revision")
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime                  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user          User              @relation("WorkforceProfileSubject", fields: [userId], references: [id], onDelete: Cascade)
+  manager       WorkforceProfile? @relation("WorkforceManager", fields: [managerProfileId], references: [id], onDelete: SetNull)
+  directReports WorkforceProfile[] @relation("WorkforceManager")
+  createdBy     User?             @relation("WorkforceProfileCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedBy     User?             @relation("WorkforceProfileUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  productAccess       WorkforceProductAccessGrant[]
+  provisioningEvents WorkforceProvisioningOutbox[]
+
+  @@index([employmentStatus])
+  @@index([department, team])
+  @@index([managerProfileId])
+  @@map("workforce_profiles")
+}
+
+model WorkforceProductAccessGrant {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  workforceProfileId String                       @map("workforce_profile_id") @db.Uuid
+  product            WorkforceProduct
+  roleKey            String                       @map("role_key") @db.VarChar(80)
+  grantedByUserId    String                       @map("granted_by_user_id") @db.Uuid
+  grantedAt          DateTime                     @default(now()) @map("granted_at") @db.Timestamptz
+  expiresAt          DateTime?                    @map("expires_at") @db.Timestamptz
+  revokedAt          DateTime?                    @map("revoked_at") @db.Timestamptz
+  revokedByUserId    String?                      @map("revoked_by_user_id") @db.Uuid
+  reason             String?                      @db.VarChar(1000)
+  provisioningState  WorkforceProvisioningState   @default(PENDING) @map("provisioning_state")
+  lastProvisionedAt  DateTime?                    @map("last_provisioned_at") @db.Timestamptz
+  lastProvisionError String?                      @map("last_provision_error") @db.VarChar(1000)
+  revision           Int                          @default(1)
+  createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime                     @updatedAt @map("updated_at") @db.Timestamptz
+
+  workforceProfile WorkforceProfile @relation(fields: [workforceProfileId], references: [id], onDelete: Cascade)
+  grantedBy        User             @relation("WorkforceProductAccessGranter", fields: [grantedByUserId], references: [id], onDelete: Restrict)
+  revokedBy        User?            @relation("WorkforceProductAccessRevoker", fields: [revokedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workforceProfileId, product, revokedAt])
+  @@index([product, roleKey, revokedAt])
+  @@index([provisioningState, updatedAt])
+  @@map("workforce_product_access_grants")
+}
+
+model WorkforceProvisioningOutbox {
+  id                   String           @id @default(uuid()) @db.Uuid
+  workforceProfileId   String           @map("workforce_profile_id") @db.Uuid
+  staffId              String           @map("staff_id") @db.VarChar(48)
+  product              WorkforceProduct
+  eventType            String           @map("event_type") @db.VarChar(40)
+  entitlementRevision  Int              @map("entitlement_revision")
+  productAccessActive  Boolean          @map("product_access_active")
+  roleKeys             String[]         @default([]) @map("role_keys")
+  grantIds             String[]         @default([]) @map("grant_ids")
+  relatedGrantIds      String[]         @default([]) @map("related_grant_ids")
+  attemptCount         Int              @default(0) @map("attempt_count")
+  nextAttemptAt        DateTime         @default(now()) @map("next_attempt_at") @db.Timestamptz
+  deliveredAt          DateTime?        @map("delivered_at") @db.Timestamptz
+  leaseOwner           String?          @map("lease_owner") @db.VarChar(120)
+  leaseExpiresAt       DateTime?        @map("lease_expires_at") @db.Timestamptz
+  lastError            String?          @map("last_error") @db.VarChar(1000)
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  workforceProfile WorkforceProfile @relation(fields: [workforceProfileId], references: [id], onDelete: Cascade)
+
+  @@index([deliveredAt, nextAttemptAt])
+  @@index([product, deliveredAt, nextAttemptAt])
+  @@index([deliveredAt, nextAttemptAt, leaseExpiresAt])
+  @@index([workforceProfileId, product, entitlementRevision])
+  @@map("workforce_provisioning_outbox")
 }
 
 model OAuthClient {

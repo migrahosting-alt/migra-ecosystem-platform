@@ -8,6 +8,7 @@ import fastifyCors from "@fastify/cors";
 import fastifyRateLimit from "@fastify/rate-limit";
 import fastifyFormbody from "@fastify/formbody";
 import { config } from "./config/env.js";
+import { startWorkforceProvisioningWorker } from "./modules/workforce/provisioning-dispatcher.js";
 
 // Routes
 import { authRoutes } from "./routes/auth.js";
@@ -15,6 +16,7 @@ import { oauthRoutes } from "./routes/oauth.js";
 import { mfaRoutes } from "./routes/mfa.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { adminRoutes } from "./routes/admin.js";
+import { workforceRoutes } from "./routes/workforce.js";
 import { organizationRoutes } from "./routes/organizations.js";
 import { clientRoutes } from "./routes/clients.js";
 import { billingRoutes } from "./routes/billing.js";
@@ -89,6 +91,7 @@ async function main() {
   await app.register(mfaRoutes);
   await app.register(sessionRoutes);
   await app.register(adminRoutes);
+  await app.register(workforceRoutes);
   await app.register(organizationRoutes);
   await app.register(clientRoutes);
   await app.register(billingRoutes);
@@ -98,6 +101,15 @@ async function main() {
 
   // Health check
   app.get("/health", async () => ({ status: "ok", service: "migraauth-api" }));
+
+  const stopWorkforceProvisioning = startWorkforceProvisioningWorker({
+    info: (message: unknown) => app.log.info(String(message)),
+    warn: (message: unknown) => app.log.warn(String(message)),
+    error: (message: unknown) => app.log.error(String(message)),
+  });
+  app.addHook("onClose", async () => {
+    stopWorkforceProvisioning();
+  });
 
   // ── Start ─────────────────────────────────────────────────────────
 

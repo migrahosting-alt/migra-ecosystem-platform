@@ -175,6 +175,28 @@ export const config = {
     returnOrigins: envList("AUTH_SOCIAL_RETURN_ORIGINS"),
   },
 
+  /** Workforce product provisioning (durable signed outbox delivery). */
+  workforceProvisioning: {
+    enabled: env("AUTH_WORKFORCE_PROVISIONING_ENABLED", "false") === "true",
+    issuer: env("AUTH_WORKFORCE_PROVISIONING_ISSUER", "migrapanel"),
+    privateKey: readKeyMaybe(
+      "AUTH_WORKFORCE_PROVISIONING_PRIVATE_KEY",
+      "AUTH_WORKFORCE_PROVISIONING_PRIVATE_KEY_FILE",
+    ),
+    keyId: process.env["AUTH_WORKFORCE_PROVISIONING_KEY_ID"] ?? undefined,
+    intervalMs: envInt("AUTH_WORKFORCE_PROVISIONING_INTERVAL_MS", 1000),
+    batchSize: envInt("AUTH_WORKFORCE_PROVISIONING_BATCH_SIZE", 25),
+    frendelo: {
+      url:
+        process.env["AUTH_WORKFORCE_PROVISIONING_FRENDELO_URL"] ??
+        undefined,
+      audience: env(
+        "AUTH_WORKFORCE_PROVISIONING_FRENDELO_AUDIENCE",
+        "frendelo-workforce-provisioning",
+      ),
+    },
+  },
+
   /** CORS */
   corsOrigins: env("AUTH_CORS_ORIGINS", "http://localhost:4100,http://localhost:3000,http://localhost:3200").split(","),
 

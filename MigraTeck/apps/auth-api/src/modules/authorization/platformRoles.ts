@@ -83,6 +83,14 @@ export const PLATFORM_PERMISSIONS = [
   "platform.intake.submissions.read",
   /** Create and operate tenant-native Intake forms and submission lifecycle. */
   "platform.intake.manage",
+  /** Attribute and migrate legacy global Intake customer data into an organization. Owner-only. */
+  "platform.intake.migrate",
+  /** Read the canonical MigraTeck workforce directory and product assignments. */
+  "platform.workforce.read",
+  /** Create staff identities and change employment metadata/lifecycle. */
+  "platform.workforce.manage",
+  /** Grant or revoke product roles. Authority over downstream product authority. */
+  "platform.workforce.product_access.manage",
   /** Read the platform audit log. */
   "platform.audit.read",
   /** Read governance incidents, runbooks, retention posture, and immutable-audit rules. */
@@ -156,6 +164,7 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.intake.read",
     "platform.intake.submissions.read",
     "platform.intake.manage",
+    "platform.workforce.read",
     "platform.audit.read",
     "platform.compliance.read",
     "platform.compliance.manage",

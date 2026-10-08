@@ -101,6 +101,27 @@ test("OPERATOR can act on accounts but cannot widen authority", () => {
   assert.ok(!p.has("platform.roles.manage"), "only OWNER may grant roles");
 });
 
+test("workforce directory is readable by operators but staff/product authority remains OWNER-only", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(!support.has("platform.workforce.read"));
+  assert.ok(!support.has("platform.workforce.manage"));
+  assert.ok(!support.has("platform.workforce.product_access.manage"));
+
+  assert.ok(operator.has("platform.workforce.read"));
+  assert.ok(!operator.has("platform.workforce.manage"));
+  assert.ok(
+    !operator.has("platform.workforce.product_access.manage"),
+    "ordinary operators must not be able to grant downstream product authority",
+  );
+
+  assert.ok(owner.has("platform.workforce.read"));
+  assert.ok(owner.has("platform.workforce.manage"));
+  assert.ok(owner.has("platform.workforce.product_access.manage"));
+});
+
 test("organization authority separates global visibility from reconciliation", () => {
   const support = permissionsForRoles(["SUPPORT"]);
   const operator = permissionsForRoles(["OPERATOR"]);
@@ -184,14 +205,17 @@ test("Intake authority separates metadata, sensitive submissions, and mutations"
   assert.ok(support.has("platform.intake.read"));
   assert.ok(!support.has("platform.intake.submissions.read"));
   assert.ok(!support.has("platform.intake.manage"));
+  assert.ok(!support.has("platform.intake.migrate"));
 
   assert.ok(operator.has("platform.intake.read"));
   assert.ok(operator.has("platform.intake.submissions.read"));
   assert.ok(operator.has("platform.intake.manage"));
+  assert.ok(!operator.has("platform.intake.migrate"), "cross-organization legacy attribution remains OWNER-only");
 
   assert.ok(owner.has("platform.intake.read"));
   assert.ok(owner.has("platform.intake.submissions.read"));
   assert.ok(owner.has("platform.intake.manage"));
+  assert.ok(owner.has("platform.intake.migrate"));
 });
 
 test("compliance authority separates review, case management, and destructive retention policy", () => {

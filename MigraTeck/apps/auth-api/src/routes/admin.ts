@@ -508,13 +508,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const actor = request.authUser!;
       const body = adminCreateOrganizationSchema.parse(request.body ?? {});
+      const ownerUserId = z.string().uuid().parse(body.owner_user_id);
       const ip = getClientIp(request);
       const ua = request.headers["user-agent"];
 
       try {
         const organization = await db.$transaction(async (tx) => {
           const owner = await tx.user.findUnique({
-            where: { id: body.owner_user_id },
+            where: { id: ownerUserId },
             select: {
               id: true,
               email: true,

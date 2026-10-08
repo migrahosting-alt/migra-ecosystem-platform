@@ -47,6 +47,7 @@ import {
 } from "../modules/sessions/index.js";
 import { hasTotpEnabled, verifyTotp, consumeRecoveryCode, recoveryCodesAreStale } from "../modules/mfa/index.js";
 import { logAuditEvent } from "../modules/audit/index.js";
+import { activateInvitedWorkforce } from "../modules/workforce/index.js";
 import { sendPasswordResetNotification, sendVerificationCode } from "../lib/notifications.js";
 import { parseIdentifier, maskIdentifier } from "../lib/identifier.js";
 import { db } from "../lib/db.js";
@@ -1442,13 +1443,27 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const resetUser = await findUserById(userId);
     if (resetUser?.status === "PENDING" && resetUser.email) {
       await markEmailVerified(userId);
+      const workforceActivated = await activateInvitedWorkforce(userId);
       await logAuditEvent({
         actorUserId: userId,
         eventType: "INTERNAL_USER_INVITE_ACCEPTED",
-        eventData: { activated_via: "password_setup" },
+        eventData: {
+          activated_via: "password_setup",
+          workforce_activated: workforceActivated,
+        },
         ipAddress: ip,
         userAgent: ua,
       });
+      if (workforceActivated) {
+        await logAuditEvent({
+          actorUserId: userId,
+          targetUserId: userId,
+          eventType: "WORKFORCE_STAFF_ACTIVATED",
+          eventData: { activated_via: "password_setup" },
+          ipAddress: ip,
+          userAgent: ua,
+        });
+      }
     }
 
     await revokeAllUserSessions(userId);
