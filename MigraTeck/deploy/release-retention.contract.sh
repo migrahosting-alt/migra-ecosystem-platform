@@ -13,19 +13,27 @@ old2="20260102-old-two"
 oldLegacyMinute="20260103T0740-old-minute"
 recent="$(date -u +%Y%m%d)-recent"
 recent2="$(date -u +%Y%m%d)-recent-two"
+recent3="$(date -u +%Y%m%d)-recent-three"
 active="$(date -u +%Y%m%d)-active"
 previous="$(date -u +%Y%m%d)T0740-previous"
 unknown="manual-backup"
 malformedTimestamp="20260103T074-bad-timestamp"
 
-for name in "$old1" "$old2" "$oldLegacyMinute" "$recent" "$recent2" "$active" "$previous" "$unknown" "$malformedTimestamp"; do
+for name in "$old1" "$old2" "$oldLegacyMinute" "$recent" "$recent2" "$recent3" "$active" "$previous" "$unknown" "$malformedTimestamp"; do
   mkdir -p "$RELEASES/$name"
 done
 
-for name in "$recent" "$recent2" "$active" "$previous" "$unknown" "$malformedTimestamp"; do
+for name in "$recent" "$recent2" "$recent3" "$active" "$previous" "$unknown" "$malformedTimestamp"; do
   mkdir -p "$RELEASES/$name/apps/web/.next/cache"
   printf 'cache-%s\n' "$name" >"$RELEASES/$name/apps/web/.next/cache/sentinel.txt"
 done
+
+# Make the count-cap ordering deterministic. recent is intentionally the
+# oldest same-day ordinary release, so MAX_KEEP=4 must evict it while keeping
+# the two newer ordinary rollback candidates plus active/previous.
+touch -d "3 minutes ago" "$RELEASES/$recent"
+touch -d "2 minutes ago" "$RELEASES/$recent2"
+touch -d "1 minute ago" "$RELEASES/$recent3"
 
 ln -s "$RELEASES/$active" "$APP/current"
 ln -s "$RELEASES/$previous" "$APP/previous"
@@ -36,6 +44,7 @@ ACTIVE_LINK="$APP/current" \
 PREVIOUS_LINK="$APP/previous" \
 RETENTION_DAYS=14 \
 MIN_KEEP=4 \
+MAX_KEEP=4 \
 bash "$(dirname "$0")/release-retention.sh" >"$OUT"
 
 grep -q "delete $old1" "$OUT"
@@ -43,9 +52,12 @@ grep -q "delete $old2" "$OUT"
 grep -q "delete $oldLegacyMinute" "$OUT"
 grep -q "keep   $active (ACTIVE)" "$OUT"
 grep -q "keep   $previous (PREVIOUS)" "$OUT"
-grep -q "keep   $recent (inside 14-day window)" "$OUT"
-grep -q "prune  $recent/apps/web/.next/cache" "$OUT"
+grep -q "delete $recent" "$OUT"
+grep -q "keep   $recent2 (newest within 14-day window)" "$OUT"
+grep -q "keep   $recent3 (newest within 14-day window)" "$OUT"
+! grep -q "prune  $recent/apps/web/.next/cache" "$OUT"
 grep -q "prune  $recent2/apps/web/.next/cache" "$OUT"
+grep -q "prune  $recent3/apps/web/.next/cache" "$OUT"
 ! grep -q "prune  $active/apps/web/.next/cache" "$OUT"
 ! grep -q "prune  $previous/apps/web/.next/cache" "$OUT"
 ! grep -q "prune  $unknown/apps/web/.next/cache" "$OUT"
@@ -58,6 +70,7 @@ ACTIVE_LINK="$APP/current" \
 PREVIOUS_LINK="$APP/previous" \
 RETENTION_DAYS=14 \
 MIN_KEEP=4 \
+MAX_KEEP=4 \
 bash "$(dirname "$0")/release-retention.sh" --apply >/dev/null
 
 [[ ! -e "$RELEASES/$old1" ]]
@@ -65,13 +78,14 @@ bash "$(dirname "$0")/release-retention.sh" --apply >/dev/null
 [[ ! -e "$RELEASES/$oldLegacyMinute" ]]
 [[ -d "$RELEASES/$active" ]]
 [[ -d "$RELEASES/$previous" ]]
-[[ -d "$RELEASES/$recent" ]]
+[[ ! -e "$RELEASES/$recent" ]]
 [[ -d "$RELEASES/$recent2" ]]
+[[ -d "$RELEASES/$recent3" ]]
 [[ -d "$RELEASES/$unknown" ]]
 [[ -d "$RELEASES/$malformedTimestamp" ]]
 
-[[ ! -e "$RELEASES/$recent/apps/web/.next/cache" ]]
 [[ ! -e "$RELEASES/$recent2/apps/web/.next/cache" ]]
+[[ ! -e "$RELEASES/$recent3/apps/web/.next/cache" ]]
 [[ -f "$RELEASES/$active/apps/web/.next/cache/sentinel.txt" ]]
 [[ -f "$RELEASES/$previous/apps/web/.next/cache/sentinel.txt" ]]
 [[ -f "$RELEASES/$unknown/apps/web/.next/cache/sentinel.txt" ]]

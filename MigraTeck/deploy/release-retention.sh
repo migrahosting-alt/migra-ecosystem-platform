@@ -7,6 +7,7 @@ ACTIVE_LINK="${ACTIVE_LINK:-/opt/migra/apps/migrateck/current}"
 PREVIOUS_LINK="${PREVIOUS_LINK:-/opt/migra/apps/migrateck/previous}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 MIN_KEEP="${MIN_KEEP:-4}"
+MAX_KEEP="${MAX_KEEP:-10}"
 BUILD_CACHE_RELATIVE="${BUILD_CACHE_RELATIVE:-apps/web/.next/cache}"
 APPLY=0
 [[ "${1:-}" == "--apply" ]] && APPLY=1
@@ -23,8 +24,10 @@ note() { printf '  %s\n' "$*"; }
 
 [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "RETENTION_DAYS must be numeric"
 [[ "$MIN_KEEP" =~ ^[0-9]+$ ]] || die "MIN_KEEP must be numeric"
+[[ "$MAX_KEEP" =~ ^[0-9]+$ ]] || die "MAX_KEEP must be numeric"
 (( RETENTION_DAYS >= 1 )) || die "RETENTION_DAYS must be at least 1"
 (( MIN_KEEP >= 2 )) || die "MIN_KEEP must be at least 2"
+(( MAX_KEEP >= MIN_KEEP )) || die "MAX_KEEP must be greater than or equal to MIN_KEEP"
 [[ -n "$BUILD_CACHE_RELATIVE" ]] || die "BUILD_CACHE_RELATIVE cannot be empty"
 [[ "$BUILD_CACHE_RELATIVE" != /* ]] || die "BUILD_CACHE_RELATIVE must be relative"
 [[ "$BUILD_CACHE_RELATIVE" != *".."* ]] || die "BUILD_CACHE_RELATIVE cannot contain '..'"
@@ -67,7 +70,7 @@ echo "=== Release retention — $HOST_LABEL"
 note "root          : $RELEASES_ROOT"
 note "active        : $ACTIVE"
 note "previous      : ${PREVIOUS:-none}"
-note "policy        : keep pinned + releases newer than $RETENTION_DAYS days + minimum $MIN_KEEP"
+note "policy        : keep pinned/referenced + newest ordinary releases (max target $MAX_KEEP, age ceiling $RETENTION_DAYS days, minimum $MIN_KEEP)"
 note "cutoff day    : $CUTOFF"
 note "mode          : $([[ $APPLY -eq 1 ]] && echo APPLY || echo 'DRY RUN (nothing deleted)')"
 df -Ph "$RELEASES_ROOT" | tail -1 | awk '{printf "  disk before   : %s used, %s free (%s)\n", $3, $4, $5}'
@@ -154,31 +157,84 @@ is_referenced() {
 
 scan_live_references
 
+# Pinned and externally referenced releases are never counted against the
+# ordinary rollback budget. If live references alone exceed MAX_KEEP, all of
+# them remain protected and the target expands rather than deleting a live
+# runtime dependency.
+declare -A KEEP_REASON=()
+PROTECTED_COUNT=0
+for name in "${VALID[@]}"; do
+  if [[ "$name" == "$ACTIVE" ]]; then
+    KEEP_REASON["$name"]="ACTIVE"
+  elif [[ -n "$PREVIOUS" && "$name" == "$PREVIOUS" ]]; then
+    KEEP_REASON["$name"]="PREVIOUS"
+  elif is_referenced "$name"; then
+    KEEP_REASON["$name"]="REFERENCED"
+  else
+    continue
+  fi
+  PROTECTED_COUNT=$((PROTECTED_COUNT + 1))
+done
+
+TARGET_KEEP="$MAX_KEEP"
+if (( PROTECTED_COUNT > TARGET_KEEP )); then
+  note "protected/live references ($PROTECTED_COUNT) exceed MAX_KEEP=$MAX_KEEP; expanding target rather than deleting live releases"
+  TARGET_KEEP="$PROTECTED_COUNT"
+fi
+
+# Rank ordinary releases newest-first by directory mtime. Release names are
+# still validated independently, but mtime gives stable ordering when several
+# deployments share the same YYYYMMDD legacy prefix.
+mapfile -t NEWEST_ORDINARY < <(
+  for name in "${VALID[@]}"; do
+    [[ -n "${KEEP_REASON[$name]:-}" ]] && continue
+    printf '%s\t%s\n' "$(stat -c '%Y' "$RELEASES_ROOT/$name")" "$name"
+  done | sort -k1,1nr -k2,2r | cut -f2-
+)
+
+SELECTED_COUNT="$PROTECTED_COUNT"
+for name in "${NEWEST_ORDINARY[@]}"; do
+  (( SELECTED_COUNT >= TARGET_KEEP )) && break
+  day="${RELEASE_DAY[$name]}"
+  if [[ "$day" -ge "$CUTOFF" ]]; then
+    KEEP_REASON["$name"]="newest within $RETENTION_DAYS-day window"
+    SELECTED_COUNT=$((SELECTED_COUNT + 1))
+  fi
+done
+
+# The age ceiling must never collapse rollback history below MIN_KEEP. If a
+# quiet host has too few recent releases, rescue the newest older candidates
+# until the minimum rollback floor is satisfied.
+if (( SELECTED_COUNT < MIN_KEEP )); then
+  for name in "${NEWEST_ORDINARY[@]}"; do
+    [[ -n "${KEEP_REASON[$name]:-}" ]] && continue
+    KEEP_REASON["$name"]="minimum rollback reserve"
+    SELECTED_COUNT=$((SELECTED_COUNT + 1))
+    (( SELECTED_COUNT >= MIN_KEEP )) && break
+  done
+fi
+
 KEEP=()
 DELETE=()
 CACHE_PRUNE=()
 for name in "${VALID[@]}"; do
-  day="${RELEASE_DAY[$name]}"
-  if [[ "$name" == "$ACTIVE" ]]; then
-    KEEP+=("$name (ACTIVE)")
-  elif [[ -n "$PREVIOUS" && "$name" == "$PREVIOUS" ]]; then
-    KEEP+=("$name (PREVIOUS)")
-  elif [[ "$day" -ge "$CUTOFF" ]]; then
-    KEEP+=("$name (inside $RETENTION_DAYS-day window)")
-    if ! is_referenced "$name"; then
+  reason="${KEEP_REASON[$name]:-}"
+  if [[ -n "$reason" ]]; then
+    KEEP+=("$name ($reason)")
+    if [[ "$name" != "$ACTIVE" ]] &&
+       [[ -z "$PREVIOUS" || "$name" != "$PREVIOUS" ]] &&
+       ! is_referenced "$name"; then
       cache_path="$RELEASES_ROOT/$name/$BUILD_CACHE_RELATIVE"
       if [[ -d "$cache_path" && ! -L "$cache_path" ]]; then
         CACHE_PRUNE+=("$name")
       fi
     fi
-  elif is_referenced "$name"; then
-    KEEP+=("$name (REFERENCED)")
   else
     DELETE+=("$name")
   fi
 done
 
-REMAINING=$(( ${#VALID[@]} - ${#DELETE[@]} ))
+REMAINING="${#KEEP_REASON[@]}"
 if (( REMAINING < MIN_KEEP )); then
   die "policy would leave $REMAINING recognized releases (< $MIN_KEEP)"
 fi
@@ -218,7 +274,6 @@ for name in "${DELETE[@]}"; do
   [[ "$name" != "$ACTIVE" ]] || die "candidate is ACTIVE"
   [[ -z "$PREVIOUS" || "$name" != "$PREVIOUS" ]] || die "candidate is PREVIOUS"
   [[ "$name" != *".."* ]] || die "candidate contains '..'"
-  [[ "${RELEASE_DAY[$name]}" -lt "$CUTOFF" ]] || die "candidate '$name' is inside retention window"
   is_referenced "$name" && die "candidate '$name' became referenced"
 done
 

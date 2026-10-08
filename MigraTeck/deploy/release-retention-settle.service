@@ -11,5 +11,6 @@ Environment=ACTIVE_LINK=/opt/migra/apps/migrateck/current
 Environment=PREVIOUS_LINK=/opt/migra/apps/migrateck/previous
 Environment=RETENTION_DAYS=14
 Environment=MIN_KEEP=4
+Environment=MAX_KEEP=10
 StandardOutput=journal
 StandardError=journal
