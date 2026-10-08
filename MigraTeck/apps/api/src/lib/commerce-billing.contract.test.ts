@@ -157,6 +157,43 @@ test("subscription actions verify tenant ownership in both local and Stripe stat
   assert.match(service, /operationId: input\.operationId/);
 });
 
+test("scheduled subscription cancellation can be reversed without bypassing operator safeguards", () => {
+  const operatorUi = repoFile(
+    "apps/web/src/app/(platform)/platform/billing/BillingOperationsWorkspace.tsx",
+  );
+
+  assert.match(
+    routes,
+    /subscriptionActionSchema[\s\S]*?"cancel_at_period_end"[\s\S]*?"keep_active"[\s\S]*?"cancel_immediate"/,
+  );
+  assert.match(service, /\| "keep_active"/);
+  assert.match(
+    service,
+    /input\.action === "keep_active" && !before\.cancel_at_period_end/,
+  );
+  assert.match(
+    service,
+    /Subscription does not have a scheduled cancellation to undo\./,
+  );
+  assert.match(
+    service,
+    /case "keep_active":[\s\S]*?cancel_at_period_end: false/,
+  );
+  assert.match(
+    service,
+    /"migrateck-billing-" \+ input\.operationId \+ "-" \+ input\.action/,
+  );
+
+  assert.match(
+    operatorUi,
+    /subscription\.cancelAtPeriodEnd \? \([\s\S]*?label="Keep active"[\s\S]*?openAction\(subscription, "keep_active"\)/,
+  );
+  assert.match(
+    operatorUi,
+    /Keep this subscription active by removing its scheduled period-end cancellation\?/,
+  );
+});
+
 test("processor action local update and audit commit atomically", () => {
   assert.match(
     service,

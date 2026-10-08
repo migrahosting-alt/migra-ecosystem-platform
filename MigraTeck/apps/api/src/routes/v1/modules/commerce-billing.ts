@@ -50,6 +50,7 @@ const subscriptionActionSchema = z.object({
     "pause_collection",
     "resume_collection",
     "cancel_at_period_end",
+    "keep_active",
     "cancel_immediate",
   ]),
   reason: z.string().trim().min(3).max(500),

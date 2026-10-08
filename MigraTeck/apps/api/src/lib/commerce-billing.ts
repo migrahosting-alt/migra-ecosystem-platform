@@ -1111,6 +1111,7 @@ export type SubscriptionOperatorAction =
   | "pause_collection"
   | "resume_collection"
   | "cancel_at_period_end"
+  | "keep_active"
   | "cancel_immediate";
 
 export async function operateSubscription(input: {
@@ -1180,6 +1181,13 @@ export async function operateSubscription(input: {
     );
   }
 
+  if (input.action === "keep_active" && !before.cancel_at_period_end) {
+    throw Object.assign(
+      new Error("Subscription does not have a scheduled cancellation to undo."),
+      { statusCode: 409 },
+    );
+  }
+
   let after: Stripe.Subscription;
 
   switch (input.action) {
@@ -1207,6 +1215,16 @@ export async function operateSubscription(input: {
       after = await client.subscriptions.update(
         before.id,
         { cancel_at_period_end: true },
+        {
+          idempotencyKey:
+            "migrateck-billing-" + input.operationId + "-" + input.action,
+        },
+      );
+      break;
+    case "keep_active":
+      after = await client.subscriptions.update(
+        before.id,
+        { cancel_at_period_end: false },
         {
           idempotencyKey:
             "migrateck-billing-" + input.operationId + "-" + input.action,
