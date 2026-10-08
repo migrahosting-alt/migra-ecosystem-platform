@@ -64,7 +64,7 @@ export default async function CommerceOverviewPage() {
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-50 text-cyan-600"><ChartNoAxesCombined size={19} /></span>
           <h2 className="mt-4 text-base font-semibold text-slate-950">Usage & Metering</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">Metered product consumption already feeds the commercial snapshot. The next layer is rate-card control, event inspection, and charge reconciliation.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Operate canonical meter definitions, organization quotas, Stripe export health, failed-event retry, and reconciliation evidence from the live usage ledger.</p>
           <Link href="/platform/commerce/usage" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-blue-600">Open usage & metering <ArrowRight size={14} /></Link>
         </article>
       </div>

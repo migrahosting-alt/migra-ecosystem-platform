@@ -61,11 +61,19 @@ async function createClient(formData: FormData) {
 export default async function NewClientPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    source?: string;
+    name?: string;
+    companyName?: string;
+    billingEmail?: string;
+    domain?: string;
+  }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/console/login");
   const sp = await searchParams;
+  const fromPlatform = sp.source === "platform";
 
   return (
     <ConsolePageShell session={session} activePath="/console/clients" title="New Client">
@@ -75,11 +83,34 @@ export default async function NewClientPage({
         title="Create a new client"
         description="Provision a new tenant in the MigraPanel database. The tenant becomes the parent for domains, mailboxes, subscriptions, and services."
         error={sp.error || null}
+        notice={
+          fromPlatform
+            ? "Prefilled from MigraTeck Platform. Review the tenant details before creating it, then return to Platform Hosting to bind the new tenant explicitly."
+            : null
+        }
         action={createClient}
       >
-        <Field label="Company / Client Name" name="name" required placeholder="Acme Corporation" />
-        <Field label="Legal Company Name" name="companyName" placeholder="Acme Corp LLC" hint="Used on invoices and contracts. Defaults to the client name." />
-        <Field label="Billing Email" name="billingEmail" type="email" placeholder="billing@acme.com" />
+        <Field
+          label="Company / Client Name"
+          name="name"
+          required
+          placeholder="Acme Corporation"
+          defaultValue={sp.name ?? ""}
+        />
+        <Field
+          label="Legal Company Name"
+          name="companyName"
+          placeholder="Acme Corp LLC"
+          hint="Used on invoices and contracts. Defaults to the client name."
+          defaultValue={sp.companyName ?? ""}
+        />
+        <Field
+          label="Billing Email"
+          name="billingEmail"
+          type="email"
+          placeholder="billing@acme.com"
+          defaultValue={sp.billingEmail ?? ""}
+        />
         <Field
           label="Tenant Type"
           name="tenantType"
@@ -91,7 +122,13 @@ export default async function NewClientPage({
             { value: "INTERNAL", label: "Internal / MigraTeck-owned" },
           ]}
         />
-        <Field label="Primary Domain (optional)" name="domain" placeholder="acme.com" hint="If known, attach the client's primary domain. You can add more domains later." />
+        <Field
+          label="Primary Domain (optional)"
+          name="domain"
+          placeholder="acme.com"
+          hint="If known, attach the client's primary domain. You can add more domains later."
+          defaultValue={sp.domain ?? ""}
+        />
       </FormShell>
     </ConsolePageShell>
   );

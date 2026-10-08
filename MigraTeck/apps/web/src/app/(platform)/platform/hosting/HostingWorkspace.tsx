@@ -322,6 +322,14 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
   }
 
   const baseUrl = snapshot.operationBoundary.consoleBaseUrl.replace(/\/$/, "");
+  const createTenantUrl =
+    baseUrl +
+    "/console/clients/new?" +
+    new URLSearchParams({
+      source: "platform",
+      name: snapshot.organization.name,
+      companyName: snapshot.organization.name,
+    }).toString();
 
   return (
     <div className="space-y-6">
@@ -422,12 +430,22 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
                 owner must explicitly bind the organization to the authoritative MigraPanel tenant
                 before any Hosting inventory is exposed.
               </p>
-              <button
-                onClick={() => void openLinker()}
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
-              >
-                <Link2 size={15} /> Link MigraPanel tenant
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={() => void openLinker()}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  <Link2 size={15} /> Link MigraPanel tenant
+                </button>
+                <a
+                  href={createTenantUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Create tenant in MigraPanel <ExternalLink size={14} />
+                </a>
+              </div>
             </div>
           </div>
 
@@ -488,7 +506,17 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
                       </button>
                     ))}
                     {!tenantLoading && tenantResults.length === 0 ? (
-                      <p className="p-4 text-sm text-slate-500">No MigraPanel tenants match this search.</p>
+                      <div className="p-4">
+                        <p className="text-sm text-slate-500">No MigraPanel tenants match this search.</p>
+                        <a
+                          href={createTenantUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                        >
+                          Create a new tenant in MigraPanel <ExternalLink size={13} />
+                        </a>
+                      </div>
                     ) : null}
                   </div>
                 </>
