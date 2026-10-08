@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node ../../scripts/write-release-manifest.mjs --service migrateck-platform-api --source src --artifact dist --output dist/release-manifest.json",
     "lint": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/server.js",
     "start:webhook-worker": "node dist/webhook-worker.js",

@@ -7,6 +7,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  GitCommit,
+  HardDrive,
+  MemoryStick,
+  PackageCheck,
   RefreshCw,
   ServerCog,
 } from "lucide-react";
@@ -27,6 +31,21 @@ type WorkerHealth = {
   detail: Record<string, unknown>;
 };
 
+type ReleaseIntegrity = {
+  key: "platform_api" | "platform_web";
+  label: string;
+  state: "verified" | "drift" | "missing" | "invalid";
+  service: string | null;
+  kind: "build" | "baseline" | null;
+  commit: string | null;
+  dirty: boolean | null;
+  builtAt: string | null;
+  deploymentPath: string | null;
+  sourceMatches: boolean | null;
+  artifactMatches: boolean | null;
+  detail: string;
+};
+
 type HealthPayload = {
   generatedAt: string;
   summary: {
@@ -40,8 +59,47 @@ type HealthPayload = {
     entitlementOverdue: number;
     socialConnectionAttention: number;
     socialReconnectRequired: number;
+    releaseIntegrityIssues: number;
+    hostCapacityState: "healthy" | "warning" | "critical";
+    diskUsedPercent: number;
+    diskAvailableBytes: number;
   };
   workers: WorkerHealth[];
+  releases: ReleaseIntegrity[];
+  host: {
+    state: "healthy" | "warning" | "critical";
+    checkedPath: string;
+    disk: {
+      totalBytes: number;
+      availableBytes: number;
+      usedBytes: number;
+      usedPercent: number;
+      warningPercent: number;
+      criticalPercent: number;
+      warningFreeBytes: number;
+      criticalFreeBytes: number;
+    };
+    memory: {
+      totalBytes: number;
+      freeBytes: number;
+      usedBytes: number;
+      usedPercent: number;
+    };
+    loadAverage: {
+      oneMinute: number;
+      fiveMinutes: number;
+      fifteenMinutes: number;
+    };
+    releases: {
+      root: string;
+      count: number;
+      activePath: string | null;
+      activeName: string | null;
+      newest: Array<{ name: string; modifiedAt: string }>;
+      error: string | null;
+    };
+    reasons: string[];
+  };
   queues: {
     provisioning: Record<string, unknown>;
     webhooks: Record<string, unknown>;
@@ -61,6 +119,35 @@ function ageLabel(seconds: number | null) {
 function stateClasses(state: WorkerHealth["state"]) {
   if (state === "healthy") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (state === "stale") return "border-amber-200 bg-amber-50 text-amber-800";
+  return "border-rose-200 bg-rose-50 text-rose-700";
+}
+
+function releaseStateClasses(state: ReleaseIntegrity["state"]) {
+  if (state === "verified") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (state === "drift") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-amber-200 bg-amber-50 text-amber-800";
+}
+
+function shortCommit(commit: string | null) {
+  if (!commit) return "Unknown commit";
+  return /^[a-f0-9]{7,40}$/i.test(commit) ? commit.slice(0, 10) : commit;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return value.toFixed(index >= 3 ? 1 : 0) + " " + units[index];
+}
+
+function capacityStateClasses(state: HealthPayload["host"]["state"]) {
+  if (state === "healthy") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (state === "warning") return "border-amber-200 bg-amber-50 text-amber-800";
   return "border-rose-200 bg-rose-50 text-rose-700";
 }
 
@@ -165,6 +252,8 @@ export function InfrastructureHealthPanel() {
     usageOpen > 0 ||
     usageFailed > 0 ||
     data.summary.entitlementOverdue > 0 ||
+    data.summary.releaseIntegrityIssues > 0 ||
+    data.summary.hostCapacityState !== "healthy" ||
     socialAttention > 0;
 
   return (
@@ -233,6 +322,205 @@ export function InfrastructureHealthPanel() {
             </div>
           </article>
         ))}
+      </div>
+
+      <div className="border-t border-slate-100 px-5 py-5 sm:px-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <HardDrive size={16} className="text-cyan-600" />
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-700">
+                Runtime capacity
+              </p>
+            </div>
+            <h3 className="mt-1 text-sm font-semibold text-slate-950">
+              Host headroom & release pressure
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Filesystem headroom, memory pressure, and release inventory on the host running the Platform API.
+            </p>
+          </div>
+          <span
+            className={
+              "rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] " +
+              capacityStateClasses(data.host.state)
+            }
+          >
+            {data.host.state}
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2 text-slate-600">
+              <HardDrive size={15} />
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">Disk usage</p>
+            </div>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+              {data.host.disk.usedPercent.toFixed(1)}%
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {formatBytes(data.host.disk.availableBytes)} available of {formatBytes(data.host.disk.totalBytes)}
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2 text-slate-600">
+              <MemoryStick size={15} />
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">Memory</p>
+            </div>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+              {data.host.memory.usedPercent.toFixed(1)}%
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {formatBytes(data.host.memory.freeBytes)} free of {formatBytes(data.host.memory.totalBytes)}
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Release inventory
+            </p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+              {data.host.releases.count}
+            </p>
+            <p className="mt-1 truncate text-[11px] text-slate-500">
+              Active: {data.host.releases.activeName ?? "unknown"}
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Load average
+            </p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+              {data.host.loadAverage.oneMinute.toFixed(2)}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              5m {data.host.loadAverage.fiveMinutes.toFixed(2)} · 15m {data.host.loadAverage.fifteenMinutes.toFixed(2)}
+            </p>
+          </article>
+        </div>
+
+        {data.host.reasons.length > 0 ? (
+          <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0 text-rose-700" />
+              <div>
+                <p className="text-xs font-semibold text-rose-900">
+                  Capacity intervention required
+                </p>
+                <ul className="mt-1 space-y-1 text-[11px] leading-5 text-rose-800">
+                  {data.host.reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="border-t border-slate-100 px-5 py-5 sm:px-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <PackageCheck size={16} className="text-violet-600" />
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-700">
+                Release integrity
+              </p>
+            </div>
+            <h3 className="mt-1 text-sm font-semibold text-slate-950">
+              Source and compiled build provenance
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Detects source-only hotfixes, stale compiled output, and runtimes without a signed-off build manifest.
+            </p>
+          </div>
+          <span className="text-xs font-semibold text-slate-500">
+            {data.summary.releaseIntegrityIssues === 0
+              ? "All release fingerprints verified"
+              : data.summary.releaseIntegrityIssues + " runtime" +
+                (data.summary.releaseIntegrityIssues === 1 ? "" : "s") +
+                " need review"}
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {data.releases.map((release) => (
+            <article
+              key={release.key}
+              className={
+                "rounded-2xl border p-4 " +
+                (release.state === "verified"
+                  ? "border-slate-200 bg-slate-50"
+                  : "border-amber-200 bg-amber-50/70")
+              }
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-950">{release.label}</p>
+                  <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <GitCommit size={12} />
+                    <code className="font-semibold text-slate-700">
+                      {shortCommit(release.commit)}
+                    </code>
+                    {release.kind === "baseline" ? (
+                      <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-violet-800">
+                        baseline
+                      </span>
+                    ) : null}
+                    {release.dirty ? (
+                      <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-800">
+                        {release.kind === "baseline" ? "mixed runtime" : "dirty build"}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <span
+                  className={
+                    "rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] " +
+                    releaseStateClasses(release.state)
+                  }
+                >
+                  {release.state}
+                </span>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p className="font-semibold text-slate-700">Source</p>
+                  <p className={release.sourceMatches === true ? "mt-1 text-emerald-700" : "mt-1 text-amber-800"}>
+                    {release.sourceMatches === null
+                      ? "Not verified"
+                      : release.sourceMatches
+                        ? "Fingerprint matches"
+                        : "Fingerprint drift"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p className="font-semibold text-slate-700">Compiled output</p>
+                  <p className={release.artifactMatches === true ? "mt-1 text-emerald-700" : "mt-1 text-amber-800"}>
+                    {release.artifactMatches === null
+                      ? "Not verified"
+                      : release.artifactMatches
+                        ? "Fingerprint matches"
+                        : "Fingerprint drift"}
+                  </p>
+                </div>
+              </div>
+
+              <p className="mt-3 text-[11px] leading-5 text-slate-500">
+                {release.detail}
+              </p>
+              {release.builtAt ? (
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Built {new Date(release.builtAt).toLocaleString()}
+                </p>
+              ) : null}
+            </article>
+          ))}
+        </div>
       </div>
 
       <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-5 sm:p-6 md:grid-cols-2 xl:grid-cols-5">

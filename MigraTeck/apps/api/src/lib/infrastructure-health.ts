@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { getDb } from "./db.js";
+import { getHostCapacitySnapshot } from "./host-capacity.js";
+import { getReleaseIntegritySnapshot } from "./release-provenance.js";
 import { getProvisioningDriftSnapshot } from "./provisioning-drift.js";
 import { analyzeSocialConnectionSyncQueue } from "./social-connection-sync.js";
 
@@ -139,6 +141,8 @@ export async function getInfrastructureHealthSnapshot() {
     entitlements,
     socialConnections,
     socialConnectionCoverage,
+    releaseIntegrity,
+    hostCapacity,
   ] = await Promise.all([
     Promise.all(WORKERS.map((worker) => readHeartbeat(worker, now))),
     db.query(
@@ -199,6 +203,8 @@ export async function getInfrastructureHealthSnapshot() {
        FROM "MigraMarketSocialConnection"
        WHERE "accessModel"='oauth' AND status<>'paused'`,
     ),
+    getReleaseIntegritySnapshot(),
+    getHostCapacitySnapshot(),
   ]);
 
   const allWorkers = workers;
@@ -217,6 +223,10 @@ export async function getInfrastructureHealthSnapshot() {
     rolloutPolicyBlockedRows: provisioningDrift.rolloutPolicyBlockedRows,
     runtimeLinkRequiredRows: provisioningDrift.runtimeLinkRequiredRows,
   };
+  const releaseIntegrityIssues = releaseIntegrity.filter(
+    (release) => release.state !== "verified",
+  ).length;
+
   const socialConnectionHealth = {
     total: Number(socialCoverage.total ?? socialConnections.length),
     credentialed: Number(
@@ -257,6 +267,10 @@ export async function getInfrastructureHealthSnapshot() {
       entitlementOverdue: Number(entitlements.rows[0]?.overdue ?? 0),
       socialConnectionAttention: socialConnectionHealth.needsAttention,
       socialReconnectRequired: socialConnectionHealth.reconnectRequired,
+      releaseIntegrityIssues,
+      hostCapacityState: hostCapacity.state,
+      diskUsedPercent: hostCapacity.disk.usedPercent,
+      diskAvailableBytes: hostCapacity.disk.availableBytes,
     },
     workers: allWorkers,
     queues: {
@@ -270,5 +284,7 @@ export async function getInfrastructureHealthSnapshot() {
       entitlements: entitlements.rows[0] ?? {},
       socialConnections: socialConnectionHealth,
     },
+    releases: releaseIntegrity,
+    host: hostCapacity,
   };
 }
