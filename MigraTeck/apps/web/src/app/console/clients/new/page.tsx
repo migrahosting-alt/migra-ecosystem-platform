@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getSession } from "../../lib/auth";
 import { panelExec } from "../../lib/db";
 import { logClientEvent } from "../../lib/modules/audit";
-import { buildPlatformHostingReturn, sanitizePlatformHostingReturn } from "../../lib/platform-handoff";
+import { buildPlatformTenantReturn, sanitizePlatformTenantReturn } from "../../lib/platform-handoff";
 import { tenantPath } from "../../lib/urls";
 import { ConsolePageShell } from "../../components/ConsolePageShell";
 import { FormShell, Field } from "../../components/FormShell";
@@ -21,9 +21,10 @@ async function createClient(formData: FormData) {
   const domain = String(formData.get("domain") || "").trim() || null;
   const source = String(formData.get("source") || "").trim();
   const returnTo = source === "platform"
-    ? sanitizePlatformHostingReturn(String(formData.get("returnTo") || ""))
+    ? sanitizePlatformTenantReturn(String(formData.get("returnTo") || ""))
     : null;
   const handoffOrgId = String(formData.get("handoffOrgId") || "").trim() || null;
+  const handoffJobId = String(formData.get("handoffJobId") || "").trim() || null;
 
   if (!name) {
     redirect("/console/clients/new?error=Name+is+required");
@@ -62,6 +63,7 @@ async function createClient(formData: FormData) {
       params.set("source", "platform");
       params.set("returnTo", returnTo);
       if (handoffOrgId) params.set("handoffOrgId", handoffOrgId);
+      if (handoffJobId) params.set("handoffJobId", handoffJobId);
     }
     redirect("/console/clients/new?" + params.toString());
   }
@@ -72,10 +74,11 @@ async function createClient(formData: FormData) {
     metadata: { name, companyName, billingEmail, tenantType, domain },
   });
 
-  const platformReturn = buildPlatformHostingReturn({
+  const platformReturn = buildPlatformTenantReturn({
     returnTo,
     createdTenantId: id,
     handoffOrgId,
+    handoffJobId,
   });
   redirect(platformReturn ?? tenantPath(id));
 }
@@ -92,26 +95,33 @@ export default async function NewClientPage({
     domain?: string;
     returnTo?: string;
     handoffOrgId?: string;
+    handoffJobId?: string;
   }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/console/login");
   const sp = await searchParams;
   const fromPlatform = sp.source === "platform";
-  const safeReturnTo = fromPlatform ? sanitizePlatformHostingReturn(sp.returnTo) : null;
+  const safeReturnTo = fromPlatform ? sanitizePlatformTenantReturn(sp.returnTo) : null;
 
   return (
     <ConsolePageShell session={session} activePath="/console/clients" title="New Client">
       <FormShell
         backHref={safeReturnTo ?? "/console/clients"}
-        backLabel={safeReturnTo ? "Back to Platform Hosting" : "Back to Clients"}
+        backLabel={
+          safeReturnTo
+            ? new URL(safeReturnTo).pathname === "/platform/commerce/catalog"
+              ? "Back to Catalog & Entitlements"
+              : "Back to Platform Hosting"
+            : "Back to Clients"
+        }
         title="Create a new client"
         description="Provision a new tenant in the MigraPanel database. The tenant becomes the parent for domains, mailboxes, subscriptions, and services."
         error={sp.error || null}
         notice={
           fromPlatform
             ? safeReturnTo
-              ? "Prefilled from MigraTeck Platform. Review the tenant details before creating it. After creation you will return to Platform Hosting to review and explicitly bind the new tenant."
+              ? "Prefilled from MigraTeck Platform. Review the tenant details before creating it. After creation you will return to the originating Platform workspace to verify and explicitly bind the new tenant."
               : "Prefilled from MigraTeck Platform, but the return target was rejected by the safety allowlist. Creation will remain in MigraPanel until you return manually."
             : null
         }
@@ -123,6 +133,9 @@ export default async function NewClientPage({
             <input type="hidden" name="returnTo" value={safeReturnTo} />
             {sp.handoffOrgId ? (
               <input type="hidden" name="handoffOrgId" value={sp.handoffOrgId} />
+            ) : null}
+            {sp.handoffJobId ? (
+              <input type="hidden" name="handoffJobId" value={sp.handoffJobId} />
             ) : null}
           </>
         ) : null}

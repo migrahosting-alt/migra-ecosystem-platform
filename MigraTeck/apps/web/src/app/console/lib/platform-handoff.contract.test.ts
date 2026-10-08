@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildPlatformHostingReturn,
+  buildPlatformTenantReturn,
+  sanitizePlatformCommerceCatalogReturn,
   sanitizePlatformHostingReturn,
+  sanitizePlatformTenantReturn,
 } from "./platform-handoff.js";
 
 const previousAppBase = process.env.APP_BASE_URL;
@@ -66,6 +69,35 @@ test("tenant creation return carries only reviewed handoff context", () => {
   assert.equal(parsed.searchParams.get("handoffOrgId"), "org_abc-123");
 });
 
+test("tenant creation can safely return to Catalog & Entitlements with one dead-job correlation", () => {
+  assert.equal(
+    sanitizePlatformTenantReturn(
+      "https://migrateck.com/platform/commerce/catalog?untrusted=1#fragment",
+    ),
+    "https://migrateck.com/platform/commerce/catalog",
+  );
+  assert.equal(
+    sanitizePlatformCommerceCatalogReturn(
+      "https://migrateck.com/platform/hosting",
+    ),
+    null,
+  );
+
+  const url = buildPlatformTenantReturn({
+    returnTo: "https://migrateck.com/platform/commerce/catalog",
+    createdTenantId: "123e4567-e89b-12d3-a456-426614174000",
+    handoffOrgId: "org_fitdripgear",
+    handoffJobId: "job_dead_123",
+  });
+
+  assert.ok(url);
+  const parsed = new URL(url!);
+  assert.equal(parsed.pathname, "/platform/commerce/catalog");
+  assert.equal(parsed.searchParams.get("handoff"), "tenant_created");
+  assert.equal(parsed.searchParams.get("handoffOrgId"), "org_fitdripgear");
+  assert.equal(parsed.searchParams.get("handoffJobId"), "job_dead_123");
+});
+
 test("invalid tenant IDs cannot become Platform handoff returns", () => {
   assert.equal(
     buildPlatformHostingReturn({
@@ -87,9 +119,11 @@ test("MigraPanel tenant creation action rechecks console authentication", () => 
 
   assert.match(page, /const session = await getSession\(\)/);
   assert.match(page, /if \(!session\) redirect\("\/console\/login"\)/);
-  assert.match(page, /buildPlatformHostingReturn/);
+  assert.match(page, /buildPlatformTenantReturn/);
+  assert.match(page, /sanitizePlatformTenantReturn/);
   assert.match(page, /name="returnTo"/);
   assert.match(page, /name="handoffOrgId"/);
+  assert.match(page, /name="handoffJobId"/);
 });
 
 test("Platform handoff never bypasses binding authority", () => {
@@ -107,4 +141,42 @@ test("Platform handoff never bypasses binding authority", () => {
   assert.match(workspace, /platform\.hosting\.bindings\.manage is required/);
   assert.match(workspace, /\/recovery-context/);
   assert.match(workspace, /Bind this tenant/);
+});
+
+test("Catalog recovery verifies, explicitly binds, and reopens evidence without auto-retry", () => {
+  const cwd = process.cwd();
+  const root = cwd.endsWith("/apps/web") ? join(cwd, "../..") : cwd;
+  const workspace = readFileSync(
+    join(
+      root,
+      "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+    ),
+    "utf8",
+  );
+  const proxy = readFileSync(
+    join(
+      root,
+      "apps/web/src/app/api/platform/hosting/organizations/[orgId]/binding/route.ts",
+    ),
+    "utf8",
+  );
+
+  assert.match(workspace, /handoffJobId/);
+  assert.match(workspace, /verifyReturnedTenant/);
+  assert.match(
+    workspace,
+    /\/api\/platform\/hosting\/organizations\/"\s*\+[\s\S]*?\/binding/,
+  );
+  assert.match(workspace, /Bind tenant to organization/);
+  assert.match(workspace, /await openDeadLetter\(current\.jobId\)/);
+  assert.match(workspace, /Creation never binds the tenant and never retries this dead letter automatically/);
+
+  const bindStart = workspace.indexOf("async function bindReturnedTenant");
+  const bindEnd = workspace.indexOf("function transitionFor", bindStart);
+  assert.ok(bindStart >= 0 && bindEnd > bindStart);
+  assert.doesNotMatch(workspace.slice(bindStart, bindEnd), /\/retry|submit\("retry"\)/);
+
+  assert.match(proxy, /fetchPlatformAuthorityApi/);
+  assert.match(proxy, /\/hosting\/organizations\//);
+  assert.doesNotMatch(proxy, /resolveDeveloperOrganization/);
 });

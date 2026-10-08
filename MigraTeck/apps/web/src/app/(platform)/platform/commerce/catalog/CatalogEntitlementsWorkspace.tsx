@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   Boxes,
@@ -9,7 +10,9 @@ import {
   ChevronRight,
   Database,
   Edit3,
+  ExternalLink,
   Layers3,
+  Link2,
   Loader2,
   RefreshCw,
   RotateCcw,
@@ -270,6 +273,15 @@ type HostingTenantSearchResult = {
   websiteCount: number;
 };
 
+type TenantHandoffState = {
+  orgId: string;
+  jobId: string;
+  tenantId: string;
+  status: "verifying" | "ready" | "binding" | "bound" | "error";
+  candidate: HostingRecoveryCandidate | null;
+  error: string | null;
+};
+
 type DeadLetterRemediation = {
   job: {
     id: string;
@@ -435,7 +447,14 @@ function driftClass(classification: DriftClassification) {
   }
 }
 
-export function CatalogEntitlementsWorkspace() {
+export function CatalogEntitlementsWorkspace({
+  consoleBaseUrl,
+  platformBaseUrl,
+}: {
+  consoleBaseUrl: string;
+  platformBaseUrl: string;
+}) {
+  const searchParams = useSearchParams();
   const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -463,6 +482,9 @@ export function CatalogEntitlementsWorkspace() {
   const [deadLetterLoadingId, setDeadLetterLoadingId] = useState<string | null>(null);
   const [deadLetterError, setDeadLetterError] = useState<string | null>(null);
   const [deadLetterMessage, setDeadLetterMessage] = useState<string | null>(null);
+  const [tenantHandoff, setTenantHandoff] = useState<TenantHandoffState | null>(
+    null,
+  );
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -519,6 +541,63 @@ export function CatalogEntitlementsWorkspace() {
     }
   }, []);
 
+  const verifyReturnedTenant = useCallback(
+    async (orgId: string, jobId: string, tenantId: string) => {
+      setTenantHandoff({
+        orgId,
+        jobId,
+        tenantId,
+        status: "verifying",
+        candidate: null,
+        error: null,
+      });
+
+      try {
+        const response = await fetch(
+          "/api/platform/hosting/tenants/" +
+            encodeURIComponent(tenantId) +
+            "/recovery-context",
+          { cache: "no-store" },
+        );
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            body.error ?? "Unable to verify the returned MigraPanel tenant",
+          );
+        }
+
+        const candidate = body.candidate as HostingRecoveryCandidate | undefined;
+        if (!candidate || candidate.tenantId !== tenantId) {
+          throw new Error("MigraPanel returned inconsistent tenant evidence");
+        }
+
+        setTenantHandoff({
+          orgId,
+          jobId,
+          tenantId,
+          status: "ready",
+          candidate,
+          error: null,
+        });
+        setSelectedOrgId(orgId);
+        void loadAccess(orgId);
+      } catch (error) {
+        setTenantHandoff({
+          orgId,
+          jobId,
+          tenantId,
+          status: "error",
+          candidate: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to verify the returned MigraPanel tenant",
+        });
+      }
+    },
+    [loadAccess],
+  );
+
   useEffect(() => {
     void loadCatalog();
     void loadOrganizations("");
@@ -530,6 +609,30 @@ export function CatalogEntitlementsWorkspace() {
     }, 300);
     return () => window.clearTimeout(timer);
   }, [orgQuery, loadOrganizations]);
+
+  const handoffMode = searchParams.get("handoff");
+  const handoffTenantId = searchParams.get("createdTenantId");
+  const handoffOrgId = searchParams.get("handoffOrgId");
+  const handoffJobId = searchParams.get("handoffJobId");
+
+  useEffect(() => {
+    if (
+      handoffMode !== "tenant_created" ||
+      !handoffTenantId ||
+      !handoffOrgId ||
+      !handoffJobId
+    ) {
+      return;
+    }
+
+    void verifyReturnedTenant(handoffOrgId, handoffJobId, handoffTenantId);
+  }, [
+    handoffMode,
+    handoffTenantId,
+    handoffOrgId,
+    handoffJobId,
+    verifyReturnedTenant,
+  ]);
 
   const coverageByProduct = useMemo(
     () => new Map(catalog?.bindingCoverage.map((entry) => [entry.product, entry]) ?? []),
@@ -552,6 +655,57 @@ export function CatalogEntitlementsWorkspace() {
         .getElementById("organization-access")
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 0);
+  }
+
+  async function bindReturnedTenant() {
+    if (
+      !tenantHandoff ||
+      tenantHandoff.status !== "ready" ||
+      !tenantHandoff.candidate
+    ) {
+      return;
+    }
+
+    const current = tenantHandoff;
+    setTenantHandoff({ ...current, status: "binding", error: null });
+
+    try {
+      const response = await fetch(
+        "/api/platform/hosting/organizations/" +
+          encodeURIComponent(current.orgId) +
+          "/binding",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tenantId: current.tenantId }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          body.error ?? "Unable to bind the returned MigraPanel tenant",
+        );
+      }
+
+      setTenantHandoff({ ...current, status: "bound", error: null });
+      setSelectedOrgId(current.orgId);
+      await Promise.all([
+        loadAccess(current.orgId),
+        loadOrganizations(orgQuery),
+        loadCatalog(),
+      ]);
+      await openDeadLetter(current.jobId);
+      window.history.replaceState({}, "", "/platform/commerce/catalog");
+    } catch (error) {
+      setTenantHandoff({
+        ...current,
+        status: "error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to bind the returned MigraPanel tenant",
+      });
+    }
   }
 
   function transitionFor(
@@ -1093,6 +1247,127 @@ export function CatalogEntitlementsWorkspace() {
         </div>
       ) : null}
 
+      {tenantHandoff ? (
+        <section
+          className={
+            "rounded-3xl border p-5 shadow-sm sm:p-6 " +
+            (tenantHandoff.status === "error"
+              ? "border-rose-200 bg-rose-50"
+              : tenantHandoff.status === "bound"
+                ? "border-emerald-200 bg-emerald-50"
+                : "border-cyan-200 bg-cyan-50")
+          }
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <span
+                className={
+                  "grid h-10 w-10 shrink-0 place-items-center rounded-2xl " +
+                  (tenantHandoff.status === "error"
+                    ? "bg-rose-100 text-rose-700"
+                    : tenantHandoff.status === "bound"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-cyan-100 text-cyan-700")
+                }
+              >
+                {tenantHandoff.status === "verifying" ||
+                tenantHandoff.status === "binding" ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : tenantHandoff.status === "bound" ? (
+                  <Check size={18} />
+                ) : tenantHandoff.status === "error" ? (
+                  <AlertTriangle size={18} />
+                ) : (
+                  <Link2 size={18} />
+                )}
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Hosting recovery handoff
+                </p>
+                <h3 className="mt-1 text-base font-semibold text-slate-950">
+                  {tenantHandoff.status === "verifying"
+                    ? "Verifying the returned MigraPanel tenant"
+                    : tenantHandoff.status === "binding"
+                      ? "Binding tenant to the affected organization"
+                      : tenantHandoff.status === "bound"
+                        ? "Tenant linked; recovery evidence reloaded"
+                        : tenantHandoff.status === "error"
+                          ? "Tenant handoff needs attention"
+                          : "Tenant created and verified — binding still requires approval"}
+                </h3>
+                {tenantHandoff.candidate ? (
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                    <span>
+                      Tenant{" "}
+                      <code className="font-semibold">
+                        {tenantHandoff.candidate.name ??
+                          tenantHandoff.candidate.companyName ??
+                          tenantHandoff.candidate.slug ??
+                          tenantHandoff.tenantId}
+                      </code>
+                    </span>
+                    <span>Org {tenantHandoff.orgId}</span>
+                    <span>Dead job {tenantHandoff.jobId}</span>
+                  </div>
+                ) : null}
+                <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-600">
+                  {tenantHandoff.status === "bound"
+                    ? "Binding does not retry provisioning automatically. Review the reopened dead-letter evidence and supply any remaining service-instance or edge context before queueing a signed retry."
+                    : tenantHandoff.status === "ready"
+                      ? "The returned tenant was re-read from MigraPanel. Binding is a separate audited action and provisioning will not retry automatically."
+                      : tenantHandoff.status === "error"
+                        ? tenantHandoff.error ??
+                          "The returned tenant could not be verified or bound."
+                        : "The Platform is validating this tenant against MigraPanel before any organization link can be created."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {tenantHandoff.status === "ready" ? (
+                <button
+                  type="button"
+                  onClick={() => void bindReturnedTenant()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-800"
+                >
+                  <Link2 size={14} /> Bind tenant to organization
+                </button>
+              ) : null}
+              {tenantHandoff.status === "error" ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void verifyReturnedTenant(
+                      tenantHandoff.orgId,
+                      tenantHandoff.jobId,
+                      tenantHandoff.tenantId,
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                >
+                  <RefreshCw size={14} /> Verify again
+                </button>
+              ) : null}
+              {tenantHandoff.candidate ? (
+                <a
+                  href={
+                    consoleBaseUrl.replace(/\/$/, "") +
+                    "/console/clients/" +
+                    encodeURIComponent(tenantHandoff.candidate.tenantId)
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Open tenant <ExternalLink size={14} />
+                </a>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Products" value={catalog.metrics.catalogProducts} detail="canonical source catalog" />
         <MetricCard label="Plans" value={catalog.metrics.catalogPlans} detail="source-controlled plans" />
@@ -1269,6 +1544,14 @@ export function CatalogEntitlementsWorkspace() {
           key={deadLetter.job.id}
           remediation={deadLetter}
           canManage={catalog.mutationReadiness.entitlements}
+          handoffCandidate={
+            tenantHandoff?.status === "bound" &&
+            tenantHandoff.jobId === deadLetter.job.id
+              ? tenantHandoff.candidate
+              : null
+          }
+          consoleBaseUrl={consoleBaseUrl}
+          platformBaseUrl={platformBaseUrl}
           onClose={() => setDeadLetter(null)}
           onResolved={completeDeadLetterResolution}
         />
@@ -1805,20 +2088,38 @@ export function CatalogEntitlementsWorkspace() {
 function DeadLetterRemediationPanel({
   remediation,
   canManage,
+  handoffCandidate,
+  consoleBaseUrl,
+  platformBaseUrl,
   onClose,
   onResolved,
 }: {
   remediation: DeadLetterRemediation;
   canManage: boolean;
+  handoffCandidate: HostingRecoveryCandidate | null;
+  consoleBaseUrl: string;
+  platformBaseUrl: string;
   onClose: () => void;
   onResolved: (message: string) => Promise<void>;
 }) {
   const [reason, setReason] = useState("");
   const [context, setContext] = useState<DeadLetterRecoveryContext>({
-    domain: remediation.retry.currentContext.domain ?? "",
-    tenantId: remediation.retry.currentContext.tenantId ?? "",
-    serviceInstanceId: remediation.retry.currentContext.serviceInstanceId ?? "",
-    targetIp: remediation.retry.currentContext.targetIp ?? "",
+    domain:
+      handoffCandidate?.suggestedContext.domain ??
+      remediation.retry.currentContext.domain ??
+      "",
+    tenantId:
+      handoffCandidate?.tenantId ??
+      remediation.retry.currentContext.tenantId ??
+      "",
+    serviceInstanceId:
+      handoffCandidate?.suggestedContext.serviceInstanceId ??
+      remediation.retry.currentContext.serviceInstanceId ??
+      "",
+    targetIp:
+      handoffCandidate?.suggestedContext.targetIp ??
+      remediation.retry.currentContext.targetIp ??
+      "",
     plan: remediation.retry.currentContext.plan ?? "",
     mailboxEmail: remediation.retry.currentContext.mailboxEmail ?? "",
   });
@@ -1826,7 +2127,7 @@ function DeadLetterRemediationPanel({
   const [error, setError] = useState<string | null>(null);
   const hostingCandidates = remediation.retry.hostingCandidates ?? [];
   const [manualHostingCandidate, setManualHostingCandidate] =
-    useState<HostingRecoveryCandidate | null>(null);
+    useState<HostingRecoveryCandidate | null>(handoffCandidate);
   const [tenantSearchQuery, setTenantSearchQuery] = useState("");
   const [tenantSearchResults, setTenantSearchResults] = useState<
     HostingTenantSearchResult[]
@@ -1891,6 +2192,25 @@ function DeadLetterRemediationPanel({
     .map((input) => input.label);
   const hostingSearchEnabled =
     remediation.job.productLane === "MIGRAHOSTING" && requiredFields.length > 0;
+  const recoveryOrganizationName =
+    remediation.job.orgName ?? remediation.job.orgSlug ?? remediation.job.orgId;
+  const createTenantParams = new URLSearchParams({
+    source: "platform",
+    name: recoveryOrganizationName,
+    companyName: recoveryOrganizationName,
+    returnTo:
+      platformBaseUrl.replace(/\/$/, "") + "/platform/commerce/catalog",
+    handoffOrgId: remediation.job.orgId,
+    handoffJobId: remediation.job.id,
+  });
+  const recoveryDomain = (context.domain ?? "").trim();
+  if (recoveryDomain) {
+    createTenantParams.set("domain", recoveryDomain);
+  }
+  const createTenantUrl =
+    consoleBaseUrl.replace(/\/$/, "") +
+    "/console/clients/new?" +
+    createTenantParams.toString();
 
   useEffect(() => {
     if (!hostingSearchEnabled) return;
@@ -2262,6 +2582,27 @@ function DeadLetterRemediationPanel({
                   No MigraPanel tenants match this search.
                 </p>
               ) : null}
+
+              <div className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-cyan-950">
+                      No tenant exists yet?
+                    </p>
+                    <p className="mt-1 text-[10px] leading-5 text-cyan-800">
+                      Create the runtime tenant in MigraPanel and return here for verification.
+                      Creation never binds the tenant and never retries this dead letter automatically.
+                    </p>
+                  </div>
+                  <a
+                    href={createTenantUrl}
+                    target="_self"
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-800"
+                  >
+                    Create MigraPanel tenant <ExternalLink size={13} />
+                  </a>
+                </div>
+              </div>
 
               {tenantSearchResults.length > 0 ? (
                 <div className="mt-3 max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
