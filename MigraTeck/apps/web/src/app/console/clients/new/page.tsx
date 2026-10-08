@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getSession } from "../../lib/auth";
 import { panelExec } from "../../lib/db";
 import { logClientEvent } from "../../lib/modules/audit";
+import { buildPlatformHostingReturn, sanitizePlatformHostingReturn } from "../../lib/platform-handoff";
 import { tenantPath } from "../../lib/urls";
 import { ConsolePageShell } from "../../components/ConsolePageShell";
 import { FormShell, Field } from "../../components/FormShell";
@@ -18,6 +19,11 @@ async function createClient(formData: FormData) {
   const billingEmail = String(formData.get("billingEmail") || "").trim() || null;
   const tenantType = String(formData.get("tenantType") || "CLIENT");
   const domain = String(formData.get("domain") || "").trim() || null;
+  const source = String(formData.get("source") || "").trim();
+  const returnTo = source === "platform"
+    ? sanitizePlatformHostingReturn(String(formData.get("returnTo") || ""))
+    : null;
+  const handoffOrgId = String(formData.get("handoffOrgId") || "").trim() || null;
 
   if (!name) {
     redirect("/console/clients/new?error=Name+is+required");
@@ -30,7 +36,9 @@ async function createClient(formData: FormData) {
     .replace(/(^-|-$)/g, "")
     .slice(0, 60) || id.slice(0, 8);
 
-  const actor = (await getSession())?.email || null;
+  const session = await getSession();
+  if (!session) redirect("/console/login");
+  const actor = session.email || null;
 
   try {
     await panelExec(
@@ -46,7 +54,16 @@ async function createClient(formData: FormData) {
       metadata: { name, companyName, billingEmail, tenantType, domain },
       result: "failure", error: msg,
     });
-    redirect(`/console/clients/new?error=${encodeURIComponent(msg)}`);
+    const params = new URLSearchParams({ error: msg, name });
+    if (companyName) params.set("companyName", companyName);
+    if (billingEmail) params.set("billingEmail", billingEmail);
+    if (domain) params.set("domain", domain);
+    if (returnTo) {
+      params.set("source", "platform");
+      params.set("returnTo", returnTo);
+      if (handoffOrgId) params.set("handoffOrgId", handoffOrgId);
+    }
+    redirect("/console/clients/new?" + params.toString());
   }
 
   await logClientEvent({
@@ -55,7 +72,12 @@ async function createClient(formData: FormData) {
     metadata: { name, companyName, billingEmail, tenantType, domain },
   });
 
-  redirect(tenantPath(id));
+  const platformReturn = buildPlatformHostingReturn({
+    returnTo,
+    createdTenantId: id,
+    handoffOrgId,
+  });
+  redirect(platformReturn ?? tenantPath(id));
 }
 
 export default async function NewClientPage({
@@ -68,28 +90,42 @@ export default async function NewClientPage({
     companyName?: string;
     billingEmail?: string;
     domain?: string;
+    returnTo?: string;
+    handoffOrgId?: string;
   }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/console/login");
   const sp = await searchParams;
   const fromPlatform = sp.source === "platform";
+  const safeReturnTo = fromPlatform ? sanitizePlatformHostingReturn(sp.returnTo) : null;
 
   return (
     <ConsolePageShell session={session} activePath="/console/clients" title="New Client">
       <FormShell
-        backHref="/console/clients"
-        backLabel="Back to Clients"
+        backHref={safeReturnTo ?? "/console/clients"}
+        backLabel={safeReturnTo ? "Back to Platform Hosting" : "Back to Clients"}
         title="Create a new client"
         description="Provision a new tenant in the MigraPanel database. The tenant becomes the parent for domains, mailboxes, subscriptions, and services."
         error={sp.error || null}
         notice={
           fromPlatform
-            ? "Prefilled from MigraTeck Platform. Review the tenant details before creating it, then return to Platform Hosting to bind the new tenant explicitly."
+            ? safeReturnTo
+              ? "Prefilled from MigraTeck Platform. Review the tenant details before creating it. After creation you will return to Platform Hosting to review and explicitly bind the new tenant."
+              : "Prefilled from MigraTeck Platform, but the return target was rejected by the safety allowlist. Creation will remain in MigraPanel until you return manually."
             : null
         }
         action={createClient}
       >
+        {safeReturnTo ? (
+          <>
+            <input type="hidden" name="source" value="platform" />
+            <input type="hidden" name="returnTo" value={safeReturnTo} />
+            {sp.handoffOrgId ? (
+              <input type="hidden" name="handoffOrgId" value={sp.handoffOrgId} />
+            ) : null}
+          </>
+        ) : null}
         <Field
           label="Company / Client Name"
           name="name"

@@ -109,6 +109,7 @@ type HostingSnapshot = {
   operationBoundary: {
     mode: string;
     consoleBaseUrl: string;
+    platformBaseUrl: string;
   };
 };
 
@@ -126,6 +127,17 @@ type PanelTenant = {
 type TenantSearchPayload = {
   canManageBindings: boolean;
   tenants: PanelTenant[];
+};
+
+type HandoffCandidate = {
+  tenantId: string;
+  name: string | null;
+  slug: string | null;
+  companyName: string | null;
+  status: string | null;
+  domains: string[];
+  serviceInstances: Array<{ id: string }>;
+  targetIps: string[];
 };
 
 function statusClass(status: string | null | undefined) {
@@ -165,6 +177,9 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
   const [canManageBindings, setCanManageBindings] = useState<boolean | null>(null);
   const [bindingBusy, setBindingBusy] = useState(false);
   const [bindingError, setBindingError] = useState<string | null>(null);
+  const [handoffCandidate, setHandoffCandidate] = useState<HandoffCandidate | null>(null);
+  const [handoffLoading, setHandoffLoading] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
 
   const load = useCallback(async (background = false) => {
     if (background) setRefreshing(true);
@@ -223,6 +238,63 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
     return () => window.clearTimeout(timer);
   }, [linking, tenantQuery, canManageBindings, loadTenants]);
 
+  useEffect(() => {
+    if (!snapshot || snapshot.binding) return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("handoff") !== "tenant_created") return;
+
+    const tenantId = params.get("createdTenantId")?.trim() ?? "";
+    const handoffOrgId = params.get("handoffOrgId")?.trim() ?? "";
+    if (!tenantId) {
+      setHandoffError("MigraPanel returned without a tenant identifier.");
+      return;
+    }
+    if (handoffOrgId && handoffOrgId !== snapshot.organization.id) {
+      setHandoffError(
+        "The returned tenant was created for a different active organization. No binding was attempted.",
+      );
+      return;
+    }
+
+    let cancelled = false;
+    setHandoffLoading(true);
+    setHandoffError(null);
+
+    void fetch(
+      "/api/platform/hosting/tenants/" +
+        encodeURIComponent(tenantId) +
+        "/recovery-context",
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(body.error ?? "Unable to verify the newly created MigraPanel tenant");
+        }
+        if (!cancelled) {
+          setHandoffCandidate((body as { candidate: HandoffCandidate }).candidate);
+          void loadTenants(tenantId);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setHandoffError(
+            error instanceof Error
+              ? error.message
+              : "Unable to verify the newly created MigraPanel tenant",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHandoffLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot, loadTenants]);
+
   const expiringCertificates = useMemo(
     () =>
       snapshot?.certificates.filter((certificate) => {
@@ -235,6 +307,14 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
   async function openLinker() {
     setLinking(true);
     if (canManageBindings === null) await loadTenants("");
+  }
+
+  function clearHandoffQuery() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("handoff");
+    url.searchParams.delete("createdTenantId");
+    url.searchParams.delete("handoffOrgId");
+    window.history.replaceState(null, "", url.pathname + (url.search ? "?" + url.searchParams.toString() : ""));
   }
 
   async function bindTenant(tenant: PanelTenant) {
@@ -260,6 +340,9 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
       if (!response.ok) throw new Error(body.error ?? "Unable to link MigraPanel tenant");
       setLinking(false);
       setTenantQuery("");
+      setHandoffCandidate(null);
+      setHandoffError(null);
+      clearHandoffQuery();
       await load(true);
     } catch (err) {
       setBindingError(err instanceof Error ? err.message : "Unable to link MigraPanel tenant");
@@ -322,6 +405,7 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
   }
 
   const baseUrl = snapshot.operationBoundary.consoleBaseUrl.replace(/\/$/, "");
+  const platformBaseUrl = snapshot.operationBoundary.platformBaseUrl.replace(/\/$/, "");
   const createTenantUrl =
     baseUrl +
     "/console/clients/new?" +
@@ -329,6 +413,8 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
       source: "platform",
       name: snapshot.organization.name,
       companyName: snapshot.organization.name,
+      returnTo: platformBaseUrl + "/platform/hosting",
+      handoffOrgId: snapshot.organization.id,
     }).toString();
 
   return (
@@ -417,6 +503,104 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
         </section>
       ) : null}
 
+      {handoffLoading ? (
+        <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+          <div className="flex items-center gap-3 text-sm font-medium text-blue-900">
+            <Loader2 size={17} className="animate-spin" />
+            Verifying the newly created MigraPanel tenant before binding…
+          </div>
+        </section>
+      ) : null}
+
+      {handoffError ? (
+        <section className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-700" />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-semibold text-rose-950">Tenant handoff could not be verified</h3>
+              <p className="mt-1 text-sm leading-6 text-rose-800">{handoffError}</p>
+              <button
+                onClick={() => {
+                  setHandoffError(null);
+                  setHandoffCandidate(null);
+                  clearHandoffQuery();
+                }}
+                className="mt-3 text-sm font-semibold text-rose-700 hover:text-rose-800"
+              >
+                Dismiss handoff
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {handoffCandidate && !snapshot.binding ? (
+        <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700">
+                  Tenant created
+                </span>
+                <span className={"rounded-full px-2.5 py-1 text-[10px] font-semibold " + statusClass(handoffCandidate.status)}>
+                  {handoffCandidate.status ?? "unknown"}
+                </span>
+              </div>
+              <h2 className="mt-3 text-lg font-semibold text-emerald-950">
+                {handoffCandidate.name ?? handoffCandidate.companyName ?? handoffCandidate.tenantId}
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-emerald-800">
+                MigraPanel returned this tenant to MigraTeck. Its identity was reloaded through the platform-authority bridge. Review it before creating the cross-system binding.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-emerald-800">
+                {handoffCandidate.slug ? <span>Slug: {handoffCandidate.slug}</span> : null}
+                <span>{handoffCandidate.domains.length} domain signal{handoffCandidate.domains.length === 1 ? "" : "s"}</span>
+                <span>{handoffCandidate.serviceInstances.length} service instance{handoffCandidate.serviceInstances.length === 1 ? "" : "s"}</span>
+                <span>{handoffCandidate.targetIps.length} target IP signal{handoffCandidate.targetIps.length === 1 ? "" : "s"}</span>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <a
+                href={baseUrl + "/console/clients/" + encodeURIComponent(handoffCandidate.tenantId)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+              >
+                Review in MigraPanel <ExternalLink size={14} />
+              </a>
+              <button
+                onClick={() =>
+                  void bindTenant({
+                    id: handoffCandidate.tenantId,
+                    name: handoffCandidate.name,
+                    slug: handoffCandidate.slug,
+                    domain: handoffCandidate.domains[0] ?? null,
+                    status: handoffCandidate.status,
+                    tenantType: null,
+                    companyName: handoffCandidate.companyName,
+                    websiteCount: handoffCandidate.serviceInstances.length,
+                  })
+                }
+                disabled={bindingBusy || canManageBindings !== true}
+                title={
+                  canManageBindings === false
+                    ? "platform.hosting.bindings.manage is required"
+                    : undefined
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bindingBusy || canManageBindings === null ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <Link2 size={15} />
+                )}
+                {canManageBindings === false ? "Binding authority required" : "Bind this tenant"}
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {!snapshot.binding ? (
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-start gap-4">
@@ -435,16 +619,8 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
                   onClick={() => void openLinker()}
                   className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
                 >
-                  <Link2 size={15} /> Link MigraPanel tenant
+                  <Link2 size={15} /> Link or create MigraPanel tenant
                 </button>
-                <a
-                  href={createTenantUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                >
-                  Create tenant in MigraPanel <ExternalLink size={14} />
-                </a>
               </div>
             </div>
           </div>
@@ -475,6 +651,19 @@ export function HostingWorkspace({ hostingEnabled }: { hostingEnabled: boolean }
                         className="absolute right-3.5 top-1/2 -translate-y-1/2 animate-spin text-slate-400"
                       />
                     ) : null}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-500">
+                      Search existing tenants first. Create a new tenant only when no authoritative tenant exists.
+                    </p>
+                    <a
+                      href={createTenantUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                    >
+                      Create new tenant <ExternalLink size={13} />
+                    </a>
                   </div>
                   {bindingError ? (
                     <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">

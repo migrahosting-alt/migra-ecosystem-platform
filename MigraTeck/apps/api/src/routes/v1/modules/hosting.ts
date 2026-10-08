@@ -49,6 +49,10 @@ export async function registerHostingRoutes(app: FastifyInstance): Promise<void>
         mode: "observe_here_operate_in_migrapanel",
         consoleBaseUrl:
           process.env.MIGRAPANEL_CONSOLE_URL?.trim() || "https://migrapanel.com",
+        platformBaseUrl:
+          process.env.APP_BASE_URL?.trim() ||
+          process.env.MIGRATECK_LAUNCH_URL?.trim() ||
+          "https://migrateck.com",
       },
     };
   });
