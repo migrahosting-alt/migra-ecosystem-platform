@@ -136,13 +136,17 @@ function eventClass(event: string) {
   return "bg-slate-100 text-slate-600";
 }
 
-export function TrustOperationsWorkspace() {
+export function TrustOperationsWorkspace({
+  initialQuery = "",
+}: {
+  initialQuery?: string;
+}) {
   const [tab, setTab] = useState<"accounts" | "audit">("accounts");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [status, setStatus] = useState("");
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [usersTotal, setUsersTotal] = useState(0);
@@ -249,8 +253,7 @@ export function TrustOperationsWorkspace() {
 
   useEffect(() => {
     void loadOverview();
-    void loadUsers("", "");
-  }, [loadOverview, loadUsers]);
+  }, [loadOverview]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

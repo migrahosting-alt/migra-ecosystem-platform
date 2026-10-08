@@ -14,6 +14,16 @@ export default async function PlatformLayout({
   ensureAuthClientInitialized();
   const session = await requirePermission("platform.read");
   const organizations = getPlatformOrganizations(session);
+  const platformAuthority =
+    (session.productAccount as
+      | {
+          platformAuthority?: {
+            roles?: string[];
+          } | null;
+        }
+      | null
+      | undefined)?.platformAuthority ?? null;
+  const operatorSearchEnabled = (platformAuthority?.roles?.length ?? 0) > 0;
 
   return (
     <div className="fixed inset-0 z-[100] flex bg-slate-950">
@@ -22,6 +32,7 @@ export default async function PlatformLayout({
         <PlatformTopBar
           {...(session.activeOrgId ? { activeOrgId: session.activeOrgId } : {})}
           organizations={organizations}
+          operatorSearchEnabled={operatorSearchEnabled}
           session={{
             email: session.email,
             ...(session.displayName ? { displayName: session.displayName } : {}),

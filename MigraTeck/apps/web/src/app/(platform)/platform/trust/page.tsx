@@ -11,9 +11,16 @@ import { TrustOperationsWorkspace } from "@/components/platform/TrustOperationsW
 
 export const dynamic = "force-dynamic";
 
-export default async function TrustOverviewPage() {
+export default async function TrustOverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string | string[] }>;
+}) {
   ensureAuthClientInitialized();
   await requirePermission("platform.read");
+  const params = await searchParams;
+  const rawQuery = Array.isArray(params.q) ? params.q[0] : params.q;
+  const initialQuery = rawQuery?.trim().slice(0, 160) ?? "";
 
   return (
     <div className="p-5 sm:p-6 lg:p-8">
@@ -45,7 +52,7 @@ export default async function TrustOverviewPage() {
         }
       />
 
-      <TrustOperationsWorkspace />
+      <TrustOperationsWorkspace initialQuery={initialQuery} />
     </div>
   );
 }
