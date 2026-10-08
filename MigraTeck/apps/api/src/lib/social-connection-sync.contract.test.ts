@@ -94,6 +94,7 @@ test("analyzer exposes health metadata without returning credential ciphertext",
   assert.ok(!analyzer.includes("credentialCiphertext:"));
   assert.ok(!analyzer.includes("refreshTokenCiphertext:"));
   assert.ok(analyzer.includes("recommendedAction"));
+  assert.ok(analyzer.includes("providerSetupRequired"));
 });
 
 test("managed worker has heartbeat and graceful shutdown", () => {
@@ -125,6 +126,82 @@ test("invalid token wording is terminal even when token and invalid are separate
   assert.equal(health.requiresReconnect, true);
   assert.equal(health.state, "reconnect_required");
   assert.equal(health.recommendedAction, "reconnect");
+});
+
+test("Meta connections without a publishable Page or business account require provider setup", () => {
+  for (const [platform, message] of [
+    ["facebook", "No Facebook pages were found for this Meta connection."],
+    ["instagram", "No Instagram business account was found for this Meta connection."],
+  ] as const) {
+    const health = assessSocialConnectionHealth(
+      {
+        platform,
+        accessModel: "oauth",
+        status: "ready",
+        externalAccountId: "meta-account",
+        metadata: { lastSyncError: message },
+        tokenExpiresAt: null,
+        credentialCiphertext: "encrypted-placeholder",
+        lastVerifiedAt: new Date("2026-10-08T21:25:00Z"),
+      },
+      new Date("2026-10-08T21:30:00Z"),
+    );
+
+    assert.equal(health.providerSetupRequired, true, platform);
+    assert.equal(health.requiresReconnect, true, platform);
+    assert.equal(health.state, "reconnect_required", platform);
+    assert.equal(health.recommendedAction, "reconnect", platform);
+    assert.equal(health.summary, "Provider account setup required", platform);
+  }
+});
+
+test("provider refresh windows avoid refreshing short-lived tokens too early", () => {
+  const previous = process.env.SOCIAL_CONNECTION_SYNC_REFRESH_WINDOW_HOURS;
+  process.env.SOCIAL_CONNECTION_SYNC_REFRESH_WINDOW_HOURS = "72";
+
+  try {
+    const now = new Date("2026-10-08T21:00:00Z");
+    const base = {
+      platform: "youtube",
+      accessModel: "oauth",
+      status: "ready",
+      externalAccountId: "channel",
+      metadata: {},
+      credentialCiphertext: "encrypted-placeholder",
+      lastVerifiedAt: now,
+    };
+
+    const twentyMinutes = assessSocialConnectionHealth(
+      {
+        ...base,
+        tokenExpiresAt: new Date(now.getTime() + 20 * 60 * 1000),
+      },
+      now,
+    );
+    assert.equal(twentyMinutes.state, "healthy");
+
+    const tenMinutes = assessSocialConnectionHealth(
+      {
+        ...base,
+        tokenExpiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+      },
+      now,
+    );
+    assert.equal(tenMinutes.state, "token_expiring");
+    assert.equal(tenMinutes.recommendedAction, "refresh");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.SOCIAL_CONNECTION_SYNC_REFRESH_WINDOW_HOURS;
+    } else {
+      process.env.SOCIAL_CONNECTION_SYNC_REFRESH_WINDOW_HOURS = previous;
+    }
+  }
+});
+
+test("OAuth provider errors preserve string error codes and descriptions", () => {
+  assert.match(core, /typeof body\.error === "string"/);
+  assert.match(core, /errorCode \+ ": " \+ errorDescription/);
+  assert.match(core, /structuredMessage/);
 });
 
 test("sync and refresh failures honor the configured retry backoff window", () => {

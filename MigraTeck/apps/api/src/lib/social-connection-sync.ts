@@ -71,6 +71,7 @@ export type SocialConnectionHealth = {
   verificationStale: boolean;
   missingAccountBinding: boolean;
   requiresReconnect: boolean;
+  providerSetupRequired: boolean;
   needsAttention: boolean;
   lastSyncError: string | null;
   expiresInHours: number | null;
@@ -107,6 +108,20 @@ function verificationStaleHours(): number {
     process.env.SOCIAL_CONNECTION_SYNC_VERIFICATION_STALE_HOURS,
     24,
   );
+}
+
+function platformRefreshWindowMs(platform: string): number {
+  const configured = refreshWindowHours() * 60 * 60 * 1000;
+  const normalized = platform.trim().toLowerCase();
+  const platformCapHours =
+    normalized === "youtube"
+      ? 0.25
+      : normalized === "x"
+        ? 0.5
+        : normalized === "tiktok"
+          ? 2
+          : 72;
+  return Math.min(configured, platformCapHours * 60 * 60 * 1000);
 }
 
 function errorRetryMinutes(): number {
@@ -166,6 +181,12 @@ function shouldRequireReconnect(message: string): boolean {
   );
 }
 
+function shouldRequireProviderSetup(message: string): boolean {
+  return /no facebook pages? (?:were )?found|no instagram business account (?:was )?found/i.test(
+    message,
+  );
+}
+
 function metadataDate(metadata: unknown, key: string): Date | null {
   const value = readMetadataString(metadata, key);
   if (!value) return null;
@@ -216,7 +237,7 @@ export function assessSocialConnectionHealth(
     REFRESHABLE_PLATFORMS.has(
       String(connection.platform || "").trim().toLowerCase(),
     );
-  const refreshWindowMs = refreshWindowHours() * 60 * 60 * 1000;
+  const refreshWindowMs = platformRefreshWindowMs(connection.platform);
   const verificationWindowMs = verificationStaleHours() * 60 * 60 * 1000;
   const tokenExpiresAt = connection.tokenExpiresAt || null;
   const lastVerifiedAt = connection.lastVerifiedAt || null;
@@ -238,8 +259,10 @@ export function assessSocialConnectionHealth(
   const statusRequiresReconnect =
     String(connection.status || "").trim().toLowerCase() ===
     "reconnect_required";
+  const providerSetupRequired = shouldRequireProviderSetup(lastSyncError || "");
   const requiresReconnect =
     statusRequiresReconnect ||
+    providerSetupRequired ||
     shouldRequireReconnect(lastSyncError || "") ||
     (oauthManaged && connected && tokenExpired && !canAutoRefresh);
 
@@ -254,7 +277,9 @@ export function assessSocialConnectionHealth(
   } else if (requiresReconnect) {
     state = "reconnect_required";
     recommendedAction = "reconnect";
-    summary = "Reconnect required";
+    summary = providerSetupRequired
+      ? "Provider account setup required"
+      : "Reconnect required";
   } else if (tokenExpired || tokenExpiresSoon) {
     state = "token_expiring";
     recommendedAction = canAutoRefresh ? "refresh" : "reconnect";
@@ -283,6 +308,7 @@ export function assessSocialConnectionHealth(
     verificationStale,
     missingAccountBinding,
     requiresReconnect,
+    providerSetupRequired,
     needsAttention: state !== "healthy",
     lastSyncError,
     expiresInHours:
@@ -428,9 +454,15 @@ async function fetchJson(
     }
     if (!response.ok) {
       const errorBody = asRecord(body.error);
+      const errorCode =
+        typeof body.error === "string" ? asString(body.error) : null;
+      const errorDescription = asString(body.error_description);
+      const structuredMessage = asString(errorBody.message);
       const message =
-        asString(errorBody.message) ||
-        asString(body.error_description) ||
+        structuredMessage ||
+        (errorCode && errorDescription
+          ? errorCode + ": " + errorDescription
+          : errorCode || errorDescription) ||
         asString(body.message) ||
         raw ||
         "status=" + response.status;
@@ -1338,6 +1370,7 @@ export async function analyzeSocialConnectionSyncQueue(
       tokenExpiresSoon: health.tokenExpiresSoon,
       verificationStale: health.verificationStale,
       requiresReconnect: health.requiresReconnect,
+      providerSetupRequired: health.providerSetupRequired,
       expiresInHours: health.expiresInHours,
       tokenExpiresAt: connection.tokenExpiresAt,
       lastVerifiedAt: connection.lastVerifiedAt,
