@@ -164,6 +164,17 @@ export type EntitlementTransitionAvailability = {
   reason: string | null;
 };
 
+export type EntitlementReconciliationAvailability = {
+  product: ProductKey;
+  status: EntitlementStatus;
+  available: boolean;
+  mode: "provisioning" | "blocked" | "not_required";
+  actions: ProvisioningAction[];
+  requiredFields: ProvisioningContextField[];
+  requiredInputs: ProvisioningInputDescriptor[];
+  reason: string | null;
+};
+
 type CurrentEntitlement = {
   id: string;
   product: ProductKey;
@@ -182,6 +193,10 @@ type DeferredEntitlementIntent = {
   endsAt: Date | null;
   notes: string | null;
 };
+
+type EntitlementProvisioningIntent =
+  | "org_entitlement_transition"
+  | "org_entitlement_reconciliation";
 
 type OrganizationRow = {
   id: string;
@@ -479,6 +494,100 @@ export async function getEntitlementTransitionAvailability(input: {
   };
 }
 
+export async function getEntitlementReconciliationAvailability(input: {
+  orgSlug: string;
+  product: ProductKey;
+  status: EntitlementStatus;
+  worker?: ProvisioningWorkerStatus;
+}): Promise<EntitlementReconciliationAvailability> {
+  if (!ACTIVE_LIKE.has(input.status)) {
+    return {
+      product: input.product,
+      status: input.status,
+      available: false,
+      mode: "blocked",
+      actions: [],
+      requiredFields: [],
+      requiredInputs: [],
+      reason: "Only an active-like entitlement can be reconciled.",
+    };
+  }
+
+  const actions = provisionActions(input.product, isInternalOrg(input.orgSlug));
+  if (actions.length === 0) {
+    return {
+      product: input.product,
+      status: input.status,
+      available: false,
+      mode: "not_required",
+      actions,
+      requiredFields: [],
+      requiredInputs: [],
+      reason:
+        "This product lane has no managed external provisioning actions to reconcile.",
+    };
+  }
+
+  const worker = input.worker ?? (await getProvisioningWorkerStatus());
+  if (!worker.ready) {
+    return {
+      product: input.product,
+      status: input.status,
+      available: false,
+      mode: "blocked",
+      actions,
+      requiredFields: [],
+      requiredInputs: [],
+      reason: worker.reason ?? "managed provisioning worker is unavailable",
+    };
+  }
+
+  if (!provisioningProductAllowed(input.product)) {
+    return {
+      product: input.product,
+      status: input.status,
+      available: false,
+      mode: "blocked",
+      actions,
+      requiredFields: [],
+      requiredInputs: [],
+      reason:
+        "Managed provisioning rollout policy does not allow the " +
+        input.product +
+        " product lane.",
+    };
+  }
+
+  const required = new Set<ProvisioningContextField>();
+  for (const action of actions) {
+    const actionReadiness = readinessForAction(input.product, action);
+    if (!actionReadiness.supported) {
+      return {
+        product: input.product,
+        status: input.status,
+        available: false,
+        mode: "blocked",
+        actions,
+        requiredFields: [...required],
+        requiredInputs: getProvisioningInputDescriptors([...required]),
+        reason: actionReadiness.reason,
+      };
+    }
+    for (const field of actionReadiness.requiredFields) required.add(field);
+  }
+
+  return {
+    product: input.product,
+    status: input.status,
+    available: true,
+    mode: "provisioning",
+    actions,
+    requiredFields: [...required],
+    requiredInputs: getProvisioningInputDescriptors([...required]),
+    reason: null,
+  };
+}
+
 export async function buildEntitlementTransitionMatrix(input: {
   orgSlug: string;
   entitlements: Array<{ product: ProductKey; status: EntitlementStatus }>;
@@ -499,10 +608,17 @@ export async function buildEntitlementTransitionMatrix(input: {
         }),
       );
     }
+    const reconciliation = await getEntitlementReconciliationAvailability({
+      orgSlug: input.orgSlug,
+      product: entitlement.product,
+      status: entitlement.status,
+      worker,
+    });
     rows.push({
       product: entitlement.product,
       currentStatus: entitlement.status,
       targets,
+      reconciliation,
     });
   }
 
@@ -517,7 +633,7 @@ function requiredContextValue(
 }
 
 function validateContext(
-  availability: EntitlementTransitionAvailability,
+  availability: Pick<EntitlementTransitionAvailability, "requiredFields">,
   context: EntitlementProvisioningContext,
 ): void {
   const missing = availability.requiredFields.filter((field) => {
@@ -564,7 +680,8 @@ async function queueTransitionAction(
     action: ProvisioningAction;
     previousStatus: EntitlementStatus;
     newStatus: EntitlementStatus;
-    transitionId: string;
+    intent: EntitlementProvisioningIntent;
+    operationId: string;
     reason: string;
     context: EntitlementProvisioningContext;
     entitlementIntent: DeferredEntitlementIntent;
@@ -602,8 +719,10 @@ async function queueTransitionAction(
     productLane: input.product,
     previousStatus: input.previousStatus,
     newStatus: input.newStatus,
-    intent: "org_entitlement_transition",
-    transitionId: input.transitionId,
+    intent: input.intent,
+    ...(input.intent === "org_entitlement_transition"
+      ? { transitionId: input.operationId }
+      : { reconciliationId: input.operationId }),
     operatorReason: input.reason,
     entitlementApplyMode: input.entitlementIntent.applyMode,
     entitlementId: input.entitlementIntent.entitlementId,
@@ -641,8 +760,10 @@ async function queueTransitionAction(
   );
 
   const idempotencyKey =
-    "manual-entitlement:" +
-    input.transitionId +
+    (input.intent === "org_entitlement_transition"
+      ? "manual-entitlement:"
+      : "entitlement-reconcile:") +
+    input.operationId +
     ":" +
     input.orgId +
     ":" +
@@ -678,6 +799,8 @@ async function queueTransitionAction(
         type,
         action: input.action,
         product: input.product,
+        intent: input.intent,
+        operationId: input.operationId,
       }),
       createdAt,
     ],
@@ -904,7 +1027,8 @@ export async function mutateOrganizationEntitlement(input: {
           action,
           previousStatus,
           newStatus: input.newStatus,
-          transitionId,
+          intent: "org_entitlement_transition",
+          operationId: transitionId,
           reason: input.reason,
           context: input.context,
           entitlementIntent,
@@ -994,6 +1118,199 @@ export async function mutateOrganizationEntitlement(input: {
       message: deferUntilProvisioned
         ? "Provisioning queued. Product access remains restricted until every provisioning job succeeds."
         : "Access update committed and audited.",
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function reconcileOrganizationEntitlementProvisioning(input: {
+  orgId: string;
+  actorId: string;
+  product: ProductKey;
+  expectedUpdatedAt: string;
+  reason: string;
+  context: EntitlementProvisioningContext;
+  ip?: string | null;
+  userAgent?: string | null;
+}) {
+  if (!PRODUCT_KEYS.includes(input.product)) {
+    throw Object.assign(new Error("Unsupported product"), { statusCode: 400 });
+  }
+
+  const client = await getDb().connect();
+  try {
+    await client.query("BEGIN");
+
+    const orgResult = await client.query<OrganizationRow>(
+      'SELECT id,name,slug FROM "Organization" WHERE id=$1 FOR UPDATE',
+      [input.orgId],
+    );
+    const organization = orgResult.rows[0];
+    if (!organization) {
+      throw Object.assign(new Error("Organization not found"), { statusCode: 404 });
+    }
+
+    const currentResult = await client.query<CurrentEntitlement>(
+      'SELECT id,product::text AS product,status::text AS status,"startsAt","endsAt",notes,"updatedAt" FROM "OrgEntitlement" WHERE "orgId"=$1 AND product=$2::"ProductKey" FOR UPDATE',
+      [input.orgId, input.product],
+    );
+    const current = currentResult.rows[0];
+    if (!current) {
+      throw Object.assign(
+        new Error("A persisted entitlement is required before provisioning can be reconciled."),
+        { statusCode: 409 },
+      );
+    }
+    if (!ACTIVE_LIKE.has(current.status)) {
+      throw Object.assign(
+        new Error("Only an active-like entitlement can be reconciled."),
+        { statusCode: 409 },
+      );
+    }
+
+    const actualUpdatedAt = new Date(current.updatedAt).toISOString();
+    if (input.expectedUpdatedAt !== actualUpdatedAt) {
+      throw Object.assign(
+        new Error("Entitlement changed since it was loaded. Refresh before reconciling provisioning."),
+        { statusCode: 409 },
+      );
+    }
+
+    const inFlight = await client.query<{
+      id: string;
+      intent: string | null;
+      operationId: string | null;
+    }>(
+      `SELECT
+         id,
+         payload->>'intent' AS intent,
+         COALESCE(payload->>'transitionId',payload->>'reconciliationId') AS "operationId"
+       FROM "ProvisioningJob"
+       WHERE "orgId"=$1
+         AND source='MANUAL'::"ProvisioningJobSource"
+         AND payload->>'product'=$2
+         AND (
+           (
+             payload->>'intent'='org_entitlement_transition'
+             AND payload->>'entitlementApplyMode'='after_all_jobs_succeed'
+             AND status::text = ANY($3::text[])
+             AND NOT EXISTS (
+               SELECT 1
+               FROM "AuditLog" a
+               WHERE a.action = ANY($4::text[])
+                 AND a.metadata->>'transitionId'=payload->>'transitionId'
+             )
+           )
+           OR
+           (
+             payload->>'intent'='org_entitlement_reconciliation'
+             AND status::text = ANY($5::text[])
+           )
+         )
+       ORDER BY "createdAt" ASC
+       LIMIT 1`,
+      [
+        input.orgId,
+        input.product,
+        ["PENDING", "RUNNING", "SUCCEEDED"],
+        ["ORG_ENTITLEMENT_TRANSITION_APPLIED", "ORG_ENTITLEMENT_TRANSITION_STALE"],
+        ["PENDING", "RUNNING"],
+      ],
+    );
+    if (inFlight.rows[0]) {
+      throw Object.assign(
+        new Error(
+          inFlight.rows[0].intent === "org_entitlement_reconciliation"
+            ? "Provisioning reconciliation is already in progress for this product."
+            : "A provisioning-backed entitlement transition is already pending for this product.",
+        ),
+        {
+          statusCode: 409,
+          operationId: inFlight.rows[0].operationId,
+        },
+      );
+    }
+
+    const availability = await getEntitlementReconciliationAvailability({
+      orgSlug: organization.slug,
+      product: input.product,
+      status: current.status,
+    });
+    if (!availability.available) {
+      throw Object.assign(
+        new Error(
+          availability.reason ??
+            "This entitlement provisioning lane does not require reconciliation.",
+        ),
+        { statusCode: 409 },
+      );
+    }
+    validateContext(availability, input.context);
+
+    const reconciliationId = randomUUID();
+    const queued = [];
+    const entitlementIntent: DeferredEntitlementIntent = {
+      applyMode: "already_applied",
+      entitlementId: current.id,
+      expectedUpdatedAt: current.updatedAt,
+      startsAt: current.startsAt,
+      endsAt: current.endsAt,
+      notes: current.notes,
+    };
+
+    for (const action of availability.actions) {
+      queued.push(
+        await queueTransitionAction(client, {
+          orgId: input.orgId,
+          actorId: input.actorId,
+          product: input.product,
+          action,
+          previousStatus: current.status,
+          newStatus: current.status,
+          intent: "org_entitlement_reconciliation",
+          operationId: reconciliationId,
+          reason: input.reason,
+          context: input.context,
+          entitlementIntent,
+        }),
+      );
+    }
+
+    await client.query(
+      'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,\'ORG_ENTITLEMENT_PROVISIONING_RECONCILIATION_QUEUED\',\'org_entitlement\',$4,$5,$6,$7::jsonb,NOW())',
+      [
+        randomUUID(),
+        input.actorId,
+        input.orgId,
+        current.id,
+        input.ip ?? null,
+        input.userAgent ?? null,
+        JSON.stringify({
+          reconciliationId,
+          reason: input.reason,
+          product: input.product,
+          status: current.status,
+          entitlementUpdatedAt: actualUpdatedAt,
+          actions: availability.actions,
+          requiredFields: availability.requiredFields,
+          jobs: queued.map((job) => job.jobId),
+        }),
+      ],
+    );
+
+    await client.query("COMMIT");
+    return {
+      organization,
+      entitlement: current,
+      availability,
+      reconciliationId,
+      queued,
+      message:
+        "Provisioning reconciliation queued. Current product access was not changed.",
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

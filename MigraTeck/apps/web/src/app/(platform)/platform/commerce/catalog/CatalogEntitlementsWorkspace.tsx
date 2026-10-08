@@ -75,6 +75,17 @@ type EntitlementTransition = {
   reason: string | null;
 };
 
+type EntitlementReconciliation = {
+  product: ProductKey;
+  status: EntitlementStatus;
+  available: boolean;
+  mode: "provisioning" | "blocked" | "not_required";
+  actions: string[];
+  requiredFields: string[];
+  requiredInputs: ProvisioningInputDescriptor[];
+  reason: string | null;
+};
+
 type AccessEntitlement = {
   product: ProductKey;
   status: EntitlementStatus;
@@ -92,6 +103,12 @@ type EntitlementEditorState = {
   reason: string;
   notes: string;
   acknowledgeBillingOverride: boolean;
+  context: Record<string, string>;
+};
+
+type ReconciliationEditorState = {
+  product: ProductKey;
+  reason: string;
   context: Record<string, string>;
 };
 
@@ -309,6 +326,7 @@ type AccessPayload = {
     product: ProductKey;
     currentStatus: EntitlementStatus;
     targets: EntitlementTransition[];
+    reconciliation: EntitlementReconciliation;
   }>;
   organization: {
     id: string;
@@ -436,6 +454,11 @@ export function CatalogEntitlementsWorkspace() {
     useState<EntitlementEditorState | null>(null);
   const [entitlementSaving, setEntitlementSaving] = useState(false);
   const [entitlementMessage, setEntitlementMessage] = useState<string | null>(null);
+  const [reconciliationEditor, setReconciliationEditor] =
+    useState<ReconciliationEditorState | null>(null);
+  const [reconciliationSaving, setReconciliationSaving] = useState(false);
+  const [reconciliationMessage, setReconciliationMessage] =
+    useState<string | null>(null);
   const [deadLetter, setDeadLetter] = useState<DeadLetterRemediation | null>(null);
   const [deadLetterLoadingId, setDeadLetterLoadingId] = useState<string | null>(null);
   const [deadLetterError, setDeadLetterError] = useState<string | null>(null);
@@ -517,6 +540,8 @@ export function CatalogEntitlementsWorkspace() {
     setSelectedOrgId(orgId);
     setEntitlementEditor(null);
     setEntitlementMessage(null);
+    setReconciliationEditor(null);
+    setReconciliationMessage(null);
     await loadAccess(orgId);
   }
 
@@ -537,7 +562,18 @@ export function CatalogEntitlementsWorkspace() {
     return row?.targets.find((target) => target.toStatus === status) ?? null;
   }
 
+  function reconciliationFor(
+    product: ProductKey,
+  ): EntitlementReconciliation | null {
+    return (
+      access?.transitions.find((item) => item.product === product)
+        ?.reconciliation ?? null
+    );
+  }
+
   function openEntitlementEditor(entitlement: AccessEntitlement) {
+    setReconciliationEditor(null);
+    setReconciliationMessage(null);
     setEntitlementEditor({
       product: entitlement.product,
       status: entitlement.status,
@@ -730,6 +766,184 @@ export function CatalogEntitlementsWorkspace() {
     }
   }
 
+
+  function openReconciliationEditor(entitlement: AccessEntitlement) {
+    setReconciliationEditor({
+      product: entitlement.product,
+      reason: "",
+      context: {},
+    });
+    setReconciliationMessage(null);
+    setEntitlementEditor(null);
+  }
+
+  async function saveReconciliation() {
+    if (!access || !selectedOrgId || !reconciliationEditor) return;
+
+    const current = access.entitlements.find(
+      (item) => item.product === reconciliationEditor.product,
+    );
+    const reconciliation = reconciliationFor(reconciliationEditor.product);
+    if (!current || !current.persisted || !current.updatedAt || !reconciliation) {
+      setReconciliationMessage(
+        "Refresh access evidence before reconciling this product.",
+      );
+      return;
+    }
+    if (!reconciliation.available) {
+      setReconciliationMessage(
+        reconciliation.reason ??
+          "This provisioning lane is not available for reconciliation.",
+      );
+      return;
+    }
+    if (reconciliationEditor.reason.trim().length < 3) {
+      setReconciliationMessage("An operator reason is required.");
+      return;
+    }
+
+    const descriptorKeys = new Set(
+      reconciliation.requiredInputs.map((input) => input.key),
+    );
+    const missingDescriptors = reconciliation.requiredFields.filter(
+      (field) => !descriptorKeys.has(field),
+    );
+    if (missingDescriptors.length > 0) {
+      setReconciliationMessage(
+        "Provisioning input metadata is incomplete for: " +
+          missingDescriptors.join(", ") +
+          ". Refresh before retrying.",
+      );
+      return;
+    }
+
+    const context: Record<string, unknown> = {};
+    for (const input of reconciliation.requiredInputs) {
+      const raw = reconciliationEditor.context[input.key] ?? "";
+      const normalized = input.kind === "password" ? raw : raw.trim();
+      if (!normalized.length) continue;
+
+      if (input.kind === "number") {
+        const numeric = Number(normalized);
+        if (!Number.isFinite(numeric)) {
+          setReconciliationMessage(input.label + " must be a valid number.");
+          return;
+        }
+        if (input.min !== undefined && numeric < input.min) {
+          setReconciliationMessage(
+            input.label + " must be at least " + input.min + ".",
+          );
+          return;
+        }
+        if (input.max !== undefined && numeric > input.max) {
+          setReconciliationMessage(
+            input.label + " must be no more than " + input.max + ".",
+          );
+          return;
+        }
+        context[input.key] = numeric;
+        continue;
+      }
+
+      if (input.kind === "json") {
+        try {
+          const parsed = JSON.parse(normalized) as unknown;
+          if (
+            parsed === null ||
+            typeof parsed !== "object" ||
+            Array.isArray(parsed)
+          ) {
+            setReconciliationMessage(input.label + " must be a JSON object.");
+            return;
+          }
+          context[input.key] = parsed;
+        } catch {
+          setReconciliationMessage(input.label + " must contain valid JSON.");
+          return;
+        }
+        continue;
+      }
+
+      context[input.key] = normalized;
+    }
+
+    const missingContext = reconciliation.requiredInputs
+      .filter((input) => context[input.key] === undefined)
+      .map((input) => input.label);
+    if (missingContext.length > 0) {
+      setReconciliationMessage(
+        "Required provisioning context is missing: " +
+          missingContext.join(", "),
+      );
+      return;
+    }
+
+    setReconciliationSaving(true);
+    setReconciliationMessage(null);
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/organizations/" +
+          encodeURIComponent(selectedOrgId) +
+          "/entitlements/" +
+          encodeURIComponent(reconciliationEditor.product) +
+          "/reconcile",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedUpdatedAt: current.updatedAt,
+            reason: reconciliationEditor.reason.trim(),
+            context,
+          }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          body.error ?? "Unable to reconcile product provisioning",
+        );
+      }
+
+      setReconciliationMessage(
+        typeof body?.message === "string"
+          ? body.message
+          : "Provisioning reconciliation queued. Current product access was not changed.",
+      );
+      setReconciliationEditor(null);
+      await Promise.all([
+        loadAccess(selectedOrgId),
+        loadOrganizations(orgQuery),
+        loadCatalog(),
+      ]);
+    } catch (error) {
+      setReconciliationMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to reconcile product provisioning",
+      );
+    } finally {
+      setReconciliationSaving(false);
+      const sensitiveKeys = new Set(
+        reconciliation.requiredInputs
+          .filter((input) => input.sensitive)
+          .map((input) => input.key),
+      );
+      setReconciliationEditor((currentEditor) =>
+        currentEditor
+          ? {
+              ...currentEditor,
+              context: Object.fromEntries(
+                Object.entries(currentEditor.context).map(([key, value]) => [
+                  key,
+                  sensitiveKeys.has(key) ? "" : value,
+                ]),
+              ),
+            }
+          : currentEditor,
+      );
+    }
+  }
+
   function editBinding(binding: Binding) {
     setBindingEditor({
       externalPriceId: binding.externalPriceId,
@@ -848,6 +1062,15 @@ export function CatalogEntitlementsWorkspace() {
         (item) => item.product === entitlementEditor.product,
       )?.targets ?? []
     : [];
+  const reconcilingEntitlement =
+    access && reconciliationEditor
+      ? access.entitlements.find(
+          (item) => item.product === reconciliationEditor.product,
+        ) ?? null
+      : null;
+  const editingReconciliation = reconciliationEditor
+    ? reconciliationFor(reconciliationEditor.product)
+    : null;
   const driftRows = catalog.provisioning.drift.rows;
   const driftAttention = driftRows.filter(
     (row) => row.classification === "active_access_needs_verification",
@@ -1379,12 +1602,27 @@ export function CatalogEntitlementsWorkspace() {
                   </div>
                 ) : null}
 
+                {reconciliationMessage ? (
+                  <div
+                    className={
+                      "rounded-2xl border px-4 py-3 text-sm font-medium " +
+                      (reconciliationMessage.includes("queued") &&
+                      reconciliationMessage.includes("not changed")
+                        ? "border-blue-200 bg-blue-50 text-blue-800"
+                        : "border-amber-200 bg-amber-50 text-amber-900")
+                    }
+                  >
+                    {reconciliationMessage}
+                  </div>
+                ) : null}
+
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {access.entitlements.map((entitlement) => {
-                    const targets =
-                      access.transitions.find(
-                        (item) => item.product === entitlement.product,
-                      )?.targets ?? [];
+                    const transitionRow = access.transitions.find(
+                      (item) => item.product === entitlement.product,
+                    );
+                    const targets = transitionRow?.targets ?? [];
+                    const reconciliation = transitionRow?.reconciliation ?? null;
                     const availableTargets = targets.filter(
                       (target) => target.available,
                     ).length;
@@ -1409,23 +1647,54 @@ export function CatalogEntitlementsWorkspace() {
                           <p>{availableTargets} of {targets.length} target states operationally available</p>
                         </div>
                         {entitlement.notes ? <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-slate-500">{entitlement.notes}</p> : null}
-                        <button
-                          onClick={() => openEntitlementEditor(entitlement)}
-                          disabled={!access.canManageEntitlements}
-                          title={
-                            access.canManageEntitlements
-                              ? "Open access controls"
-                              : "platform.commerce.entitlements.manage is required"
-                          }
-                          className={
-                            "mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition " +
-                            (access.canManageEntitlements
-                              ? "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700"
-                              : "cursor-not-allowed border-slate-200 bg-white text-slate-400")
-                          }
-                        >
-                          <SlidersHorizontal size={13} /> Configure access
-                        </button>
+                        <div className="mt-3 grid gap-2">
+                          <button
+                            onClick={() => openEntitlementEditor(entitlement)}
+                            disabled={!access.canManageEntitlements}
+                            title={
+                              access.canManageEntitlements
+                                ? "Open access controls"
+                                : "platform.commerce.entitlements.manage is required"
+                            }
+                            className={
+                              "inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+                              (access.canManageEntitlements
+                                ? "border-slate-200 bg-white text-slate-700 hover:border-emerald-300 hover:text-emerald-700"
+                                : "cursor-not-allowed border-slate-200 bg-white text-slate-400")
+                            }
+                          >
+                            <SlidersHorizontal size={13} /> Configure access
+                          </button>
+                          {entitlement.persisted &&
+                          ["ACTIVE", "TRIAL", "INTERNAL_ONLY"].includes(
+                            entitlement.status,
+                          ) ? (
+                            <button
+                              onClick={() => openReconciliationEditor(entitlement)}
+                              disabled={
+                                !access.canManageEntitlements ||
+                                !reconciliation?.available
+                              }
+                              title={
+                                !access.canManageEntitlements
+                                  ? "platform.commerce.entitlements.manage is required"
+                                  : reconciliation?.available
+                                    ? "Re-run downstream provisioning without changing access"
+                                    : reconciliation?.reason ??
+                                      "Provisioning reconciliation is unavailable"
+                              }
+                              className={
+                                "inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition " +
+                                (access.canManageEntitlements &&
+                                reconciliation?.available
+                                  ? "border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100"
+                                  : "cursor-not-allowed border-slate-200 bg-white text-slate-400")
+                              }
+                            >
+                              <RotateCcw size={13} /> Reconcile provisioning
+                            </button>
+                          ) : null}
+                        </div>
                       </article>
                     );
                   })}
@@ -1445,6 +1714,24 @@ export function CatalogEntitlementsWorkspace() {
                       setEntitlementMessage(null);
                     }}
                     onSave={() => void saveEntitlement()}
+                  />
+                ) : null}
+
+                {reconciliationEditor &&
+                reconcilingEntitlement &&
+                editingReconciliation ? (
+                  <EntitlementReconciliationPanel
+                    editor={reconciliationEditor}
+                    entitlement={reconcilingEntitlement}
+                    reconciliation={editingReconciliation}
+                    worker={access.worker}
+                    saving={reconciliationSaving}
+                    onChange={setReconciliationEditor}
+                    onCancel={() => {
+                      setReconciliationEditor(null);
+                      setReconciliationMessage(null);
+                    }}
+                    onSave={() => void saveReconciliation()}
                   />
                 ) : null}
 
@@ -2354,6 +2641,261 @@ function ReadinessRow({
   );
 }
 
+
+
+function EntitlementReconciliationPanel({
+  editor,
+  entitlement,
+  reconciliation,
+  worker,
+  saving,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  editor: ReconciliationEditorState;
+  entitlement: AccessEntitlement;
+  reconciliation: EntitlementReconciliation;
+  worker: WorkerStatus;
+  saving: boolean;
+  onChange: (value: ReconciliationEditorState) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const descriptorKeys = new Set(
+    reconciliation.requiredInputs.map((input) => input.key),
+  );
+  const missingDescriptors = reconciliation.requiredFields.filter(
+    (field) => !descriptorKeys.has(field),
+  );
+  const canSave =
+    reconciliation.available &&
+    missingDescriptors.length === 0 &&
+    worker.ready &&
+    !saving;
+
+  return (
+    <section className="rounded-3xl border border-blue-200 bg-[linear-gradient(145deg,#ffffff,#f3f8ff)] p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-4 border-b border-blue-100 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+            Provisioning reconciliation
+          </p>
+          <h4 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+            {editor.product}
+          </h4>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+            Re-run the downstream provisioning required by the current{" "}
+            <span
+              className={
+                "rounded-full px-2 py-0.5 text-[10px] font-bold " +
+                statusClass(entitlement.status)
+              }
+            >
+              {entitlement.status}
+            </span>{" "}
+            entitlement. This operation does not grant, revoke, or otherwise
+            change product access.
+          </p>
+        </div>
+        <div className="text-left sm:text-right">
+          <span
+            className={
+              "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] " +
+              (worker.ready
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-amber-100 text-amber-800")
+            }
+          >
+            <span
+              className={
+                "h-2 w-2 rounded-full " +
+                (worker.ready ? "bg-emerald-500" : "bg-amber-500")
+              }
+            />
+            {worker.ready ? "Worker live" : "Worker unavailable"}
+          </span>
+          {worker.lastSeenAt ? (
+            <p className="mt-1 text-[10px] text-slate-500">
+              Heartbeat {formatDate(worker.lastSeenAt)}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div
+        className={
+          "mt-5 rounded-2xl border p-4 " +
+          (reconciliation.available
+            ? "border-blue-200 bg-blue-50"
+            : "border-amber-200 bg-amber-50")
+        }
+      >
+        <div className="flex items-start gap-3">
+          {reconciliation.available ? (
+            <RotateCcw
+              size={17}
+              className="mt-0.5 shrink-0 text-blue-700"
+            />
+          ) : (
+            <AlertTriangle
+              size={17}
+              className="mt-0.5 shrink-0 text-amber-700"
+            />
+          )}
+          <div>
+            <p className="text-xs font-semibold text-slate-900">
+              {reconciliation.available
+                ? "Signed provisioning replay"
+                : "Reconciliation is currently blocked"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              {reconciliation.available
+                ? reconciliation.actions.length > 0
+                  ? "The operator will queue " +
+                    reconciliation.actions.join(" · ") +
+                    " using the current entitlement as the source of truth."
+                  : "No managed external provisioning action is required."
+                : reconciliation.reason ??
+                  "This provisioning lane is not operationally ready."}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {reconciliation.requiredFields.length > 0 ? (
+        <div className="mt-5">
+          <p className="text-sm font-semibold text-slate-800">
+            Provisioning context
+          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            These values are required to re-drive the current product setup.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {reconciliation.requiredInputs.map((input) => (
+              <label
+                key={input.key}
+                className={
+                  "text-xs font-semibold text-slate-700 " +
+                  (input.kind === "json" ? "sm:col-span-2" : "")
+                }
+              >
+                {input.label}
+                {input.kind === "json" ? (
+                  <textarea
+                    rows={4}
+                    value={editor.context[input.key] ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        ...editor,
+                        context: {
+                          ...editor.context,
+                          [input.key]: event.target.value,
+                        },
+                      })
+                    }
+                    placeholder={input.placeholder}
+                    spellCheck={false}
+                    className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-xs font-normal text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                  />
+                ) : (
+                  <input
+                    type={
+                      input.kind === "email"
+                        ? "email"
+                        : input.kind === "password"
+                          ? "password"
+                          : input.kind === "number"
+                            ? "number"
+                            : "text"
+                    }
+                    min={input.kind === "number" ? input.min : undefined}
+                    max={input.kind === "number" ? input.max : undefined}
+                    autoComplete={
+                      input.kind === "password" ? "new-password" : undefined
+                    }
+                    value={editor.context[input.key] ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        ...editor,
+                        context: {
+                          ...editor.context,
+                          [input.key]: event.target.value,
+                        },
+                      })
+                    }
+                    placeholder={input.placeholder}
+                    className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                  />
+                )}
+                {input.sensitive ? (
+                  <span className="mt-1 block text-[10px] font-normal leading-5 text-slate-500">
+                    Sensitive value. It is cleared after submission and is
+                    stored only through the encrypted provisioning-secret
+                    reference path.
+                  </span>
+                ) : null}
+              </label>
+            ))}
+          </div>
+          {missingDescriptors.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+              Backend provisioning metadata is incomplete for{" "}
+              {missingDescriptors.join(", ")}. The operation stays locked.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <label className="mt-5 block text-sm font-semibold text-slate-800">
+        Operator reason
+        <textarea
+          value={editor.reason}
+          onChange={(event) =>
+            onChange({
+              ...editor,
+              reason: event.target.value,
+            })
+          }
+          rows={3}
+          maxLength={500}
+          placeholder="Why are you re-running provisioning for this active entitlement?"
+          className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+        />
+      </label>
+
+      <div className="mt-5 rounded-2xl border border-blue-200 bg-white p-4 text-xs leading-5 text-slate-600">
+        <strong className="text-slate-900">Access invariant:</strong> this
+        operation queues signed provisioning jobs only. It does not update the
+        entitlement status, start/end dates, billing evidence, or notes.
+      </div>
+
+      <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!canSave}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <RotateCcw size={15} />
+          )}
+          {saving ? "Queueing…" : "Queue reconciliation"}
+        </button>
+      </div>
+    </section>
+  );
+}
 
 function EntitlementEditorPanel({
   editor,

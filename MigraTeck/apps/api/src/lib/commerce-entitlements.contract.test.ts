@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  getEntitlementReconciliationAvailability,
   getEntitlementTransitionAvailability,
   type ProvisioningWorkerStatus,
 } from "./commerce-entitlements.js";
@@ -237,6 +238,53 @@ test("internal Migra organizations skip customer pod creation but still require 
   }
 });
 
+test("reconciliation preflight reuses the current active entitlement provisioning lane", async () => {
+  const previous = {
+    MIGRAHOSTING_AGENT_URL: process.env.MIGRAHOSTING_AGENT_URL,
+    MIGRAHOSTING_AGENT_KEY_ID: process.env.MIGRAHOSTING_AGENT_KEY_ID,
+    MIGRAHOSTING_AGENT_SECRET: process.env.MIGRAHOSTING_AGENT_SECRET,
+    MIGRAPANEL_EDGE_URL: process.env.MIGRAPANEL_EDGE_URL,
+    MIGRAPANEL_EDGE_TOKEN: process.env.MIGRAPANEL_EDGE_TOKEN,
+  };
+
+  process.env.MIGRAHOSTING_AGENT_URL = "https://hosting-agent.invalid";
+  process.env.MIGRAHOSTING_AGENT_KEY_ID = "test-key";
+  process.env.MIGRAHOSTING_AGENT_SECRET = "test-secret";
+  process.env.MIGRAPANEL_EDGE_URL = "https://edge.invalid";
+  process.env.MIGRAPANEL_EDGE_TOKEN = "test-token";
+
+  try {
+    const ready = await getEntitlementReconciliationAvailability({
+      orgSlug: "customer-acme",
+      product: "MIGRAHOSTING",
+      status: "ACTIVE",
+      worker: readyWorker,
+    });
+    assert.equal(ready.available, true);
+    assert.equal(ready.mode, "provisioning");
+    assert.deepEqual(ready.actions, ["POD_CREATE", "DNS_PROVISION"]);
+    assert.deepEqual(
+      new Set(ready.requiredFields),
+      new Set(["domain", "tenantId", "serviceInstanceId", "targetIp"]),
+    );
+
+    const inactive = await getEntitlementReconciliationAvailability({
+      orgSlug: "customer-acme",
+      product: "MIGRAHOSTING",
+      status: "RESTRICTED",
+      worker: readyWorker,
+    });
+    assert.equal(inactive.available, false);
+    assert.equal(inactive.mode, "blocked");
+    assert.match(inactive.reason ?? "", /active-like entitlement/i);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("operator provisioning inputs are backend-described instead of hard-coded in the UI", () => {
   const source = repoFile("apps/api/src/lib/commerce-entitlements.ts");
   const operatorUi = repoFile(
@@ -288,6 +336,88 @@ test("entitlement mutation contract is concurrency-safe, billing-aware, signed a
   assert.match(source, /await publishPlatformEvent\(client/);
   assert.match(source, /await client\.query\("COMMIT"\)/);
   assert.match(source, /await client\.query\("ROLLBACK"\)/);
+});
+
+
+test("active entitlement provisioning can be reconciled without changing access", () => {
+  const source = repoFile("apps/api/src/lib/commerce-entitlements.ts");
+  const routes = repoFile("apps/api/src/routes/v1/modules/commerce-catalog.ts");
+  const operatorUi = repoFile(
+    "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
+  );
+  const proxy = repoFile(
+    "apps/web/src/app/api/platform/commerce/organizations/[orgId]/entitlements/[product]/reconcile/route.ts",
+  );
+
+  assert.match(source, /getEntitlementReconciliationAvailability/);
+  assert.match(source, /reconcileOrganizationEntitlementProvisioning/);
+  assert.match(source, /intent: "org_entitlement_reconciliation"/);
+  assert.match(source, /"entitlement-reconcile:"/);
+  assert.match(
+    source,
+    /ORG_ENTITLEMENT_PROVISIONING_RECONCILIATION_QUEUED/,
+  );
+  assert.match(
+    source,
+    /Provisioning reconciliation queued\. Current product access was not changed\./,
+  );
+  assert.match(
+    source,
+    /Provisioning reconciliation is already in progress for this product/,
+  );
+
+  const start = source.indexOf(
+    "export async function reconcileOrganizationEntitlementProvisioning",
+  );
+  assert.ok(start >= 0);
+  const reconciliationFunction = source.slice(start);
+  assert.match(reconciliationFunction, /FROM "OrgEntitlement"/);
+  assert.match(reconciliationFunction, /FOR UPDATE/);
+  assert.match(reconciliationFunction, /expectedUpdatedAt/);
+  assert.doesNotMatch(
+    reconciliationFunction,
+    /INSERT INTO "OrgEntitlement"|UPDATE "OrgEntitlement"/,
+    "reconciliation must not mutate the entitlement contract",
+  );
+
+  assert.match(
+    routes,
+    /"\/commerce\/organizations\/:orgId\/entitlements\/:product\/reconcile"[\s\S]*?"platform\.commerce\.entitlements\.manage"/,
+  );
+  assert.match(routes, /entitlementReconciliationSchema/);
+  assert.match(routes, /reconcileOrganizationEntitlementProvisioning/);
+
+  assert.match(operatorUi, /Reconcile provisioning/);
+  assert.match(operatorUi, /Access invariant:/);
+  assert.match(
+    operatorUi,
+    /This operation does not grant, revoke, or otherwise[\s\S]*?change product access/,
+  );
+  assert.match(operatorUi, /\/reconcile"/);
+  assert.match(proxy, /method: "POST"/);
+  assert.match(proxy, /fetchPlatformAuthorityApi/);
+});
+
+test("reconciliation jobs use a distinct durable intent from entitlement transitions", () => {
+  const source = repoFile("apps/api/src/lib/commerce-entitlements.ts");
+  const engine = repoFile("apps/api/src/lib/provisioning-engine.ts");
+
+  assert.match(
+    source,
+    /type EntitlementProvisioningIntent =[\s\S]*?"org_entitlement_transition"[\s\S]*?"org_entitlement_reconciliation"/,
+  );
+  assert.match(
+    source,
+    /input\.intent === "org_entitlement_transition"[\s\S]*?transitionId[\s\S]*?reconciliationId/,
+  );
+  assert.match(source, /intent: input\.intent/);
+  assert.match(source, /operationId: input\.operationId/);
+
+  assert.match(
+    engine,
+    /payload\.intent !== "org_entitlement_transition"/,
+    "the deferred-access finalizer must ignore reconciliation jobs",
+  );
 });
 
 test("provisioning-backed grants remain restricted until the worker proves success", () => {

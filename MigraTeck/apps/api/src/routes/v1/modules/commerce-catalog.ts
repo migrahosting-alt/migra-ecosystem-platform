@@ -13,6 +13,7 @@ import {
   buildEntitlementTransitionMatrix,
   getProvisioningWorkerStatus,
   mutateOrganizationEntitlement,
+  reconcileOrganizationEntitlementProvisioning,
 } from "../../../lib/commerce-entitlements.js";
 import {
   cancelDeadProvisioningJob,
@@ -71,6 +72,12 @@ const entitlementMutationSchema = z.object({
   notes: z.string().trim().max(2000).nullable().optional(),
   reason: z.string().trim().min(3).max(500),
   acknowledgeBillingOverride: z.boolean().default(false),
+  context: entitlementContextSchema,
+});
+
+const entitlementReconciliationSchema = z.object({
+  expectedUpdatedAt: z.string().datetime(),
+  reason: z.string().trim().min(3).max(500),
   context: entitlementContextSchema,
 });
 
@@ -190,6 +197,30 @@ export async function registerCommerceCatalogRoutes(
       });
 
       return reply.code(200).send(result);
+    },
+  );
+
+  app.post(
+    "/commerce/organizations/:orgId/entitlements/:product/reconcile",
+    async (request, reply) => {
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.entitlements.manage",
+      ]);
+      const { orgId, product } = entitlementParamsSchema.parse(request.params);
+      const body = entitlementReconciliationSchema.parse(request.body);
+
+      const result = await reconcileOrganizationEntitlementProvisioning({
+        orgId,
+        actorId: authority.platformUserId,
+        product,
+        expectedUpdatedAt: body.expectedUpdatedAt,
+        reason: body.reason,
+        context: body.context,
+        ip: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+
+      return reply.code(202).send(result);
     },
   );
 
