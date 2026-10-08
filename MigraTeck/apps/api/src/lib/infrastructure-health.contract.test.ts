@@ -26,11 +26,14 @@ test("infrastructure health requires MigraAuth platform-operator authority", () 
 test("all background workers publish or consume dedicated heartbeat paths", () => {
   const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
   const webhook = repoFile("apps/api/src/webhook-worker.ts");
+  const social = repoFile("apps/api/src/social-connection-sync-worker.ts");
+  const socialUnit = repoFile("deploy/migrateck-social-sync-worker.service");
 
   for (const fragment of [
     "/run/migrateck-provisioning/heartbeat.json",
     "/run/migrateck-entitlement-expiry/heartbeat.json",
     "/run/migrateck-usage/heartbeat.json",
+    "/run/migrateck-social-sync/heartbeat.json",
     "/run/migrateck-webhook/heartbeat.json",
   ]) {
     assert.ok(health.includes(fragment), fragment);
@@ -39,6 +42,12 @@ test("all background workers publish or consume dedicated heartbeat paths", () =
   assert.match(webhook, /WEBHOOK_WORKER_HEARTBEAT_FILE/);
   assert.match(webhook, /lastSeenAt/);
   assert.match(webhook, /removeHeartbeat/);
+
+  assert.match(social, /SOCIAL_CONNECTION_SYNC_HEARTBEAT_FILE/);
+  assert.match(social, /lastSeenAt/);
+  assert.match(social, /removeHeartbeat/);
+  assert.match(socialUnit, /dist\/social-connection-sync-worker\.js/);
+  assert.match(socialUnit, /RuntimeDirectory=migrateck-social-sync/);
 });
 
 test("usage health reads the real UsageEvent export lifecycle", () => {

@@ -12,7 +12,12 @@ import {
 } from "lucide-react";
 
 type WorkerHealth = {
-  key: "provisioning" | "entitlement_expiry" | "usage" | "webhooks";
+  key:
+    | "provisioning"
+    | "entitlement_expiry"
+    | "usage"
+    | "social_connections"
+    | "webhooks";
   label: string;
   state: "healthy" | "stale" | "missing";
   workerId: string | null;
@@ -32,6 +37,8 @@ type HealthPayload = {
     provisioningDeadLetters: number;
     webhookBacklog: number;
     entitlementOverdue: number;
+    socialConnectionAttention: number;
+    socialReconnectRequired: number;
   };
   workers: WorkerHealth[];
   queues: {
@@ -39,6 +46,7 @@ type HealthPayload = {
     webhooks: Record<string, unknown>;
     usageExports: Record<string, unknown>;
     entitlements: Record<string, unknown>;
+    socialConnections: Record<string, unknown>;
   };
 };
 
@@ -143,6 +151,10 @@ export function InfrastructureHealthPanel() {
     numberValue(data.queues.usageExports.running) +
     numberValue(data.queues.usageExports.retry);
   const usageFailed = numberValue(data.queues.usageExports.failed);
+  const socialAttention = numberValue(data.queues.socialConnections.needsAttention);
+  const socialReconnect = numberValue(
+    data.queues.socialConnections.reconnectRequired,
+  );
 
   const needsAttention =
     data.summary.unhealthyWorkers > 0 ||
@@ -150,7 +162,8 @@ export function InfrastructureHealthPanel() {
     data.summary.webhookBacklog > 0 ||
     usageOpen > 0 ||
     usageFailed > 0 ||
-    data.summary.entitlementOverdue > 0;
+    data.summary.entitlementOverdue > 0 ||
+    socialAttention > 0;
 
   return (
     <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -220,7 +233,7 @@ export function InfrastructureHealthPanel() {
         ))}
       </div>
 
-      <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-5 sm:p-6 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-5 sm:p-6 md:grid-cols-2 xl:grid-cols-5">
         <QueueCard
           title="Provisioning"
           value={data.summary.provisioningBacklog}
@@ -256,6 +269,27 @@ export function InfrastructureHealthPanel() {
           href="/platform/commerce/catalog"
           alert={data.summary.entitlementOverdue > 0}
         />
+        <article
+          className={
+            "rounded-2xl border bg-white p-4 " +
+            (socialAttention > 0 ? "border-amber-200" : "border-slate-200")
+          }
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Social connections
+          </p>
+          <p
+            className={
+              "mt-2 text-xl font-semibold " +
+              (socialAttention > 0 ? "text-amber-800" : "text-slate-950")
+            }
+          >
+            {socialAttention.toLocaleString()}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            {socialReconnect} reconnect required · worker-managed sync
+          </p>
+        </article>
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-[11px] text-slate-500 sm:px-6">

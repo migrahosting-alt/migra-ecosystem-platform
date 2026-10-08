@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { getDb } from "./db.js";
+import { analyzeSocialConnectionSyncQueue } from "./social-connection-sync.js";
 
 export type WorkerState = "healthy" | "stale" | "missing";
 
@@ -11,7 +12,12 @@ type HeartbeatPayload = {
 };
 
 type WorkerHealth = {
-  key: "provisioning" | "entitlement_expiry" | "usage" | "webhooks";
+  key:
+    | "provisioning"
+    | "entitlement_expiry"
+    | "usage"
+    | "social_connections"
+    | "webhooks";
   label: string;
   state: WorkerState;
   heartbeatPath: string | null;
@@ -49,6 +55,14 @@ const WORKERS = [
     label: "Usage export",
     heartbeatPath: process.env.USAGE_WORKER_HEARTBEAT_FILE ?? "/run/migrateck-usage/heartbeat.json",
     expectedMaxAgeSeconds: 45,
+  },
+  {
+    key: "social_connections" as const,
+    label: "Social connection sync",
+    heartbeatPath:
+      process.env.SOCIAL_CONNECTION_SYNC_HEARTBEAT_FILE ??
+      "/run/migrateck-social-sync/heartbeat.json",
+    expectedMaxAgeSeconds: 20 * 60,
   },
   {
     key: "webhooks" as const,
@@ -121,6 +135,7 @@ export async function getInfrastructureHealthSnapshot() {
     webhooks,
     usageExports,
     entitlements,
+    socialConnections,
   ] = await Promise.all([
     Promise.all(WORKERS.map((worker) => readHeartbeat(worker, now))),
     db.query(
@@ -168,10 +183,28 @@ export async function getInfrastructureHealthSnapshot() {
          max("updatedAt") AS "lastUpdatedAt"
        FROM "OrgEntitlement"`,
     ),
+    analyzeSocialConnectionSyncQueue(100),
   ]);
 
   const allWorkers = workers;
   const unhealthyWorkers = allWorkers.filter((worker) => worker.state !== "healthy");
+  const socialConnectionHealth = {
+    total: socialConnections.length,
+    needsAttention: socialConnections.filter(
+      (connection) => connection.recommendedAction !== "monitor",
+    ).length,
+    reconnectRequired: socialConnections.filter(
+      (connection) => connection.requiresReconnect,
+    ).length,
+    tokenExpired: socialConnections.filter((connection) => connection.tokenExpired)
+      .length,
+    tokenExpiresSoon: socialConnections.filter(
+      (connection) => connection.tokenExpiresSoon,
+    ).length,
+    verificationStale: socialConnections.filter(
+      (connection) => connection.verificationStale,
+    ).length,
+  };
 
   return {
     generatedAt: new Date(now).toISOString(),
@@ -186,6 +219,8 @@ export async function getInfrastructureHealthSnapshot() {
       provisioningDeadLetters: Number(provisioning.rows[0]?.dead ?? 0),
       webhookBacklog: Number(webhooks.rows[0]?.pending ?? 0),
       entitlementOverdue: Number(entitlements.rows[0]?.overdue ?? 0),
+      socialConnectionAttention: socialConnectionHealth.needsAttention,
+      socialReconnectRequired: socialConnectionHealth.reconnectRequired,
     },
     workers: allWorkers,
     queues: {
@@ -193,6 +228,7 @@ export async function getInfrastructureHealthSnapshot() {
       webhooks: webhooks.rows[0] ?? {},
       usageExports: usageExports.rows[0] ?? {},
       entitlements: entitlements.rows[0] ?? {},
+      socialConnections: socialConnectionHealth,
     },
   };
 }
