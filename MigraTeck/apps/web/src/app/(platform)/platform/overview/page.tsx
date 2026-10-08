@@ -42,6 +42,40 @@ type PlatformAccountContext = {
   } | null;
 };
 
+type IdentityDiagnostic = {
+  authenticated: true;
+  strategy: "migraauth-oauth2-bearer";
+  user: {
+    id: string;
+    email: string | null;
+    displayName: string | null;
+    status: string;
+  };
+  selectedOrganization: {
+    id: string;
+    name: string;
+    slug: string;
+    role: string;
+  } | null;
+  platformOperator: {
+    authorized: boolean;
+    roles: string[];
+    permissions: string[];
+    viaBootstrap: boolean;
+  };
+  bridge: {
+    user: {
+      status: "linked" | "email_candidate" | "missing";
+      platformUserId: string | null;
+    };
+    organization: {
+      status: "linked" | "slug_candidate" | "missing" | "not_selected";
+      platformOrganizationId: string | null;
+      authOrganizationId: string | null;
+    };
+  };
+};
+
 type SessionRecord = {
   id: string;
   current: boolean;
@@ -242,6 +276,7 @@ export default async function PlatformOverviewPage() {
   const commercialPromise = getCommercialSnapshot(orgId);
 
   const [
+    identityResult,
     sessionsResult,
     auditResult,
     membersResult,
@@ -251,6 +286,10 @@ export default async function PlatformOverviewPage() {
     intakeResult,
     commercial,
   ] = await Promise.all([
+    failClosedRead(fetchPlatformAuthorityApi<IdentityDiagnostic>(
+      "/auth/session" + (orgId ? "?organizationId=" + encodeURIComponent(orgId) : ""),
+      { signal: AbortSignal.timeout(5000) },
+    )),
     failClosedRead(fetchAuthApi<{ sessions: SessionRecord[] }>("/v1/sessions", { signal: AbortSignal.timeout(5000) })),
     failClosedRead(fetchAuthApi<{ audit_logs: AuditRecord[] }>(
       "/v1/admin/audit?user_id=" + encodeURIComponent(session.authUserId) + "&limit=10&offset=0",
@@ -271,6 +310,19 @@ export default async function PlatformOverviewPage() {
     failClosedRead(fetchPlatformAuthorityApi<IntakeRuntimeOverview>("/intake/runtime", { signal: AbortSignal.timeout(5000) })),
     commercialPromise,
   ]);
+
+  const identityDiagnostic = identityResult.ok ? identityResult.data : null;
+  const identityUserBridgeLinked = identityDiagnostic?.bridge.user.status === "linked";
+  const identityOrganizationBridgeLinked =
+    !identityDiagnostic?.selectedOrganization ||
+    identityDiagnostic.bridge.organization.status === "linked";
+  const identityBridgeHealthy =
+    Boolean(identityDiagnostic) &&
+    identityUserBridgeLinked &&
+    identityOrganizationBridgeLinked;
+  const identityAuthorityAgrees =
+    !identityDiagnostic ||
+    identityDiagnostic.platformOperator.authorized === hasPlatformAuthority;
 
   const sessionCount = sessionsResult.ok ? sessionsResult.data.sessions.length : null;
   const currentSessionVisible = sessionsResult.ok
@@ -333,13 +385,14 @@ export default async function PlatformOverviewPage() {
           ? "attention"
           : "operational";
 
-  const trustState: HealthState = !sessionsResult.ok && !auditResult.ok
-    ? "unavailable"
-    : !sessionsResult.ok || !auditResult.ok
-      ? "degraded"
-      : !currentSessionVisible
-        ? "attention"
-        : "operational";
+  const trustState: HealthState =
+    !identityResult.ok && !sessionsResult.ok && !auditResult.ok
+      ? "unavailable"
+      : !identityResult.ok || !sessionsResult.ok || !auditResult.ok
+        ? "degraded"
+        : !identityBridgeHealthy || !identityAuthorityAgrees || !currentSessionVisible
+          ? "attention"
+          : "operational";
 
   const organizationsState: HealthState = organizations.length === 0
     ? "context"
@@ -370,6 +423,34 @@ export default async function PlatformOverviewPage() {
   const operationalDomainCount = Object.values(domainStates).filter((state) => state === "operational").length;
 
   const attentionItems = [
+    !identityResult.ok
+      ? {
+          title: "Identity bridge diagnostic unavailable",
+          detail: "The parent Platform could not verify MigraAuth identity and bridge state.",
+          href: "/platform/trust",
+          severity: "danger" as const,
+        }
+      : !identityBridgeHealthy
+        ? {
+            title: "Identity bridge needs reconciliation",
+            detail:
+              "User bridge: " +
+              identityDiagnostic!.bridge.user.status.replace(/_/g, " ") +
+              " · organization bridge: " +
+              identityDiagnostic!.bridge.organization.status.replace(/_/g, " ") +
+              ".",
+            href: "/platform/organizations",
+            severity: "warn" as const,
+          }
+        : !identityAuthorityAgrees
+          ? {
+              title: "Platform authority context is inconsistent",
+              detail:
+                "The browser session and MigraAuth platform-operator authority do not agree. Refresh or reconcile the operator session before high-risk changes.",
+              href: "/platform/trust",
+              severity: "warn" as const,
+            }
+          : null,
     !sessionsResult.ok
       ? { title: "Identity session visibility unavailable", detail: "MigraAuth session data could not be verified from this overview.", href: "/platform/security", severity: "danger" as const }
       : !currentSessionVisible
@@ -545,9 +626,9 @@ export default async function PlatformOverviewPage() {
                     ? String(commercial.subscriptions.length) + " subscription" + (commercial.subscriptions.length === 1 ? "" : "s") + " · " + String(commercial.invoices.length) + " invoice" + (commercial.invoices.length === 1 ? "" : "s")
                     : orgId ? String(commercialAvailableCount) + "/" + String(commercialChecks.length) + " commerce sources available" : "Select an organization for commercial state."
                   : domain.key === "trust"
-                    ? sessionsResult.ok && auditResult.ok
-                      ? String(sessionCount ?? 0) + " session" + (sessionCount === 1 ? "" : "s") + " · " + String(recentActivity?.length ?? 0) + " recent audit event" + (recentActivity?.length === 1 ? "" : "s")
-                      : "Identity or governance evidence is partially unavailable."
+                    ? identityResult.ok && sessionsResult.ok && auditResult.ok
+                      ? (identityBridgeHealthy ? "Identity linked" : "Identity bridge drift") + " · " + String(sessionCount ?? 0) + " session" + (sessionCount === 1 ? "" : "s") + " · " + String(recentActivity?.length ?? 0) + " recent audit event" + (recentActivity?.length === 1 ? "" : "s")
+                      : "Identity, session, or governance evidence is partially unavailable."
                     : domain.key === "infrastructure"
                       ? !hasPlatformAuthority
                         ? "Platform operator authority is required for global Intake visibility."

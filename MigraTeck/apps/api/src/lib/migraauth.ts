@@ -97,6 +97,36 @@ export type PlatformPrincipal = {
   platformOrgId: string;
 };
 
+export type PlatformIdentityDiagnostic = {
+  authenticated: true;
+  strategy: "migraauth-oauth2-bearer";
+  user: {
+    id: string;
+    email: string | null;
+    displayName: string | null;
+    status: string;
+  };
+  memberships: AuthMembership[];
+  selectedOrganization: AuthMembership | null;
+  platformOperator: {
+    authorized: boolean;
+    roles: string[];
+    permissions: string[];
+    viaBootstrap: boolean;
+  };
+  bridge: {
+    user: {
+      status: "linked" | "email_candidate" | "missing";
+      platformUserId: string | null;
+    };
+    organization: {
+      status: "linked" | "slug_candidate" | "missing" | "not_selected";
+      platformOrganizationId: string | null;
+      authOrganizationId: string | null;
+    };
+  };
+};
+
 function authBaseUrl(): string {
   return (
     process.env.MIGRAAUTH_API_URL ??
@@ -163,6 +193,134 @@ async function authFetchPlatformAuthority(
   }
 
   return response.json() as Promise<PlatformAuthorityResponse>;
+}
+
+function errorStatus(error: unknown): number | null {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === "number"
+  ) {
+    return (error as { statusCode: number }).statusCode;
+  }
+  return null;
+}
+
+export async function getPlatformIdentityDiagnostic(
+  request: FastifyRequest,
+  requestedOrganizationId?: string | null,
+): Promise<PlatformIdentityDiagnostic> {
+  const token = bearerToken(request);
+  const [me, organizations] = await Promise.all([
+    authFetch<MeResponse>("/v1/me", token),
+    authFetch<OrganizationsResponse>("/v1/organizations", token),
+  ]);
+
+  let authority: PlatformAuthorityResponse | null = null;
+  try {
+    authority = await authFetchPlatformAuthority(token);
+  } catch (error) {
+    if (errorStatus(error) !== 403) throw error;
+  }
+
+  if (authority && authority.user_id !== me.user.id) {
+    throw Object.assign(
+      new Error("Identity authority returned inconsistent operator identity"),
+      { statusCode: 503 },
+    );
+  }
+
+  const requested = requestedOrganizationId?.trim() || null;
+  let selectedOrganization: AuthMembership | null = null;
+  if (requested) {
+    selectedOrganization =
+      organizations.organizations.find((membership) => membership.id === requested) ??
+      null;
+    if (!selectedOrganization) {
+      throw Object.assign(
+        new Error("Requested organization is not part of this authenticated identity"),
+        { statusCode: 403 },
+      );
+    }
+  } else if (organizations.organizations.length === 1) {
+    selectedOrganization = organizations.organizations[0] ?? null;
+  }
+
+  const db = getDb();
+  const userBridge = me.user.email
+    ? await db.query<{ id: string; authUserId: string | null }>(
+        'SELECT id,"authUserId" FROM "User" WHERE "authUserId"=$1 OR lower(email)=lower($2) ORDER BY CASE WHEN "authUserId"=$1 THEN 0 ELSE 1 END LIMIT 1',
+        [me.user.id, me.user.email],
+      )
+    : await db.query<{ id: string; authUserId: string | null }>(
+        'SELECT id,"authUserId" FROM "User" WHERE "authUserId"=$1 LIMIT 1',
+        [me.user.id],
+      );
+  const userRow = userBridge.rows[0] ?? null;
+  const userBridgeStatus: "linked" | "email_candidate" | "missing" =
+    !userRow
+      ? "missing"
+      : userRow.authUserId === me.user.id
+        ? "linked"
+        : "email_candidate";
+
+  let organizationBridge: PlatformIdentityDiagnostic["bridge"]["organization"] = {
+    status: "not_selected",
+    platformOrganizationId: null,
+    authOrganizationId: null,
+  };
+
+  if (selectedOrganization) {
+    const orgResult = await db.query<{
+      id: string;
+      authOrganizationId: string | null;
+    }>(
+      'SELECT id,"authOrganizationId" FROM "Organization" WHERE "authOrganizationId"=$1 OR slug=$2 ORDER BY CASE WHEN "authOrganizationId"=$1 THEN 0 ELSE 1 END LIMIT 1',
+      [selectedOrganization.id, selectedOrganization.slug],
+    );
+    const orgRow = orgResult.rows[0] ?? null;
+    organizationBridge = !orgRow
+      ? {
+          status: "missing",
+          platformOrganizationId: null,
+          authOrganizationId: null,
+        }
+      : {
+          status:
+            orgRow.authOrganizationId === selectedOrganization.id
+              ? "linked"
+              : "slug_candidate",
+          platformOrganizationId: orgRow.id,
+          authOrganizationId: orgRow.authOrganizationId,
+        };
+  }
+
+  return {
+    authenticated: true,
+    strategy: "migraauth-oauth2-bearer",
+    user: {
+      id: me.user.id,
+      email: me.user.email,
+      displayName: me.user.display_name ?? null,
+      status: me.user.status,
+    },
+    memberships: organizations.organizations,
+    selectedOrganization,
+    platformOperator: {
+      authorized: Boolean(authority),
+      roles: authority?.roles ?? [],
+      permissions: authority?.permissions ?? [],
+      viaBootstrap: authority?.via_bootstrap ?? false,
+    },
+    bridge: {
+      user: {
+        status: userBridgeStatus,
+        platformUserId: userRow?.id ?? null,
+      },
+      organization: organizationBridge,
+    },
+  };
 }
 
 async function ensurePlatformUser(user: AuthUser): Promise<string> {
