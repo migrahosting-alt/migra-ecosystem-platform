@@ -35,6 +35,7 @@ type HealthPayload = {
     unhealthyWorkers: number;
     provisioningBacklog: number;
     provisioningDeadLetters: number;
+    provisioningDriftNeedsVerification: number;
     webhookBacklog: number;
     entitlementOverdue: number;
     socialConnectionAttention: number;
@@ -159,6 +160,7 @@ export function InfrastructureHealthPanel() {
   const needsAttention =
     data.summary.unhealthyWorkers > 0 ||
     data.summary.provisioningBacklog > 0 ||
+    data.summary.provisioningDriftNeedsVerification > 0 ||
     data.summary.webhookBacklog > 0 ||
     usageOpen > 0 ||
     usageFailed > 0 ||
@@ -235,15 +237,20 @@ export function InfrastructureHealthPanel() {
 
       <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-5 sm:p-6 md:grid-cols-2 xl:grid-cols-5">
         <QueueCard
-          title="Provisioning"
-          value={data.summary.provisioningBacklog}
+          title="Provisioning verification"
+          value={data.summary.provisioningDriftNeedsVerification}
           detail={
+            data.summary.provisioningBacklog +
+            " open queue · " +
             data.summary.provisioningDeadLetters +
-            " historical dead letter" +
+            " dead-letter job" +
             (data.summary.provisioningDeadLetters === 1 ? "" : "s")
           }
           href="/platform/commerce/catalog"
-          alert={data.summary.provisioningBacklog > 0}
+          alert={
+            data.summary.provisioningBacklog > 0 ||
+            data.summary.provisioningDriftNeedsVerification > 0
+          }
         />
         <QueueCard
           title="Webhooks"

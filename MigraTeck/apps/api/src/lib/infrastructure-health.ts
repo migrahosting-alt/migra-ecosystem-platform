@@ -132,6 +132,7 @@ export async function getInfrastructureHealthSnapshot() {
   const [
     workers,
     provisioning,
+    provisioningDrift,
     webhooks,
     usageExports,
     entitlements,
@@ -149,6 +150,62 @@ export async function getInfrastructureHealthSnapshot() {
          min("createdAt") FILTER (WHERE status IN ('PENDING','RUNNING','FAILED')) AS "oldestOpenAt",
          max("updatedAt") AS "lastUpdatedAt"
        FROM "ProvisioningJob"`,
+    ),
+    db.query(
+      `WITH dead AS (
+         SELECT
+           j."orgId",
+           COALESCE(
+             NULLIF(j.payload->>'productLane',''),
+             NULLIF(j.payload->>'product','')
+           ) AS product,
+           count(*)::int AS "deadJobs",
+           max(COALESCE(j."lastErrorAt",j."updatedAt")) AS "latestDeadAt"
+         FROM "ProvisioningJob" j
+         WHERE j.status='DEAD'::"ProvisioningJobStatus"
+         GROUP BY
+           j."orgId",
+           COALESCE(
+             NULLIF(j.payload->>'productLane',''),
+             NULLIF(j.payload->>'product','')
+           )
+       ),
+       success AS (
+         SELECT
+           j."orgId",
+           COALESCE(
+             NULLIF(j.payload->>'productLane',''),
+             NULLIF(j.payload->>'product','')
+           ) AS product,
+           max(j."updatedAt") AS "latestSuccessAt"
+         FROM "ProvisioningJob" j
+         WHERE j.status='SUCCEEDED'::"ProvisioningJobStatus"
+         GROUP BY
+           j."orgId",
+           COALESCE(
+             NULLIF(j.payload->>'productLane',''),
+             NULLIF(j.payload->>'product','')
+           )
+       )
+       SELECT
+         count(*)::int AS "needsVerification",
+         COALESCE(sum(d."deadJobs"),0)::int AS "correlatedDeadJobs"
+       FROM dead d
+       JOIN "OrgEntitlement" e
+         ON e."orgId"=d."orgId"
+        AND e.product::text=d.product
+       LEFT JOIN success s
+         ON s."orgId"=d."orgId"
+        AND s.product IS NOT DISTINCT FROM d.product
+       WHERE e.status IN (
+         'ACTIVE'::"EntitlementStatus",
+         'TRIAL'::"EntitlementStatus",
+         'INTERNAL_ONLY'::"EntitlementStatus"
+       )
+         AND (
+           s."latestSuccessAt" IS NULL
+           OR s."latestSuccessAt" <= d."latestDeadAt"
+         )`,
     ),
     db.query(
       `SELECT
@@ -205,6 +262,14 @@ export async function getInfrastructureHealthSnapshot() {
   const missingCredentialReconnect = Number(
     socialCoverage.missingCredentialReconnect ?? 0,
   );
+  const provisioningDriftHealth = {
+    needsVerification: Number(
+      provisioningDrift.rows[0]?.needsVerification ?? 0,
+    ),
+    correlatedDeadJobs: Number(
+      provisioningDrift.rows[0]?.correlatedDeadJobs ?? 0,
+    ),
+  };
   const socialConnectionHealth = {
     total: Number(socialCoverage.total ?? socialConnections.length),
     credentialed: Number(
@@ -239,6 +304,8 @@ export async function getInfrastructureHealthSnapshot() {
         Number(provisioning.rows[0]?.running ?? 0) +
         Number(provisioning.rows[0]?.failed ?? 0),
       provisioningDeadLetters: Number(provisioning.rows[0]?.dead ?? 0),
+      provisioningDriftNeedsVerification:
+        provisioningDriftHealth.needsVerification,
       webhookBacklog: Number(webhooks.rows[0]?.pending ?? 0),
       entitlementOverdue: Number(entitlements.rows[0]?.overdue ?? 0),
       socialConnectionAttention: socialConnectionHealth.needsAttention,
@@ -246,7 +313,11 @@ export async function getInfrastructureHealthSnapshot() {
     },
     workers: allWorkers,
     queues: {
-      provisioning: provisioning.rows[0] ?? {},
+      provisioning: {
+        ...(provisioning.rows[0] ?? {}),
+        driftNeedsVerification: provisioningDriftHealth.needsVerification,
+        driftCorrelatedDeadJobs: provisioningDriftHealth.correlatedDeadJobs,
+      },
       webhooks: webhooks.rows[0] ?? {},
       usageExports: usageExports.rows[0] ?? {},
       entitlements: entitlements.rows[0] ?? {},

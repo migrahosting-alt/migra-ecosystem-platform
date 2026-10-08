@@ -69,3 +69,21 @@ test("social infrastructure health includes uncredentialed reconnect-required co
   assert.match(health, /missingCredentialReconnect/);
   assert.match(health, /socialConnectionHealth/);
 });
+
+test("provisioning health reports active-access drift instead of dead letters alone", () => {
+  const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
+  const panel = repoFile(
+    "apps/web/src/components/platform/InfrastructureHealthPanel.tsx",
+  );
+
+  assert.match(health, /WITH dead AS/);
+  assert.match(health, /JOIN "OrgEntitlement" e/);
+  assert.match(health, /e\.status IN/);
+  assert.match(health, /"latestSuccessAt" <= d\."latestDeadAt"/);
+  assert.match(health, /provisioningDriftNeedsVerification/);
+  assert.match(health, /driftCorrelatedDeadJobs/);
+
+  assert.match(panel, /Provisioning verification/);
+  assert.match(panel, /provisioningDriftNeedsVerification/);
+  assert.match(panel, /href="\/platform\/commerce\/catalog"/);
+});
