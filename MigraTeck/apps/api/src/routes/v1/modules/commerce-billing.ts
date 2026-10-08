@@ -5,6 +5,7 @@ import { requirePlatformAuthority } from "../../../lib/migraauth.js";
 import {
   getBillingOperationsOverview,
   getOrganizationBillingOperations,
+  initializeOrganizationBillingCustomer,
   operateSubscription,
   reconcileOrganizationBilling,
 } from "../../../lib/commerce-billing.js";
@@ -27,6 +28,21 @@ const reconcileSchema = z.object({
   operationId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
 });
+
+const initializeCustomerSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("create"),
+    operationId: z.string().uuid(),
+    reason: z.string().trim().min(3).max(500),
+    billingEmail: z.string().trim().email().max(320),
+  }),
+  z.object({
+    mode: z.literal("link_existing"),
+    operationId: z.string().uuid(),
+    reason: z.string().trim().min(3).max(500),
+    externalCustomerId: z.string().trim().min(6).max(255),
+  }),
+]);
 
 const subscriptionActionSchema = z.object({
   operationId: z.string().uuid(),
@@ -76,6 +92,30 @@ export async function registerCommerceBillingRoutes(
       ...(await getOrganizationBillingOperations(orgId)),
     };
   });
+
+  app.post(
+    "/commerce/billing/organizations/:orgId/customer",
+    async (request) => {
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.billing.manage",
+      ]);
+      const { orgId } = orgParamsSchema.parse(request.params);
+      const body = initializeCustomerSchema.parse(request.body);
+
+      return initializeOrganizationBillingCustomer({
+        orgId,
+        actorId: authority.platformUserId,
+        operationId: body.operationId,
+        mode: body.mode,
+        billingEmail: body.mode === "create" ? body.billingEmail : null,
+        externalCustomerId:
+          body.mode === "link_existing" ? body.externalCustomerId : null,
+        reason: body.reason,
+        ip: request.ip ?? null,
+        userAgent: request.headers["user-agent"] ?? null,
+      });
+    },
+  );
 
   app.post(
     "/commerce/billing/organizations/:orgId/reconcile",

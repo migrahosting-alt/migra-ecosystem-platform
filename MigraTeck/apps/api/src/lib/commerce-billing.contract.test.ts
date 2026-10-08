@@ -57,6 +57,55 @@ test("operator service uses deployed ledger tables instead of future billing-cor
   assert.doesNotMatch(service, /__billingDb/);
 });
 
+test("billing customer initialization is narrow-authority, idempotent, ownership-safe and audited", () => {
+  assert.match(
+    routes,
+    /organizations\/:orgId\/customer[\s\S]*?"platform\.commerce\.billing\.manage"/,
+  );
+  assert.match(routes, /initializeCustomerSchema[\s\S]*?mode: z\.literal\("create"\)/);
+  assert.match(routes, /billingEmail: z\.string\(\)\.trim\(\)\.email\(\)/);
+  assert.match(routes, /mode: z\.literal\("link_existing"\)/);
+  assert.match(routes, /externalCustomerId: z\.string\(\)\.trim\(\)/);
+
+  assert.match(service, /customers\.create\([\s\S]*?org_id: input\.orgId/);
+  assert.match(service, /platform: "migrateck"/);
+  assert.match(
+    service,
+    /migrateck-billing-customer-" \+ input\.operationId \+ "-create"/,
+  );
+  assert.match(
+    service,
+    /migrateck-billing-customer-" \+ input\.operationId \+ "-link"/,
+  );
+
+  assert.match(
+    service,
+    /Stripe customer metadata belongs to another organization/,
+  );
+  assert.match(
+    service,
+    /Stripe customer is already attributed to another platform/,
+  );
+  assert.match(
+    service,
+    /Stripe customer is already mapped to another organization/,
+  );
+  assert.match(service, /pg_advisory_lock\(hashtext\(\$1\)\)/);
+  assert.match(service, /migrateck:billing-org:/);
+  assert.match(service, /migrateck:billing-customer:/);
+  assert.match(service, /pg_advisory_unlock\(hashtext\(\$1\)\)/);
+  assert.match(service, /FOR UPDATE/);
+  assert.match(
+    service,
+    /INSERT INTO "BillingCustomer"[\s\S]*?INSERT INTO "BillingOrgState"[\s\S]*?INSERT INTO "AuditLog"[\s\S]*?COMMIT/,
+  );
+  assert.match(service, /BILLING_CUSTOMER_OPERATOR_CREATED/);
+  assert.match(service, /BILLING_CUSTOMER_OPERATOR_LINKED/);
+  assert.match(service, /previousOperationId === input\.operationId/);
+  assert.match(service, /operationId: input\.operationId/);
+  assert.match(service, /reason: input\.reason/);
+});
+
 test("reconciliation is idempotent on processor identifiers and audit-rich", () => {
   assert.match(
     service,

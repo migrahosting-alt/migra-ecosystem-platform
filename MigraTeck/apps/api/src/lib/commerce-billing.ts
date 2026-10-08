@@ -587,6 +587,321 @@ async function audit(input: {
   );
 }
 
+export type BillingCustomerInitializationMode = "create" | "link_existing";
+
+async function withBillingCustomerInitializationLocks<T>(
+  keys: string[],
+  operation: () => Promise<T>,
+): Promise<T> {
+  const client = await getDb().connect();
+  const ordered = [...new Set(keys)].sort();
+  try {
+    for (const key of ordered) {
+      await client.query("SELECT pg_advisory_lock(hashtext($1))", [key]);
+    }
+    return await operation();
+  } finally {
+    for (const key of ordered.reverse()) {
+      await client
+        .query("SELECT pg_advisory_unlock(hashtext($1))", [key])
+        .catch(() => undefined);
+    }
+    client.release();
+  }
+}
+
+export async function initializeOrganizationBillingCustomer(input: {
+  orgId: string;
+  actorId: string;
+  operationId: string;
+  mode: BillingCustomerInitializationMode;
+  billingEmail?: string | null;
+  externalCustomerId?: string | null;
+  reason: string;
+  ip?: string | null;
+  userAgent?: string | null;
+}) {
+  const externalCustomerId =
+    input.mode === "link_existing" ? input.externalCustomerId?.trim() : null;
+  const lockKeys = ["migrateck:billing-org:" + input.orgId];
+  if (externalCustomerId) {
+    lockKeys.push("migrateck:billing-customer:" + externalCustomerId);
+  }
+
+  return withBillingCustomerInitializationLocks(lockKeys, async () => {
+  const db = getDb();
+
+  const organizationResult = await db.query<{
+    id: string;
+    name: string;
+    slug: string;
+  }>(
+    'SELECT id,name,slug FROM "Organization" WHERE id=$1 LIMIT 1',
+    [input.orgId],
+  );
+  const organization = organizationResult.rows[0];
+  if (!organization) {
+    throw Object.assign(new Error("Organization not found"), {
+      statusCode: 404,
+    });
+  }
+
+  const existingResult = await db.query<{
+    id: string;
+    externalCustomerId: string;
+    email: string | null;
+    metadata: Record<string, unknown> | null;
+  }>(
+    'SELECT id,"externalCustomerId",email,metadata FROM "BillingCustomer" WHERE "orgId"=$1 AND provider=\'STRIPE\'::"BillingProvider" LIMIT 1',
+    [input.orgId],
+  );
+  const existing = existingResult.rows[0];
+  if (existing) {
+    const previousOperationId =
+      typeof existing.metadata?.operationId === "string"
+        ? existing.metadata.operationId
+        : null;
+    const sameLink =
+      input.mode === "link_existing" &&
+      input.externalCustomerId &&
+      existing.externalCustomerId === input.externalCustomerId;
+    const sameOperation = previousOperationId === input.operationId;
+
+    if (sameLink || sameOperation) {
+      return {
+        created: false,
+        mapping: existing,
+        organization,
+        detail: await getOrganizationBillingOperations(input.orgId),
+      };
+    }
+    throw Object.assign(
+      new Error("Organization already has a Stripe customer mapping"),
+      { statusCode: 409 },
+    );
+  }
+
+  const client = stripe();
+  let customer: Stripe.Customer;
+
+  if (input.mode === "create") {
+    const billingEmail = input.billingEmail?.trim().toLowerCase();
+    if (!billingEmail) {
+      throw Object.assign(
+        new Error("Billing email is required when creating a Stripe customer"),
+        { statusCode: 400 },
+      );
+    }
+
+    customer = await client.customers.create(
+      {
+        name: organization.name,
+        email: billingEmail,
+        metadata: {
+          org_id: input.orgId,
+          org_slug: organization.slug,
+          platform: "migrateck",
+          source: "platform_operator",
+        },
+      },
+      {
+        idempotencyKey:
+          "migrateck-billing-customer-" + input.operationId + "-create",
+      },
+    );
+  } else {
+    const externalCustomerId = input.externalCustomerId?.trim();
+    if (!externalCustomerId) {
+      throw Object.assign(
+        new Error("Stripe customer ID is required when linking an existing customer"),
+        { statusCode: 400 },
+      );
+    }
+
+    const existingCustomerMapping = await db.query<{ orgId: string }>(
+      'SELECT "orgId" FROM "BillingCustomer" WHERE "externalCustomerId"=$1 LIMIT 1',
+      [externalCustomerId],
+    );
+    if (
+      existingCustomerMapping.rows[0] &&
+      existingCustomerMapping.rows[0].orgId !== input.orgId
+    ) {
+      throw Object.assign(
+        new Error("Stripe customer is already mapped to another organization"),
+        { statusCode: 409 },
+      );
+    }
+
+    const retrieved = await client.customers.retrieve(externalCustomerId);
+    if ("deleted" in retrieved && retrieved.deleted) {
+      throw Object.assign(new Error("Stripe customer has been deleted"), {
+        statusCode: 409,
+      });
+    }
+    customer = retrieved as Stripe.Customer;
+
+    const remoteOrgId = customer.metadata?.org_id?.trim();
+    if (remoteOrgId && remoteOrgId !== input.orgId) {
+      throw Object.assign(
+        new Error("Stripe customer metadata belongs to another organization"),
+        { statusCode: 409 },
+      );
+    }
+    const remotePlatform = customer.metadata?.platform?.trim();
+    if (remotePlatform && remotePlatform !== "migrateck") {
+      throw Object.assign(
+        new Error("Stripe customer is already attributed to another platform"),
+        { statusCode: 409 },
+      );
+    }
+
+    customer = await client.customers.update(
+      customer.id,
+      {
+        metadata: {
+          ...customer.metadata,
+          org_id: input.orgId,
+          org_slug: organization.slug,
+          platform: "migrateck",
+          source: customer.metadata?.source ?? "platform_operator_link",
+        },
+      },
+      {
+        idempotencyKey:
+          "migrateck-billing-customer-" + input.operationId + "-link",
+      },
+    );
+  }
+
+  const tx = await db.connect();
+  let mapping: {
+    id: string;
+    externalCustomerId: string;
+    email: string | null;
+  };
+  try {
+    await tx.query("BEGIN");
+
+    await tx.query(
+      'SELECT id FROM "Organization" WHERE id=$1 FOR UPDATE',
+      [input.orgId],
+    );
+
+    const orgMapping = await tx.query<{
+      id: string;
+      externalCustomerId: string;
+      email: string | null;
+    }>(
+      'SELECT id,"externalCustomerId",email FROM "BillingCustomer" WHERE "orgId"=$1 AND provider=\'STRIPE\'::"BillingProvider" FOR UPDATE',
+      [input.orgId],
+    );
+    if (orgMapping.rows[0]) {
+      if (orgMapping.rows[0].externalCustomerId === customer.id) {
+        mapping = orgMapping.rows[0];
+        await tx.query("COMMIT");
+        return {
+          created: false,
+          mapping,
+          organization,
+          detail: await getOrganizationBillingOperations(input.orgId),
+        };
+      }
+      throw Object.assign(
+        new Error("Organization acquired another Stripe customer mapping during this operation"),
+        { statusCode: 409 },
+      );
+    }
+
+    const customerMapping = await tx.query<{ orgId: string }>(
+      'SELECT "orgId" FROM "BillingCustomer" WHERE "externalCustomerId"=$1 FOR UPDATE',
+      [customer.id],
+    );
+    if (
+      customerMapping.rows[0] &&
+      customerMapping.rows[0].orgId !== input.orgId
+    ) {
+      throw Object.assign(
+        new Error("Stripe customer is already mapped to another organization"),
+        { statusCode: 409 },
+      );
+    }
+
+    const localId = randomUUID();
+    const inserted = await tx.query<{
+      id: string;
+      externalCustomerId: string;
+      email: string | null;
+    }>(
+      `INSERT INTO "BillingCustomer"
+        (id,"orgId",provider,"externalCustomerId",email,metadata,"createdAt","updatedAt")
+       VALUES ($1,$2,'STRIPE'::"BillingProvider",$3,$4,$5::jsonb,NOW(),NOW())
+       RETURNING id,"externalCustomerId",email`,
+      [
+        localId,
+        input.orgId,
+        customer.id,
+        customer.email ?? input.billingEmail ?? null,
+        JSON.stringify({
+          source:
+            input.mode === "create"
+              ? "platform_operator_create"
+              : "platform_operator_link",
+          operationId: input.operationId,
+        }),
+      ],
+    );
+    mapping = inserted.rows[0]!;
+
+    await tx.query(
+      `INSERT INTO "BillingOrgState"
+        (id,"orgId","stripeCustomerId","lastSyncedAt","createdAt","updatedAt")
+       VALUES ($1,$2,$3,NOW(),NOW(),NOW())
+       ON CONFLICT ("orgId") DO UPDATE SET
+         "stripeCustomerId"=EXCLUDED."stripeCustomerId",
+         "lastSyncedAt"=NOW(),
+         "updatedAt"=NOW()`,
+      [randomUUID(), input.orgId, customer.id],
+    );
+
+    await tx.query(
+      'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,$4,\'billing_customer\',$5,$6,$7,$8::jsonb,NOW())',
+      [
+        randomUUID(),
+        input.actorId,
+        input.orgId,
+        input.mode === "create"
+          ? "BILLING_CUSTOMER_OPERATOR_CREATED"
+          : "BILLING_CUSTOMER_OPERATOR_LINKED",
+        mapping.id,
+        input.ip ?? null,
+        input.userAgent ?? null,
+        JSON.stringify({
+          operationId: input.operationId,
+          reason: input.reason,
+          mode: input.mode,
+          externalCustomerId: customer.id,
+          stripeEmail: customer.email ?? null,
+        }),
+      ],
+    );
+
+    await tx.query("COMMIT");
+  } catch (error) {
+    await tx.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    tx.release();
+  }
+
+  return {
+    created: true,
+    mapping,
+    organization,
+    detail: await getOrganizationBillingOperations(input.orgId),
+  };
+  });
+}
+
 async function persistProcessorBundle(input: {
   orgId: string;
   customerId: string;

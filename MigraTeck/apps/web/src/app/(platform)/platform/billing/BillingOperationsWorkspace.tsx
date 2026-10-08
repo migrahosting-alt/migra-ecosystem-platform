@@ -310,6 +310,16 @@ export function BillingOperationsWorkspace() {
     subscription: LocalSubscription;
     action: SubscriptionAction;
   } | null>(null);
+  const [customerInitMode, setCustomerInitMode] = useState<
+    "create" | "link_existing"
+  >("create");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerExternalId, setCustomerExternalId] = useState("");
+  const [customerReason, setCustomerReason] = useState("");
+  const [customerOperationId, setCustomerOperationId] = useState<string | null>(
+    null,
+  );
+  const [customerInitializing, setCustomerInitializing] = useState(false);
 
   const loadOverview = useCallback(async (search = "", background = false) => {
     if (!background) setOverviewLoading(true);
@@ -375,7 +385,73 @@ export function BillingOperationsWorkspace() {
     setReconcileReason("");
     setActionTarget(null);
     setActionReason("");
+    setCustomerInitMode("create");
+    setCustomerEmail("");
+    setCustomerExternalId("");
+    setCustomerReason("");
+    setCustomerOperationId(null);
     await loadDetail(orgId);
+  }
+
+  async function initializeCustomer() {
+    if (!detail || !detail.canManageBilling || detail.customer) return;
+    if (customerReason.trim().length < 3) return;
+    if (customerInitMode === "create" && !customerEmail.trim()) return;
+    if (customerInitMode === "link_existing" && !customerExternalId.trim()) return;
+
+    const operationId = customerOperationId ?? crypto.randomUUID();
+    if (!customerOperationId) setCustomerOperationId(operationId);
+
+    setCustomerInitializing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/billing/organizations/" +
+          encodeURIComponent(detail.organization.id) +
+          "/customer",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operationId,
+            mode: customerInitMode,
+            reason: customerReason.trim(),
+            ...(customerInitMode === "create"
+              ? { billingEmail: customerEmail.trim() }
+              : { externalCustomerId: customerExternalId.trim() }),
+          }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to initialize MigraPay customer");
+      }
+
+      if (body.detail) {
+        setDetail(body.detail as BillingDetail);
+      } else {
+        await loadDetail(detail.organization.id);
+      }
+      setCustomerEmail("");
+      setCustomerExternalId("");
+      setCustomerReason("");
+      setCustomerOperationId(null);
+      setNotice(
+        customerInitMode === "create"
+          ? "Stripe customer created, mapped to this organization, and audited."
+          : "Existing Stripe customer verified, linked to this organization, and audited.",
+      );
+      await loadOverview(query, true);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to initialize MigraPay customer",
+      );
+    } finally {
+      setCustomerInitializing(false);
+    }
   }
 
   async function reconcile() {
@@ -650,12 +726,135 @@ export function BillingOperationsWorkspace() {
               </div>
 
               {!detail.customer ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
-                  <h3 className="text-sm font-semibold text-slate-900">No Stripe customer mapping</h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">
-                    This organization has no BillingCustomer record. Reconciliation and subscription actions are unavailable until checkout/customer provisioning creates a Stripe mapping.
-                  </p>
-                </div>
+                <section className="rounded-2xl border border-blue-200 bg-[linear-gradient(135deg,#f8fbff,#ffffff)] p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">
+                        Customer initialization
+                      </p>
+                      <h3 className="mt-1 text-base font-semibold text-slate-950">
+                        Initialize MigraPay for this organization
+                      </h3>
+                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                        Create a new Stripe customer with MigraTeck organization metadata, or verify and link an existing Stripe customer. This establishes the commercial identity required before reconciliation, payment methods, or subscription operations.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
+                      No Stripe mapping
+                    </span>
+                  </div>
+
+                  {detail.canManageBilling ? (
+                    <div className="mt-5 space-y-4">
+                      <div className="grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 sm:max-w-md">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomerInitMode("create");
+                            setCustomerOperationId(null);
+                          }}
+                          className={
+                            "rounded-lg px-3 py-2 text-xs font-semibold transition " +
+                            (customerInitMode === "create"
+                              ? "bg-white text-slate-950 shadow-sm"
+                              : "text-slate-500 hover:text-slate-800")
+                          }
+                        >
+                          Create Stripe customer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomerInitMode("link_existing");
+                            setCustomerOperationId(null);
+                          }}
+                          className={
+                            "rounded-lg px-3 py-2 text-xs font-semibold transition " +
+                            (customerInitMode === "link_existing"
+                              ? "bg-white text-slate-950 shadow-sm"
+                              : "text-slate-500 hover:text-slate-800")
+                          }
+                        >
+                          Link existing customer
+                        </button>
+                      </div>
+
+                      <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+                        <label className="text-sm font-semibold text-slate-800">
+                          {customerInitMode === "create"
+                            ? "Billing email"
+                            : "Stripe customer ID"}
+                          <input
+                            value={
+                              customerInitMode === "create"
+                                ? customerEmail
+                                : customerExternalId
+                            }
+                            onChange={(event) =>
+                              customerInitMode === "create"
+                                ? setCustomerEmail(event.target.value)
+                                : setCustomerExternalId(event.target.value)
+                            }
+                            type={
+                              customerInitMode === "create" ? "email" : "text"
+                            }
+                            placeholder={
+                              customerInitMode === "create"
+                                ? "billing@example.com"
+                                : "cus_..."
+                            }
+                            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                          />
+                        </label>
+
+                        <label className="text-sm font-semibold text-slate-800">
+                          Operator reason
+                          <input
+                            value={customerReason}
+                            onChange={(event) =>
+                              setCustomerReason(event.target.value)
+                            }
+                            maxLength={500}
+                            placeholder="Why is this billing identity being created or linked?"
+                            className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10"
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => void initializeCustomer()}
+                          disabled={
+                            customerInitializing ||
+                            customerReason.trim().length < 3 ||
+                            (customerInitMode === "create"
+                              ? !customerEmail.trim()
+                              : !customerExternalId.trim())
+                          }
+                          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          {customerInitializing ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <CreditCard size={14} />
+                          )}
+                          {customerInitializing
+                            ? "Initializing…"
+                            : customerInitMode === "create"
+                              ? "Create customer"
+                              : "Verify & link"}
+                        </button>
+                      </div>
+
+                      <p className="text-xs leading-5 text-slate-500">
+                        Existing links are ownership-checked locally and against Stripe metadata. Create operations use Stripe idempotency keyed to the operator operation UUID.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">
+                      Read-only. {detail.managementPermission} is required to initialize a billing customer.
+                    </div>
+                  )}
+                </section>
               ) : (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
