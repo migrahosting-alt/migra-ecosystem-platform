@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PRODUCT_CATALOG } from "@migrateck/billing-core/catalog";
 import { ENTITLEMENT_STATUSES, PRODUCT_KEYS } from "./commerce-catalog.js";
 import { getEntitlementTransitionAvailability } from "./commerce-entitlements.js";
+import { classifyProvisioningDrift } from "./provisioning-drift.js";
 
 function repoFile(path: string): string {
   const cwd = process.cwd();
@@ -101,24 +102,94 @@ test("catalog snapshot exposes global provisioning health and dead-letter eviden
 
 test("historical dead letters are reconciled against current access before operator action", () => {
   const model = repoFile("apps/api/src/lib/commerce-catalog.ts");
+  const driftModel = repoFile("apps/api/src/lib/provisioning-drift.ts");
+  const healthModel = repoFile("apps/api/src/lib/infrastructure-health.ts");
   const workspace = repoFile(
     "apps/web/src/app/(platform)/platform/commerce/catalog/CatalogEntitlementsWorkspace.tsx",
   );
 
-  assert.match(model, /WITH dead AS/);
-  assert.match(model, /success AS/);
-  assert.match(model, /e\.status::text AS "entitlementStatus"/);
-  assert.match(model, /"subscriptionCount"/);
-  assert.match(model, /active_access_needs_verification/);
-  assert.match(model, /superseded_by_success/);
-  assert.match(model, /access_not_active/);
-  assert.match(model, /unmapped_legacy_job/);
+  assert.match(model, /getProvisioningDriftSnapshot/);
+  assert.match(healthModel, /getProvisioningDriftSnapshot/);
+  assert.match(driftModel, /WITH dead AS/);
+  assert.match(driftModel, /success AS/);
+  assert.match(driftModel, /REVENUE_PROVISION_HANDOFF_ACCEPTED/);
+  assert.match(driftModel, /"provenanceTenantId"/);
+  assert.match(driftModel, /active_access_needs_verification/);
+  assert.match(driftModel, /synthetic_test_data/);
+  assert.match(driftModel, /rollout_policy_blocked/);
+  assert.match(driftModel, /runtime_link_required/);
 
   assert.match(workspace, /Historical reconciliation/);
   assert.match(workspace, /Dead provisioning vs current access/);
   assert.match(workspace, /verification queue, not an automatic revoke list/);
+  assert.match(workspace, /Test fixture/);
+  assert.match(workspace, /Policy blocked/);
+  assert.match(workspace, /Runtime link required/);
   assert.match(workspace, /Inspect access/);
   assert.doesNotMatch(workspace, />Revoke all</i);
+});
+
+test("provisioning drift separates actionable access from test and rollout-policy evidence", () => {
+  const previous = process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST;
+  process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST = "MIGRAHOSTING";
+
+  const base = {
+    orgId: "org-1",
+    orgName: "Example",
+    orgSlug: "example",
+    product: "MIGRAHOSTING",
+    deadJobs: 2,
+    latestDeadAt: "2026-04-12T00:00:00.000Z",
+    lastDeadError: "missing_hosting_context",
+    entitlementStatus: "ACTIVE",
+    entitlementUpdatedAt: "2026-04-12T01:00:00.000Z",
+    succeededJobs: 0,
+    latestSuccessAt: null,
+    subscriptionCount: 0,
+    provenanceSource: "manual-backend-enable",
+    provenanceTenantId: null,
+    provenanceMonthlyRevenue: 0,
+  };
+
+  try {
+    const manual = classifyProvisioningDrift(base);
+    assert.equal(manual.classification, "active_access_needs_verification");
+    assert.equal(manual.disposition, "runtime_link_required");
+    assert.equal(manual.actionable, true);
+
+    const smoke = classifyProvisioningDrift({
+      ...base,
+      orgId: "org-smoke",
+      provenanceSource: "manual-smoke",
+    });
+    assert.equal(smoke.disposition, "synthetic_test_data");
+    assert.equal(smoke.actionable, false);
+
+    const blocked = classifyProvisioningDrift({
+      ...base,
+      orgId: "org-panel",
+      product: "MIGRAPANEL",
+      provenanceSource: "migra-market.revenue.close_deal",
+      provenanceTenantId: "tenant_old",
+      provenanceMonthlyRevenue: 49,
+    });
+    assert.equal(blocked.disposition, "rollout_policy_blocked");
+    assert.equal(blocked.actionable, false);
+
+    const recovered = classifyProvisioningDrift({
+      ...base,
+      latestSuccessAt: "2026-04-12T02:00:00.000Z",
+    });
+    assert.equal(recovered.classification, "superseded_by_success");
+    assert.equal(recovered.disposition, "later_success");
+    assert.equal(recovered.actionable, false);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST;
+    } else {
+      process.env.PROVISIONING_WORKER_PRODUCT_ALLOWLIST = previous;
+    }
+  }
 });
 
 test("manual entitlement mutation is permission-gated and transition-preflighted", () => {

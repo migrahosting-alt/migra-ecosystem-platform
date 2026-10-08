@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { getDb } from "./db.js";
+import { getProvisioningDriftSnapshot } from "./provisioning-drift.js";
 import { analyzeSocialConnectionSyncQueue } from "./social-connection-sync.js";
 
 export type WorkerState = "healthy" | "stale" | "missing";
@@ -151,62 +152,7 @@ export async function getInfrastructureHealthSnapshot() {
          max("updatedAt") AS "lastUpdatedAt"
        FROM "ProvisioningJob"`,
     ),
-    db.query(
-      `WITH dead AS (
-         SELECT
-           j."orgId",
-           COALESCE(
-             NULLIF(j.payload->>'productLane',''),
-             NULLIF(j.payload->>'product','')
-           ) AS product,
-           count(*)::int AS "deadJobs",
-           max(COALESCE(j."lastErrorAt",j."updatedAt")) AS "latestDeadAt"
-         FROM "ProvisioningJob" j
-         WHERE j.status='DEAD'::"ProvisioningJobStatus"
-         GROUP BY
-           j."orgId",
-           COALESCE(
-             NULLIF(j.payload->>'productLane',''),
-             NULLIF(j.payload->>'product','')
-           )
-       ),
-       success AS (
-         SELECT
-           j."orgId",
-           COALESCE(
-             NULLIF(j.payload->>'productLane',''),
-             NULLIF(j.payload->>'product','')
-           ) AS product,
-           max(j."updatedAt") AS "latestSuccessAt"
-         FROM "ProvisioningJob" j
-         WHERE j.status='SUCCEEDED'::"ProvisioningJobStatus"
-         GROUP BY
-           j."orgId",
-           COALESCE(
-             NULLIF(j.payload->>'productLane',''),
-             NULLIF(j.payload->>'product','')
-           )
-       )
-       SELECT
-         count(*)::int AS "needsVerification",
-         COALESCE(sum(d."deadJobs"),0)::int AS "correlatedDeadJobs"
-       FROM dead d
-       JOIN "OrgEntitlement" e
-         ON e."orgId"=d."orgId"
-        AND e.product::text=d.product
-       LEFT JOIN success s
-         ON s."orgId"=d."orgId"
-        AND s.product IS NOT DISTINCT FROM d.product
-       WHERE e.status IN (
-         'ACTIVE'::"EntitlementStatus",
-         'TRIAL'::"EntitlementStatus",
-         'INTERNAL_ONLY'::"EntitlementStatus"
-       )
-         AND (
-           s."latestSuccessAt" IS NULL
-           OR s."latestSuccessAt" <= d."latestDeadAt"
-         )`,
-    ),
+    getProvisioningDriftSnapshot(),
     db.query(
       `SELECT
          count(*) FILTER (WHERE status='PENDING')::int AS pending,
@@ -263,12 +209,13 @@ export async function getInfrastructureHealthSnapshot() {
     socialCoverage.missingCredentialReconnect ?? 0,
   );
   const provisioningDriftHealth = {
-    needsVerification: Number(
-      provisioningDrift.rows[0]?.needsVerification ?? 0,
-    ),
-    correlatedDeadJobs: Number(
-      provisioningDrift.rows[0]?.correlatedDeadJobs ?? 0,
-    ),
+    needsVerification: provisioningDrift.needsVerification,
+    correlatedDeadJobs: provisioningDrift.correlatedDeadJobs,
+    historicalNeedsReview: provisioningDrift.historicalNeedsReview,
+    historicalCorrelatedDeadJobs: provisioningDrift.historicalCorrelatedDeadJobs,
+    syntheticTestRows: provisioningDrift.syntheticTestRows,
+    rolloutPolicyBlockedRows: provisioningDrift.rolloutPolicyBlockedRows,
+    runtimeLinkRequiredRows: provisioningDrift.runtimeLinkRequiredRows,
   };
   const socialConnectionHealth = {
     total: Number(socialCoverage.total ?? socialConnections.length),

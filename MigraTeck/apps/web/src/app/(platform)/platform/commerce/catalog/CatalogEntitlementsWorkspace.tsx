@@ -47,6 +47,15 @@ type DriftClassification =
   | "access_not_active"
   | "unmapped_legacy_job";
 
+type DriftDisposition =
+  | "runtime_link_required"
+  | "synthetic_test_data"
+  | "rollout_policy_blocked"
+  | "verification_required"
+  | "later_success"
+  | "inactive_access"
+  | "legacy_unmapped";
+
 type WorkerStatus = {
   ready: boolean;
   workerId: string | null;
@@ -213,7 +222,18 @@ type CatalogPayload = {
         latestSuccessAt: string | null;
         subscriptionCount: number;
         classification: DriftClassification;
+        disposition?: DriftDisposition;
+        actionable?: boolean;
+        provenanceSource?: string | null;
+        provenanceTenantId?: string | null;
+        provenanceMonthlyRevenue?: number | null;
       }>;
+      correlatedDeadJobs?: number;
+      historicalNeedsReview?: number;
+      historicalCorrelatedDeadJobs?: number;
+      syntheticTestRows?: number;
+      rolloutPolicyBlockedRows?: number;
+      runtimeLinkRequiredRows?: number;
     };
   };
   metrics: {
@@ -434,7 +454,41 @@ function driftLabel(classification: DriftClassification) {
   }
 }
 
-function driftClass(classification: DriftClassification) {
+function driftDispositionLabel(
+  disposition: DriftDisposition | undefined,
+  classification: DriftClassification,
+) {
+  switch (disposition) {
+    case "runtime_link_required":
+      return "Runtime link required";
+    case "synthetic_test_data":
+      return "Synthetic test evidence";
+    case "rollout_policy_blocked":
+      return "Rollout policy blocked";
+    case "verification_required":
+      return "Needs verification";
+    case "later_success":
+      return "Later success found";
+    case "inactive_access":
+      return "Access not active";
+    case "legacy_unmapped":
+      return "Legacy lane unmapped";
+    default:
+      return driftLabel(classification);
+  }
+}
+
+function driftClass(
+  classification: DriftClassification,
+  disposition?: DriftDisposition,
+) {
+  if (disposition === "synthetic_test_data") {
+    return "border-slate-200 bg-slate-50 text-slate-700";
+  }
+  if (disposition === "rollout_policy_blocked") {
+    return "border-violet-200 bg-violet-50 text-violet-800";
+  }
+
   switch (classification) {
     case "active_access_needs_verification":
       return "border-amber-200 bg-amber-50 text-amber-800";
@@ -1227,8 +1281,16 @@ export function CatalogEntitlementsWorkspace({
     : null;
   const driftRows = catalog.provisioning.drift.rows;
   const driftAttention = driftRows.filter(
-    (row) => row.classification === "active_access_needs_verification",
+    (row) =>
+      row.actionable ??
+      row.classification === "active_access_needs_verification",
   );
+  const driftSynthetic = driftRows.filter(
+    (row) => row.disposition === "synthetic_test_data",
+  ).length;
+  const driftPolicyBlocked = driftRows.filter(
+    (row) => row.disposition === "rollout_policy_blocked",
+  ).length;
   const driftSuperseded = driftRows.filter(
     (row) => row.classification === "superseded_by_success",
   ).length;
@@ -1415,9 +1477,11 @@ export function CatalogEntitlementsWorkspace({
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[31rem]">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:min-w-[42rem] xl:grid-cols-6">
                 {[
                   ["Verify", driftAttention.length],
+                  ["Test fixture", driftSynthetic],
+                  ["Policy blocked", driftPolicyBlocked],
                   ["Later success", driftSuperseded],
                   ["Inactive", driftInactive],
                   ["Unmapped", driftUnmapped],
@@ -1432,7 +1496,7 @@ export function CatalogEntitlementsWorkspace({
 
             <div className="mt-4 grid gap-3 lg:grid-cols-2">
               {driftRows.map((row) => (
-                <article key={row.orgId + ":" + (row.product ?? "legacy")} className={"rounded-2xl border p-4 " + driftClass(row.classification)}>
+                <article key={row.orgId + ":" + (row.product ?? "legacy")} className={"rounded-2xl border p-4 " + driftClass(row.classification, row.disposition)}>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1440,7 +1504,7 @@ export function CatalogEntitlementsWorkspace({
                           {row.orgName ?? row.orgSlug ?? row.orgId}
                         </span>
                         <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em]">
-                          {driftLabel(row.classification)}
+                          {driftDispositionLabel(row.disposition, row.classification)}
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1465,9 +1529,11 @@ export function CatalogEntitlementsWorkspace({
                         <span>
                           Later success: {row.latestSuccessAt ? formatDate(row.latestSuccessAt) : "none"}
                         </span>
+                        {row.provenanceSource ? <span>Source: {row.provenanceSource}</span> : null}
+                        {row.provenanceTenantId ? <span>Historical tenant: {row.provenanceTenantId}</span> : null}
                       </div>
                     </div>
-                    {row.classification === "active_access_needs_verification" ? (
+                    {(row.actionable ?? row.classification === "active_access_needs_verification") ? (
                       <button
                         type="button"
                         onClick={() => void inspectDriftOrganization(row.orgId)}
