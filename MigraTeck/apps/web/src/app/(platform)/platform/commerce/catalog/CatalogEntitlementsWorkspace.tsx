@@ -337,6 +337,7 @@ type TenantHandoffState = {
   tenantId: string;
   status: "verifying" | "ready" | "binding" | "bound" | "error";
   candidate: HostingRecoveryCandidate | null;
+  resolutionMode: "dead_letter_recovery" | "fresh_reconciliation" | null;
   error: string | null;
 };
 
@@ -633,10 +634,13 @@ export function CatalogEntitlementsWorkspace({
       );
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Unable to load organization access");
-      setAccess(body);
+      const payload = body as AccessPayload;
+      setAccess(payload);
+      return payload;
     } catch (error) {
       setAccess(null);
       setAccessError(error instanceof Error ? error.message : "Unable to load organization access");
+      return null;
     } finally {
       setAccessLoading(false);
     }
@@ -650,6 +654,7 @@ export function CatalogEntitlementsWorkspace({
         tenantId,
         status: "verifying",
         candidate: null,
+        resolutionMode: null,
         error: null,
       });
 
@@ -678,6 +683,7 @@ export function CatalogEntitlementsWorkspace({
           tenantId,
           status: "ready",
           candidate,
+          resolutionMode: null,
           error: null,
         });
         setSelectedOrgId(orgId);
@@ -689,6 +695,7 @@ export function CatalogEntitlementsWorkspace({
           tenantId,
           status: "error",
           candidate: null,
+          resolutionMode: null,
           error:
             error instanceof Error
               ? error.message
@@ -810,9 +817,30 @@ export function CatalogEntitlementsWorkspace({
     }
 
     const current = tenantHandoff;
-    setTenantHandoff({ ...current, status: "binding", error: null });
+    const candidate = tenantHandoff.candidate;
+    setTenantHandoff({
+      ...current,
+      status: "binding",
+      resolutionMode: null,
+      error: null,
+    });
 
     try {
+      const remediationResponse = await fetch(
+        "/api/platform/commerce/provisioning/jobs/" +
+          encodeURIComponent(current.jobId) +
+          "/remediation",
+        { cache: "no-store" },
+      );
+      const remediationBody = await remediationResponse.json();
+      if (!remediationResponse.ok) {
+        throw new Error(
+          remediationBody.error ??
+            "Unable to verify the historical provisioning evidence",
+        );
+      }
+      const remediation = remediationBody as DeadLetterRemediation;
+
       const response = await fetch(
         "/api/platform/hosting/organizations/" +
           encodeURIComponent(current.orgId) +
@@ -830,19 +858,59 @@ export function CatalogEntitlementsWorkspace({
         );
       }
 
-      setTenantHandoff({ ...current, status: "bound", error: null });
       setSelectedOrgId(current.orgId);
-      await Promise.all([
+      const [refreshedAccess] = await Promise.all([
         loadAccess(current.orgId),
         loadOrganizations(orgQuery),
         loadCatalog(),
       ]);
-      await openDeadLetter(current.jobId);
+
+      if (remediation.retry.malformed) {
+        const verifiedContext = {
+          ...candidate.suggestedContext,
+          tenantId: candidate.tenantId,
+        };
+        setDeadLetter(null);
+        setDeadLetterError(null);
+        setReconciliationEditor({
+          product: "MIGRAHOSTING",
+          reason:
+            "Recover current MigraHosting runtime from verified tenant evidence after malformed legacy provisioning history.",
+          context: verifiedContext,
+        });
+        setReconciliationMessage(
+          refreshedAccess
+            ? "Tenant linked. Review the verified runtime context below, complete any missing fields, then explicitly queue a fresh signed reconciliation."
+            : "Tenant linked. Refresh organization access before queueing a fresh signed reconciliation.",
+        );
+        setEntitlementEditor(null);
+        setTenantHandoff({
+          ...current,
+          status: "bound",
+          resolutionMode: "fresh_reconciliation",
+          error: null,
+        });
+        window.setTimeout(() => {
+          document
+            .getElementById("organization-access")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 0);
+      } else {
+        setTenantHandoff({
+          ...current,
+          status: "bound",
+          resolutionMode: "dead_letter_recovery",
+          error: null,
+        });
+        await openDeadLetter(current.jobId);
+      }
+
       window.history.replaceState({}, "", "/platform/commerce/catalog");
     } catch (error) {
       setTenantHandoff({
         ...current,
         status: "error",
+        resolutionMode: null,
         error:
           error instanceof Error
             ? error.message
@@ -1522,7 +1590,9 @@ export function CatalogEntitlementsWorkspace({
                 ) : null}
                 <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-600">
                   {tenantHandoff.status === "bound"
-                    ? "Binding does not retry provisioning automatically. Review the reopened dead-letter evidence and supply any remaining service-instance or edge context before queueing a signed retry."
+                    ? tenantHandoff.resolutionMode === "fresh_reconciliation"
+                      ? "Binding did not replay malformed history. A fresh MigraHosting reconciliation is open below with verified tenant context only; review and complete any missing fields before explicitly queueing new signed jobs."
+                      : "Binding does not retry provisioning automatically. Review the reopened dead-letter evidence and supply any remaining service-instance or edge context before queueing a signed retry."
                     : tenantHandoff.status === "ready"
                       ? "The returned tenant was re-read from MigraPanel. Binding is a separate audited action and provisioning will not retry automatically."
                       : tenantHandoff.status === "error"

@@ -143,7 +143,7 @@ test("Platform handoff never bypasses binding authority", () => {
   assert.match(workspace, /Bind this tenant/);
 });
 
-test("Catalog recovery verifies, explicitly binds, and reopens evidence without auto-retry", () => {
+test("Catalog recovery verifies, explicitly binds, and branches safely by historical job integrity", () => {
   const cwd = process.cwd();
   const root = cwd.endsWith("/apps/web") ? join(cwd, "../..") : cwd;
   const workspace = readFileSync(
@@ -168,13 +168,22 @@ test("Catalog recovery verifies, explicitly binds, and reopens evidence without 
     /\/api\/platform\/hosting\/organizations\/"\s*\+[\s\S]*?\/binding/,
   );
   assert.match(workspace, /Bind tenant to organization/);
+  assert.match(workspace, /remediation\.retry\.malformed/);
+  assert.match(workspace, /resolutionMode: "fresh_reconciliation"/);
+  assert.match(workspace, /resolutionMode: "dead_letter_recovery"/);
+  assert.match(workspace, /setReconciliationEditor\(\{/);
+  assert.match(workspace, /candidate\.suggestedContext/);
+  assert.match(workspace, /tenantId: candidate\.tenantId/);
   assert.match(workspace, /await openDeadLetter\(current\.jobId\)/);
   assert.match(workspace, /Creation never binds the tenant and never retries this dead letter automatically/);
 
   const bindStart = workspace.indexOf("async function bindReturnedTenant");
   const bindEnd = workspace.indexOf("function transitionFor", bindStart);
   assert.ok(bindStart >= 0 && bindEnd > bindStart);
-  assert.doesNotMatch(workspace.slice(bindStart, bindEnd), /\/retry|submit\("retry"\)/);
+  const bindFlow = workspace.slice(bindStart, bindEnd);
+  assert.doesNotMatch(bindFlow, /\/retry|submit\("retry"\)/);
+  assert.doesNotMatch(bindFlow, /\/reconcile["'`]/);
+  assert.match(bindFlow, /\/remediation/);
 
   assert.match(proxy, /fetchPlatformAuthorityApi/);
   assert.match(proxy, /\/hosting\/organizations\//);
