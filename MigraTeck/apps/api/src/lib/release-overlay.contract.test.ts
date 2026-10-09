@@ -51,7 +51,7 @@ test("overlay inventory classifies production drift without exposing contents", 
 
   const manifest = JSON.parse(readFileSync(output, "utf8")) as {
     summary: Record<string, number>;
-    entries: Array<Record<string, string>>;
+    entries: Array<Record<string, string | null>>;
   };
 
   assert.equal(manifest.summary.totalDifferences, 6);
@@ -62,16 +62,24 @@ test("overlay inventory classifies production drift without exposing contents", 
   assert.equal(manifest.summary.highCriticality, 3);
 
   const byPath = new Map(manifest.entries.map((entry) => [entry.path, entry]));
-  assert.deepEqual(byPath.get("apps/web/src/app/console/migraguard/page.tsx"), {
-    path: "apps/web/src/app/console/migraguard/page.tsx",
-    kind: "extra",
-    classification: "runtime_source",
-    criticality: "high",
-    recommendedAction: "reconcile_to_git",
-  });
+  const productionOnly = byPath.get("apps/web/src/app/console/migraguard/page.tsx");
+  assert.equal(productionOnly?.kind, "extra");
+  assert.equal(productionOnly?.classification, "runtime_source");
+  assert.equal(productionOnly?.criticality, "high");
+  assert.equal(productionOnly?.recommendedAction, "reconcile_to_git");
+  assert.equal(productionOnly?.canonicalSha256, null);
+  assert.match(String(productionOnly?.releaseSha256), /^[a-f0-9]{64}$/);
   assert.equal(
     byPath.get("apps/web/src/app/page.tsx")?.recommendedAction,
     "reconcile_patch",
+  );
+  assert.match(
+    String(byPath.get("apps/web/src/app/page.tsx")?.canonicalSha256),
+    /^[a-f0-9]{64}$/,
+  );
+  assert.match(
+    String(byPath.get("apps/web/src/app/page.tsx")?.releaseSha256),
+    /^[a-f0-9]{64}$/,
   );
   assert.equal(
     byPath.get("apps/web/src/app/new/page.tsx")?.recommendedAction,
@@ -98,8 +106,10 @@ test("overlay inventory classifies production drift without exposing contents", 
   assert.ok(
     manifest.entries.every(
       (entry) =>
-        !Object.values(entry).some((value) =>
-          ["canonical page", "production patch", "legacy runtime"].includes(value),
+        !Object.values(entry).some(
+          (value) =>
+            typeof value === "string" &&
+            ["canonical page", "production patch", "legacy runtime"].includes(value),
         ),
     ),
   );
@@ -130,7 +140,10 @@ test("overlay reader keeps absolute filesystem roots out of operator entries", (
   );
 
   assert.match(source, /!entry\.path\.startsWith\("\/"\)/);
-  assert.match(source, /!entry\.path\.includes\("\.\."\)/);
+  assert.match(source, /hasParentTraversal\(entry\.path\)/);
+  assert.match(source, /segment === "\.\."/);
   assert.match(source, /entries\.length > 50_000/);
   assert.match(source, /different installed release/);
+  assert.match(source, /publicEntry/);
+  assert.match(source, /\.map\(publicEntry\)/);
 });

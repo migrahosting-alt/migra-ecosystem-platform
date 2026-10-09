@@ -20,9 +20,49 @@ DEPLOY_RUN_SMOKE="${DEPLOY_RUN_SMOKE:-false}"
 DEPLOY_SMOKE_URL="${DEPLOY_SMOKE_URL:-${BASE_URL:-}}"
 DEPLOY_SMOKE_ATTEMPTS="${DEPLOY_SMOKE_ATTEMPTS:-10}"
 DEPLOY_SMOKE_DELAY_SECONDS="${DEPLOY_SMOKE_DELAY_SECONDS:-2}"
+DEPLOY_RELEASE_GATE="${DEPLOY_RELEASE_GATE:-true}"
+DEPLOY_OVERLAY_INVENTORY_PATH="${DEPLOY_OVERLAY_INVENTORY_PATH:-/opt/migra/apps/migrateck/current/OVERLAY_INVENTORY.json}"
 
 log() {
   printf '%s\n' "$1"
+}
+
+run_release_overlay_gate() {
+  if [[ "${DEPLOY_SYNC_REMOTE}" != "true" || "${DEPLOY_WORKSPACE}" != "@migrateck/web" ]]; then
+    return
+  fi
+
+  if [[ "${DEPLOY_RELEASE_GATE}" != "true" ]]; then
+    log "[warn] Web release reconciliation gate disabled explicitly (DEPLOY_RELEASE_GATE=${DEPLOY_RELEASE_GATE})"
+    return
+  fi
+
+  if [[ -z "${DEPLOY_HOST}" ]]; then
+    log "DEPLOY_HOST is required for the web release reconciliation gate"
+    exit 1
+  fi
+
+  local remote_target="${DEPLOY_USER}@${DEPLOY_HOST}"
+  local inventory
+  local gate_status=0
+  inventory="$(mktemp)"
+
+  log "[step] fetch installed web overlay inventory"
+  if ! ssh -p "${DEPLOY_SSH_PORT}" "${remote_target}"       "cat $(printf '%q' "${DEPLOY_OVERLAY_INVENTORY_PATH}")" >"${inventory}"; then
+    rm -f "${inventory}"
+    log "Unable to read installed release overlay inventory at ${DEPLOY_OVERLAY_INVENTORY_PATH}"
+    exit 1
+  fi
+
+  log "[step] verify candidate does not lose unreconciled production runtime source"
+  node "${ROOT_DIR}/scripts/analyze-overlay-reconciliation.mjs"     --inventory "${inventory}"     --workspace "${ROOT_DIR}/apps/web"     --git-root "${ROOT_DIR}"     --git-prefix "apps/web"     --classification runtime_source     --fail-on-blockers || gate_status=$?
+
+  rm -f "${inventory}"
+
+  if (( gate_status != 0 )); then
+    log "Web release blocked: reconcile production runtime source before deployment."
+    exit "${gate_status}"
+  fi
 }
 
 run_workspace_checks() {
@@ -237,6 +277,7 @@ cd "${ROOT_DIR}"
 
 log "Starting production deployment workflow for ${DEPLOY_WORKSPACE}..."
 
+run_release_overlay_gate
 run_workspace_checks
 
 if [[ "${DEPLOY_SYNC_REMOTE}" == "true" ]]; then

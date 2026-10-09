@@ -181,22 +181,24 @@ async function buildInventory(
   for (const path of paths) {
     const inCanonical = canonicalSet.has(path);
     const inRelease = releaseSet.has(path);
-    let kind;
+    const [canonicalSha256, releaseSha256] = await Promise.all([
+      inCanonical ? hashFile(canonical, path) : Promise.resolve(null),
+      inRelease ? hashFile(release, path) : Promise.resolve(null),
+    ]);
 
+    let kind;
     if (inCanonical && !inRelease) kind = "missing";
     else if (!inCanonical && inRelease) kind = "extra";
     else {
-      const [canonicalHash, releaseHash] = await Promise.all([
-        hashFile(canonical, path),
-        hashFile(release, path),
-      ]);
-      if (canonicalHash === releaseHash) continue;
+      if (canonicalSha256 === releaseSha256) continue;
       kind = "modified";
     }
 
     entries.push({
       path,
       kind,
+      canonicalSha256,
+      releaseSha256,
       ...classifyPath(path, kind),
     });
   }

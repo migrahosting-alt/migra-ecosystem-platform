@@ -21,6 +21,11 @@ export type ReleaseOverlayEntry = {
   recommendedAction: string;
 };
 
+type OverlayManifestEntry = ReleaseOverlayEntry & {
+  canonicalSha256: string | null;
+  releaseSha256: string | null;
+};
+
 type OverlayManifest = {
   schemaVersion: 1;
   generatedAt: string;
@@ -36,7 +41,7 @@ type OverlayManifest = {
   };
   byClassification: Record<string, number>;
   byAction: Record<string, number>;
-  entries: ReleaseOverlayEntry[];
+  entries: OverlayManifestEntry[];
 };
 
 export type ReleaseOverlayState = "managed" | "missing" | "invalid";
@@ -90,14 +95,22 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-function validateEntry(value: unknown): value is ReleaseOverlayEntry {
+function validSha256(value: unknown) {
+  return value === null || (typeof value === "string" && /^[a-f0-9]{64}$/i.test(value));
+}
+
+function hasParentTraversal(path: string) {
+  return path.split("/").some((segment) => segment === "..");
+}
+
+function validateEntry(value: unknown): value is OverlayManifestEntry {
   if (!value || typeof value !== "object") return false;
-  const entry = value as Partial<ReleaseOverlayEntry>;
+  const entry = value as Partial<OverlayManifestEntry>;
   return (
     typeof entry.path === "string" &&
     entry.path.length > 0 &&
     !entry.path.startsWith("/") &&
-    !entry.path.includes("..") &&
+    !hasParentTraversal(entry.path) &&
     ["extra", "modified", "missing"].includes(entry.kind ?? "") &&
     [
       "deployment_metadata",
@@ -111,8 +124,20 @@ function validateEntry(value: unknown): value is ReleaseOverlayEntry {
     ].includes(entry.classification ?? "") &&
     ["low", "medium", "high"].includes(entry.criticality ?? "") &&
     typeof entry.recommendedAction === "string" &&
-    entry.recommendedAction.length > 0
+    entry.recommendedAction.length > 0 &&
+    validSha256(entry.canonicalSha256) &&
+    validSha256(entry.releaseSha256)
   );
+}
+
+function publicEntry(entry: OverlayManifestEntry): ReleaseOverlayEntry {
+  return {
+    path: entry.path,
+    kind: entry.kind,
+    classification: entry.classification,
+    criticality: entry.criticality,
+    recommendedAction: entry.recommendedAction,
+  };
 }
 
 function parseManifest(raw: string): OverlayManifest {
@@ -152,7 +177,7 @@ function parseManifest(raw: string): OverlayManifest {
   return value as OverlayManifest;
 }
 
-function samples(entries: ReleaseOverlayEntry[]) {
+function samples(entries: OverlayManifestEntry[]) {
   return [...entries]
     .sort((a, b) => {
       const rank = { high: 0, medium: 1, low: 2 };
@@ -162,7 +187,8 @@ function samples(entries: ReleaseOverlayEntry[]) {
         a.path.localeCompare(b.path)
       );
     })
-    .slice(0, 16);
+    .slice(0, 16)
+    .map(publicEntry);
 }
 
 async function loadManifest(): Promise<{
@@ -282,6 +308,6 @@ export async function listReleaseOverlayEntries(input: {
     total: filtered.length,
     offset,
     limit,
-    entries: filtered.slice(offset, offset + limit),
+    entries: filtered.slice(offset, offset + limit).map(publicEntry),
   };
 }
