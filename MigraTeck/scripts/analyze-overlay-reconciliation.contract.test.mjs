@@ -282,3 +282,85 @@ test("overlay reconciliation allows Next catch-all names but rejects parent trav
   assert.notEqual(unsafe.status, 0);
   assert.match(unsafe.stderr, /unsafe path/);
 });
+
+test("committed lookup treats Next dynamic route names literally", () => {
+  const root = mkdtempSync(join(tmpdir(), "migrateck-reconcile-dynamic-git-"));
+  const workspace = join(root, "apps/web");
+  mkdirSync(workspace, { recursive: true });
+
+  execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "reconcile@example.invalid"], {
+    cwd: root,
+  });
+  execFileSync("git", ["config", "user.name", "Reconcile Test"], {
+    cwd: root,
+  });
+
+  const committedPath = "src/app/api/items/[slug]/route.ts";
+  const recoveredPath = "src/app/api/items/[id]/route.ts";
+  write(root, "apps/web/" + committedPath, "committed dynamic route");
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["commit", "-m", "dynamic fixture"], {
+    cwd: root,
+    stdio: "ignore",
+  });
+
+  // Production recovery arrived after HEAD. The bracketed route is present in
+  // the workspace but must not be mistaken for a committed empty blob.
+  write(root, "apps/web/" + recoveredPath, "production-only dynamic route");
+
+  const inventoryPath = join(root, "inventory-dynamic.json");
+  writeFileSync(
+    inventoryPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      canonicalCommit: "fixture",
+      releaseLabel: "fixture",
+      entries: [
+        {
+          path: committedPath,
+          kind: "extra",
+          classification: "runtime_source",
+          criticality: "high",
+          recommendedAction: "reconcile_to_git",
+          canonicalSha256: null,
+          releaseSha256: sha("committed dynamic route"),
+        },
+        {
+          path: recoveredPath,
+          kind: "extra",
+          classification: "runtime_source",
+          criticality: "high",
+          recommendedAction: "reconcile_to_git",
+          canonicalSha256: null,
+          releaseSha256: sha("production-only dynamic route"),
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  const result = spawnSync(
+    "node",
+    [
+      join(repoRoot(), "scripts/analyze-overlay-reconciliation.mjs"),
+      "--inventory",
+      inventoryPath,
+      "--workspace",
+      workspace,
+      "--git-root",
+      root,
+      "--git-prefix",
+      "apps/web",
+    ],
+    { cwd: repoRoot(), encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.counts.production_extra_committed, 1);
+  assert.equal(output.counts.production_extra_recovered_uncommitted, 1);
+  assert.equal(output.summary.nonBlocking, 1);
+  assert.equal(output.summary.blocking, 1);
+});

@@ -47,7 +47,11 @@ function hashHeadFile(gitRoot, gitPrefix, rel) {
   const normalizedPrefix = (gitPrefix || "").replace(/^\/+|\/+$/g, "");
   const gitPath = [normalizedPrefix, rel].filter(Boolean).join("/");
   try {
-    const bytes = execFileSync("git", ["show", "HEAD:" + gitPath], {
+    // cat-file resolves the rev:path as one literal object expression.
+    // git show on an absent Next.js dynamic-route path can yield an empty
+    // successful result, which then looks like a committed empty file.
+    // Fail closed instead: an absent blob must return null.
+    const bytes = execFileSync("git", ["cat-file", "blob", "HEAD:" + gitPath], {
       cwd: gitRoot,
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
