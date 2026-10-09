@@ -66,6 +66,7 @@ const platformNav: PlatformNavGroup[] = [
       { href: "/platform/billing", label: "MigraPay & Billing", icon: CreditCard },
       { href: "/platform/commerce/catalog", label: "Catalog & Entitlements", icon: Boxes },
       { href: "/platform/commerce/usage", label: "Usage & Metering", icon: ChartNoAxesCombined },
+      { href: "/platform/commerce/audit", label: "Commerce Audit", icon: ClipboardList },
     ],
   },
   {
@@ -111,9 +112,13 @@ export function PlatformSidebar() {
             <ul className="space-y-0.5">
               {group.items.map((item) => {
                 const Icon = item.icon;
+                const exactOnly =
+                  item.href === "/platform/overview" ||
+                  item.href === "/platform/developers" ||
+                  item.href === "/platform/commerce";
                 const active =
                   pathname === item.href ||
-                  (item.href !== "/platform/overview" && pathname.startsWith(item.href + "/"));
+                  (!exactOnly && pathname.startsWith(item.href + "/"));
 
                 return (
                   <li key={group.heading + ":" + item.href + ":" + item.label}>
