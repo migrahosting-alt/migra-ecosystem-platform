@@ -150,7 +150,13 @@ function classifyPath(path, kind) {
   };
 }
 
-async function buildInventory(canonicalRoot, releaseRoot, outputPath, commit) {
+async function buildInventory(
+  canonicalRoot,
+  releaseRoot,
+  outputPath,
+  commit,
+  releaseLabelOverride = null,
+) {
   const canonical = await realpath(canonicalRoot);
   const release = await realpath(releaseRoot);
   if (canonical === release) throw new Error("Canonical and release roots must be different");
@@ -209,7 +215,7 @@ async function buildInventory(canonicalRoot, releaseRoot, outputPath, commit) {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     canonicalCommit: commit,
-    releaseLabel: basename(release),
+    releaseLabel: releaseLabelOverride || basename(release),
     summary: {
       totalDifferences: entries.length,
       productionOnly: count((entry) => entry.kind === "extra"),
@@ -247,6 +253,7 @@ const canonicalArg = arg("canonical");
 const releaseArg = arg("release");
 const outputArg = arg("output");
 const commitArg = arg("commit");
+const releaseLabelArg = arg("release-label");
 
 if (canonicalArg && releaseArg && outputArg) {
   await stat(canonicalArg);
@@ -257,6 +264,7 @@ if (canonicalArg && releaseArg && outputArg) {
     releaseArg,
     outputArg,
     commit,
+    releaseLabelArg,
   );
   console.log(JSON.stringify({
     output: resolve(outputArg),
@@ -266,7 +274,7 @@ if (canonicalArg && releaseArg && outputArg) {
   }));
 } else if (process.argv[1]?.endsWith("write-overlay-inventory.mjs")) {
   throw new Error(
-    "Usage: node write-overlay-inventory.mjs --canonical <dir> --release <dir> --output <file> [--commit <sha>]",
+    "Usage: node write-overlay-inventory.mjs --canonical <dir> --release <dir> --output <file> [--commit <sha>] [--release-label <name>]",
   );
 }
 

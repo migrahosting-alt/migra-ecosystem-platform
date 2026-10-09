@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { basename, dirname } from "node:path";
+import { basename } from "node:path";
 
 export type OverlayKind = "extra" | "modified" | "missing";
 export type OverlayClassification =
@@ -76,6 +76,13 @@ function inventoryPath() {
   return (
     process.env.MIGRATECK_WEB_OVERLAY_INVENTORY ??
     "/opt/migra/apps/migrateck/current/OVERLAY_INVENTORY.json"
+  );
+}
+
+function installedReleaseRoot() {
+  return (
+    process.env.MIGRATECK_WEB_RELEASE_CONTAINER_ROOT ??
+    "/opt/migra/apps/migrateck/current"
   );
 }
 
@@ -168,7 +175,7 @@ async function loadManifest(): Promise<{
 
   let installedReleaseLabel: string | null = null;
   try {
-    installedReleaseLabel = basename(await realpath(dirname(path)));
+    installedReleaseLabel = basename(await realpath(installedReleaseRoot()));
   } catch {
     installedReleaseLabel = null;
   }
