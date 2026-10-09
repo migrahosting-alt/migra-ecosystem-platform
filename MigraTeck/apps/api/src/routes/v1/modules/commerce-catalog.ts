@@ -106,6 +106,9 @@ const deadLetterCancelSchema = z.object({
   reason: z.string().trim().min(3).max(500),
 });
 
+const manualEntitlementMutationEnabled =
+  process.env.MANUAL_ENTITLEMENT_MUTATION_ENABLED === "true";
+
 export async function registerCommerceCatalogRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -206,58 +209,61 @@ export async function registerCommerceCatalogRoutes(
     };
   });
 
-  app.put(
-    "/commerce/organizations/:orgId/entitlements/:product",
-    async (request, reply) => {
-      const authority = await requirePlatformAuthority(request, [
-        "platform.commerce.entitlements.manage",
-      ]);
-      const { orgId, product } = entitlementParamsSchema.parse(request.params);
-      const body = entitlementMutationSchema.parse(request.body);
+  if (manualEntitlementMutationEnabled) {
+    app.put(
+      "/commerce/organizations/:orgId/entitlements/:product",
+      async (request, reply) => {
+        const authority = await requirePlatformAuthority(request, [
+          "platform.commerce.entitlements.manage",
+        ]);
+        const { orgId, product } = entitlementParamsSchema.parse(request.params);
+        const body = entitlementMutationSchema.parse(request.body);
 
-      const result = await mutateOrganizationEntitlement({
-        orgId,
-        actorId: authority.platformUserId,
-        product,
-        newStatus: body.status,
-        expectedUpdatedAt: body.expectedUpdatedAt,
-        startsAt: body.startsAt,
-        endsAt: body.endsAt,
-        notes: body.notes,
-        reason: body.reason,
-        acknowledgeBillingOverride: body.acknowledgeBillingOverride,
-        context: body.context,
-        ip: request.ip ?? null,
-        userAgent: request.headers["user-agent"] ?? null,
-      });
+        const result = await mutateOrganizationEntitlement({
+          orgId,
+          actorId: authority.platformUserId,
+          product,
+          newStatus: body.status,
+          expectedUpdatedAt: body.expectedUpdatedAt,
+          startsAt: body.startsAt,
+          endsAt: body.endsAt,
+          notes: body.notes,
+          reason: body.reason,
+          acknowledgeBillingOverride: body.acknowledgeBillingOverride,
+          context: body.context,
+          ip: request.ip ?? null,
+          userAgent: request.headers["user-agent"] ?? null,
+        });
 
-      return reply.code(200).send(result);
-    },
-  );
+        return reply.code(200).send(result);
+      },
+    );
 
-  app.post(
-    "/commerce/organizations/:orgId/entitlements/:product/reconcile",
-    async (request, reply) => {
-      const authority = await requirePlatformAuthority(request, [
-        "platform.commerce.entitlements.manage",
-      ]);
-      const { orgId, product } = entitlementParamsSchema.parse(request.params);
-      const body = entitlementReconciliationSchema.parse(request.body);
+    app.post(
+      "/commerce/organizations/:orgId/entitlements/:product/reconcile",
+      async (request, reply) => {
+        const authority = await requirePlatformAuthority(request, [
+          "platform.commerce.entitlements.manage",
+        ]);
+        const { orgId, product } = entitlementParamsSchema.parse(request.params);
+        const body = entitlementReconciliationSchema.parse(request.body);
 
-      const result = await reconcileOrganizationEntitlementProvisioning({
-        orgId,
-        actorId: authority.platformUserId,
-        product,
-        expectedUpdatedAt: body.expectedUpdatedAt,
-        reason: body.reason,
-        context: body.context,
-        ip: request.ip ?? null,
-        userAgent: request.headers["user-agent"] ?? null,
-      });
+        const result = await reconcileOrganizationEntitlementProvisioning({
+          orgId,
+          actorId: authority.platformUserId,
+          product,
+          expectedUpdatedAt: body.expectedUpdatedAt,
+          reason: body.reason,
+          context: body.context,
+          ip: request.ip ?? null,
+          userAgent: request.headers["user-agent"] ?? null,
+        });
 
-      return reply.code(202).send(result);
-    },
-  );
+        return reply.code(202).send(result);
+      },
+    );
+
+  }
 
   app.get(
     "/commerce/provisioning/jobs/:jobId/remediation",
