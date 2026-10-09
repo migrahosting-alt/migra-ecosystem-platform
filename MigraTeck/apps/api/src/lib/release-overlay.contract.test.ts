@@ -162,6 +162,7 @@ test("inventory ignores retained Next build backups and downgrades non-runtime e
   file(release, "src/app/page.tsx.prev-20261009T084958Z", "source backup");
   file(release, "next-env.d.ts", "generated next types");
   file(release, "tsconfig.tsbuildinfo", "generated compiler state");
+  file(release, "tsconfig.distribution.tmp.tsbuildinfo", "generated focused compiler state");
 
   const output = join(release, "OVERLAY_INVENTORY.json");
   execFileSync(
@@ -195,6 +196,10 @@ test("inventory ignores retained Next build backups and downgrades non-runtime e
   assert.equal(byPath.get("src/app/page.tsx.prev-20261009T084958Z")?.classification, "build_evidence");
   assert.equal(byPath.get("next-env.d.ts")?.classification, "build_evidence");
   assert.equal(byPath.get("tsconfig.tsbuildinfo")?.classification, "build_evidence");
+  assert.equal(
+    byPath.get("tsconfig.distribution.tmp.tsbuildinfo")?.classification,
+    "build_evidence",
+  );
   assert.equal(manifest.summary.highCriticality, 0);
   assert.equal(manifest.summary.runtimeReconciliation, 0);
 });

@@ -144,7 +144,7 @@ async function hashFile(root, rel) {
 function classifyPath(path, kind) {
   if (
     path === "next-env.d.ts" ||
-    path === "tsconfig.tsbuildinfo" ||
+    /(?:^|\/)[^/]+\.tsbuildinfo$/i.test(path) ||
     /(?:^|\/)[^/]+\.(?:prev(?:[-.][^/]*)?|bak|backup)(?:$|\.)/i.test(path) ||
     /~$/.test(path)
   ) {
