@@ -28,6 +28,15 @@ export function requiresCsrf(request: FastifyRequest): boolean {
     return false;
   }
 
+  // Stripe webhooks carry no browser authority. They are authenticated by the
+  // Stripe-Signature over the exact raw request body inside the route handler.
+  if (
+    route === "/v1/billing/webhooks/stripe" ||
+    route === "/billing/webhooks/stripe"
+  ) {
+    return false;
+  }
+
   return true;
 }
 

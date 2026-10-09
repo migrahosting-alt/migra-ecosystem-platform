@@ -902,17 +902,29 @@ export async function initializeOrganizationBillingCustomer(input: {
   });
 }
 
-async function persistProcessorBundle(input: {
+type ProcessorPersistenceInput = {
   orgId: string;
   customerId: string;
   customerEmail: string | null;
   processor: ProcessorBundle;
-  actorId: string;
-  operationId: string;
-  reason: string;
-  ip?: string | null;
-  userAgent?: string | null;
-}) {
+} & (
+  | {
+      source: "operator";
+      actorId: string;
+      operationId: string;
+      reason: string;
+      ip?: string | null;
+      userAgent?: string | null;
+    }
+  | {
+      source: "stripe_webhook";
+      webhookRowId: string;
+      eventId: string;
+      eventType: string;
+    }
+);
+
+async function persistProcessorBundle(input: ProcessorPersistenceInput) {
   const db = getDb();
   const client = await db.connect();
 
@@ -1030,24 +1042,48 @@ async function persistProcessorBundle(input: {
       ],
     );
 
-    await client.query(
-      'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,\'BILLING_RECONCILED\',\'billing_customer\',$4,$5,$6,$7::jsonb,NOW())',
-      [
-        randomUUID(),
-        input.actorId,
-        input.orgId,
-        input.customerId,
-        input.ip ?? null,
-        input.userAgent ?? null,
-        JSON.stringify({
-          operationId: input.operationId,
-          reason: input.reason,
-          processorSubscriptions: input.processor.subscriptions.length,
-          processorInvoices: input.processor.invoices.length,
-          processorPaymentMethods: input.processor.paymentMethods.length,
-        }),
-      ],
-    );
+    if (input.source === "stripe_webhook") {
+      await client.query(
+        'UPDATE "BillingOrgState" SET "lastStripeEventId"=$1,"lastStripeEventType"=$2,"updatedAt"=NOW() WHERE "orgId"=$3',
+        [input.eventId, input.eventType, input.orgId],
+      );
+      await client.query(
+        'INSERT INTO "BillingEventProjection" (id,"webhookEventId","orgId","projectionType","projectionRef",status,metadata,"createdAt") VALUES ($1,$2,$3,$4,$5,\'APPLIED\',$6::jsonb,NOW())',
+        [
+          randomUUID(),
+          input.webhookRowId,
+          input.orgId,
+          "STRIPE_BILLING_RECONCILIATION",
+          input.customerId,
+          JSON.stringify({
+            eventId: input.eventId,
+            eventType: input.eventType,
+            processorSubscriptions: input.processor.subscriptions.length,
+            processorInvoices: input.processor.invoices.length,
+            processorPaymentMethods: input.processor.paymentMethods.length,
+          }),
+        ],
+      );
+    } else {
+      await client.query(
+        'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,\'BILLING_RECONCILED\',\'billing_customer\',$4,$5,$6,$7::jsonb,NOW())',
+        [
+          randomUUID(),
+          input.actorId,
+          input.orgId,
+          input.customerId,
+          input.ip ?? null,
+          input.userAgent ?? null,
+          JSON.stringify({
+            operationId: input.operationId,
+            reason: input.reason,
+            processorSubscriptions: input.processor.subscriptions.length,
+            processorInvoices: input.processor.invoices.length,
+            processorPaymentMethods: input.processor.paymentMethods.length,
+          }),
+        ],
+      );
+    }
 
     await client.query("COMMIT");
   } catch (error) {
@@ -1055,6 +1091,204 @@ async function persistProcessorBundle(input: {
     throw error;
   } finally {
     client.release();
+  }
+}
+
+function stripeCustomerIdFromEvent(event: Stripe.Event): string | null {
+  const object = event.data.object as unknown as Record<string, unknown>;
+  if (event.type.startsWith("customer.") && typeof object.id === "string") {
+    return object.id;
+  }
+
+  const customer = object.customer;
+  if (typeof customer === "string") return customer;
+  if (
+    customer &&
+    typeof customer === "object" &&
+    "id" in customer &&
+    typeof (customer as { id?: unknown }).id === "string"
+  ) {
+    return (customer as { id: string }).id;
+  }
+  return null;
+}
+
+function safeStripeEventSummary(event: Stripe.Event, customerId: string | null) {
+  const object = event.data.object as unknown as Record<string, unknown>;
+  return {
+    eventId: event.id,
+    eventType: event.type,
+    objectId: typeof object.id === "string" ? object.id : null,
+    objectType: typeof object.object === "string" ? object.object : null,
+    customerId,
+  };
+}
+
+export function constructCanonicalStripeWebhookEvent(
+  rawBody: string | Buffer,
+  signature: string,
+  secret: string,
+): Stripe.Event {
+  try {
+    return stripe().webhooks.constructEvent(rawBody, signature, secret);
+  } catch {
+    throw Object.assign(new Error("Invalid Stripe webhook signature"), {
+      statusCode: 400,
+    });
+  }
+}
+
+export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
+  const db = getDb();
+  const lockClient = await db.connect();
+  const lockKey = "migrateck:stripe-webhook:" + event.id;
+  let webhookRowId: string | null = null;
+
+  try {
+    await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+
+    const existing = await lockClient.query<{
+      id: string;
+      status: string;
+      retryCount: number;
+    }>(
+      'SELECT id,status::text AS status,"retryCount" FROM "BillingWebhookEvent" WHERE "eventId"=$1 LIMIT 1',
+      [event.id],
+    );
+    const previous = existing.rows[0] ?? null;
+    webhookRowId = previous?.id ?? randomUUID();
+
+    if (previous && ["PROCESSED", "IGNORED"].includes(previous.status)) {
+      return {
+        eventId: event.id,
+        eventType: event.type,
+        status: previous.status.toLowerCase(),
+        duplicate: true,
+      };
+    }
+
+    const customerId = stripeCustomerIdFromEvent(event);
+    const safePayload = safeStripeEventSummary(event, customerId);
+
+    if (!previous) {
+      await lockClient.query(
+        `INSERT INTO "BillingWebhookEvent"
+          (id,provider,"eventId","eventType","eventCreated",livemode,status,reason,"retryCount","rawPayload","receivedAt","updatedAt")
+         VALUES ($1,'STRIPE'::"BillingProvider",$2,$3,$4,$5,'PROCESSING'::"BillingWebhookEventStatus",NULL,0,$6::jsonb,NOW(),NOW())`,
+        [
+          webhookRowId,
+          event.id,
+          event.type,
+          event.created ?? null,
+          event.livemode ?? null,
+          JSON.stringify(safePayload),
+        ],
+      );
+    } else {
+      await lockClient.query(
+        `UPDATE "BillingWebhookEvent"
+         SET status='PROCESSING'::"BillingWebhookEventStatus",reason=NULL,
+             "retryCount"="retryCount" + CASE WHEN status IN ('FAILED'::"BillingWebhookEventStatus",'PROCESSING'::"BillingWebhookEventStatus") THEN 1 ELSE 0 END,
+             "rawPayload"=$2::jsonb,"updatedAt"=NOW()
+         WHERE id=$1`,
+        [webhookRowId, JSON.stringify(safePayload)],
+      );
+    }
+
+    if (!customerId) {
+      await lockClient.query(
+        `UPDATE "BillingWebhookEvent"
+         SET status='IGNORED'::"BillingWebhookEventStatus",reason=$2,"processedAt"=NOW(),"updatedAt"=NOW()
+         WHERE id=$1`,
+        [webhookRowId, "Event does not identify a Stripe customer"],
+      );
+      return {
+        eventId: event.id,
+        eventType: event.type,
+        status: "ignored",
+        duplicate: false,
+      };
+    }
+
+    const mapping = await lockClient.query<{
+      orgId: string;
+      email: string | null;
+    }>(
+      `SELECT "orgId",email FROM "BillingCustomer"
+       WHERE provider='STRIPE'::"BillingProvider" AND "externalCustomerId"=$1
+       LIMIT 1`,
+      [customerId],
+    );
+    const mapped = mapping.rows[0] ?? null;
+
+    if (!mapped) {
+      await lockClient.query(
+        `UPDATE "BillingWebhookEvent"
+         SET status='IGNORED'::"BillingWebhookEventStatus",reason=$2,"processedAt"=NOW(),"updatedAt"=NOW()
+         WHERE id=$1`,
+        [webhookRowId, "Stripe customer is not mapped to a platform organization"],
+      );
+      return {
+        eventId: event.id,
+        eventType: event.type,
+        status: "ignored",
+        duplicate: false,
+      };
+    }
+
+    const processor = await loadProcessorBundle(customerId);
+    if (!processor.completeness.subscriptions || !processor.completeness.invoices) {
+      throw Object.assign(
+        new Error("Stripe history exceeds the safe webhook reconciliation window"),
+        { statusCode: 503 },
+      );
+    }
+
+    await persistProcessorBundle({
+      source: "stripe_webhook",
+      orgId: mapped.orgId,
+      customerId,
+      customerEmail: processor.customer.email ?? mapped.email ?? null,
+      processor,
+      webhookRowId,
+      eventId: event.id,
+      eventType: event.type,
+    });
+
+    await lockClient.query(
+      `UPDATE "BillingWebhookEvent"
+       SET status='PROCESSED'::"BillingWebhookEventStatus",reason=NULL,"processedAt"=NOW(),"updatedAt"=NOW()
+       WHERE id=$1`,
+      [webhookRowId],
+    );
+
+    return {
+      eventId: event.id,
+      eventType: event.type,
+      status: "processed",
+      duplicate: false,
+      orgId: mapped.orgId,
+    };
+  } catch (error) {
+    if (webhookRowId) {
+      await lockClient
+        .query(
+          `UPDATE "BillingWebhookEvent"
+           SET status='FAILED'::"BillingWebhookEventStatus",reason=$2,"processedAt"=NOW(),"updatedAt"=NOW()
+           WHERE id=$1`,
+          [
+            webhookRowId,
+            (error instanceof Error ? error.message : "Stripe webhook processing failed").slice(0, 500),
+          ],
+        )
+        .catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    await lockClient
+      .query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey])
+      .catch(() => undefined);
+    lockClient.release();
   }
 }
 
@@ -1093,6 +1327,7 @@ export async function reconcileOrganizationBilling(input: {
   }
 
   await persistProcessorBundle({
+    source: "operator",
     orgId: input.orgId,
     customerId: row.externalCustomerId,
     customerEmail: processor.customer.email ?? row.email ?? null,

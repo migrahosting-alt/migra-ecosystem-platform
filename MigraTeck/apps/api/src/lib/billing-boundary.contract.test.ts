@@ -106,3 +106,24 @@ test("only catalog and signed Stripe webhook remain intentionally public", () =>
     );
   }
 });
+
+test("signed Stripe webhook bypasses browser CSRF only to enter the canonical commerce pipeline", () => {
+  const csrf = repoFile("apps/api/src/lib/csrf.ts");
+  const commerceService = repoFile("apps/api/src/lib/commerce-billing.ts");
+
+  assert.match(csrf, /route === "\/v1\/billing\/webhooks\/stripe"/);
+  assert.match(billingRoutes, /preParsing:[\s\S]*?rawBody/);
+  assert.match(billingRoutes, /Stripe webhook payload is too large/);
+  assert.match(billingRoutes, /constructCanonicalStripeWebhookEvent/);
+  assert.match(billingRoutes, /processCanonicalStripeWebhookEvent/);
+  assert.doesNotMatch(billingRoutes, /@migrateck\/billing-core\/webhooks/);
+
+  assert.match(commerceService, /migrateck:stripe-webhook:/);
+  assert.match(commerceService, /pg_advisory_lock\(hashtext\(\$1\)\)/);
+  assert.match(commerceService, /BillingWebhookEvent/);
+  assert.match(commerceService, /BillingEventProjection/);
+  assert.match(commerceService, /lastStripeEventId/);
+  assert.match(commerceService, /source: "stripe_webhook"/);
+  assert.match(commerceService, /Invalid Stripe webhook signature/);
+  assert.doesNotMatch(commerceService, /__billingDb/);
+});

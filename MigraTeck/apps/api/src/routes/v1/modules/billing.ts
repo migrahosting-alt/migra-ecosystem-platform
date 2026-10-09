@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { requireOrganizationPrincipal } from "../../../lib/migraauth.js";
@@ -23,9 +24,9 @@ import {
 } from "@migrateck/billing-core/subscriptions";
 import { getOrgEntitlements } from "@migrateck/billing-core/entitlements";
 import {
-  constructEvent,
-  processWebhookEvent,
-} from "@migrateck/billing-core/webhooks";
+  constructCanonicalStripeWebhookEvent,
+  processCanonicalStripeWebhookEvent,
+} from "../../../lib/commerce-billing.js";
 import { getInvoices, getInvoice } from "@migrateck/billing-core/invoices";
 import {
   recordUsage,
@@ -446,33 +447,64 @@ export async function registerBillingRoutes(
   app.post(
     "/billing/webhooks/stripe",
     {
-      config: {
-        rawBody: true,
+      preParsing: async (request, _reply, payload) => {
+        const chunks: Buffer[] = [];
+        let total = 0;
+        for await (const chunk of payload) {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          total += buffer.length;
+          if (total > 2 * 1024 * 1024) {
+            throw Object.assign(new Error("Stripe webhook payload is too large"), {
+              statusCode: 413,
+            });
+          }
+          chunks.push(buffer);
+        }
+
+        const rawBody = Buffer.concat(chunks);
+        (request as FastifyRequest & { rawBody?: Buffer }).rawBody = rawBody;
+        const replay = Readable.from([rawBody]) as Readable & {
+          receivedEncodedLength?: number;
+        };
+        replay.receivedEncodedLength = rawBody.length;
+        return replay;
       },
     },
     async (request, reply) => {
-      const ctx = getBillingCtx();
-      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-      if (!webhookSecret)
-        throw new Error("STRIPE_WEBHOOK_SECRET is not configured");
+      const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+      if (!webhookSecret) {
+        throw Object.assign(
+          new Error("STRIPE_WEBHOOK_SECRET is not configured"),
+          { statusCode: 503 },
+        );
+      }
 
       const signature = request.headers["stripe-signature"];
-      if (!signature)
+      if (typeof signature !== "string" || !signature) {
         throw Object.assign(new Error("Missing stripe-signature header"), {
           statusCode: 400,
         });
+      }
 
-      const rawBody =
-        (request as any).rawBody ?? (request.body as string | Buffer);
-      const event = constructEvent(
-        ctx,
+      const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
+      if (!rawBody) {
+        throw Object.assign(new Error("Stripe webhook raw body is unavailable"), {
+          statusCode: 500,
+        });
+      }
+
+      const event = constructCanonicalStripeWebhookEvent(
         rawBody,
-        signature as string,
+        signature,
         webhookSecret,
       );
-      const result = await processWebhookEvent(ctx, event);
+      const result = await processCanonicalStripeWebhookEvent(event);
 
-      reply.code(200).send({ received: true, status: result.status });
+      reply.code(200).send({
+        received: true,
+        status: result.status,
+        duplicate: result.duplicate,
+      });
     },
   );
 }

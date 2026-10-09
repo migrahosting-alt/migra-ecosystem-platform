@@ -503,7 +503,7 @@ export function BillingOperationsWorkspace() {
         : action === "cancel_at_period_end"
           ? "Schedule this subscription to cancel at the end of its current period?"
           : action === "keep_active"
-            ? "Remove the scheduled cancellation and keep this subscription active?"
+            ? "Keep this subscription active by removing its scheduled period-end cancellation?"
             : action === "pause_collection"
             ? "Pause Stripe collection for this subscription?"
             : "Resume Stripe collection for this subscription?";
