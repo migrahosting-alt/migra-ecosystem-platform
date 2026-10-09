@@ -32,6 +32,49 @@ type WorkerHealth = {
   detail: Record<string, unknown>;
 };
 
+type SocialConnectionDiagnostic = {
+  id: string;
+  orgId: string;
+  orgName: string | null;
+  platform: string;
+  handle: string;
+  status: string;
+  state:
+    | "healthy"
+    | "disconnected"
+    | "reconnect_required"
+    | "token_expiring"
+    | "verification_stale";
+  summary: string;
+  recommendedAction: "connect" | "reconnect" | "refresh" | "sync" | "monitor";
+  connected: boolean;
+  canAutoRefresh: boolean;
+  tokenExpired: boolean;
+  tokenExpiresSoon: boolean;
+  verificationStale: boolean;
+  missingAccountBinding: boolean;
+  requiresReconnect: boolean;
+  providerSetupRequired: boolean;
+  needsAttention: boolean;
+  expiresInHours: number | null;
+  tokenExpiresAt: string | null;
+  lastVerifiedAt: string | null;
+};
+
+type SocialConnectionQueue = {
+  total: number;
+  credentialed: number;
+  missingCredential: number;
+  disconnected: number;
+  needsAttention: number;
+  reconnectRequired: number;
+  providerSetupRequired: number;
+  tokenExpired: number;
+  tokenExpiresSoon: number;
+  verificationStale: number;
+  connections: SocialConnectionDiagnostic[];
+};
+
 type ReleaseIntegrity = {
   key: "platform_api" | "platform_web";
   label: string;
@@ -145,7 +188,7 @@ type HealthPayload = {
     webhooks: Record<string, unknown>;
     usageExports: Record<string, unknown>;
     entitlements: Record<string, unknown>;
-    socialConnections: Record<string, unknown>;
+    socialConnections: SocialConnectionQueue;
   };
 };
 
@@ -194,6 +237,47 @@ function capacityStateClasses(state: HealthPayload["host"]["state"]) {
 function numberValue(value: unknown) {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function socialPlatformLabel(platform: string) {
+  const normalized = platform.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    facebook: "Facebook",
+    google_business: "Google Business",
+    instagram: "Instagram",
+    linkedin: "LinkedIn",
+    pinterest: "Pinterest",
+    tiktok: "TikTok",
+    x: "X",
+    youtube: "YouTube",
+  };
+  return labels[normalized] ?? platform;
+}
+
+function socialActionCopy(connection: SocialConnectionDiagnostic) {
+  if (connection.providerSetupRequired) {
+    return "OAuth is present, but the provider account is missing a publishable Page or business account. Complete provider-side setup, then reconnect and verify.";
+  }
+  if (!connection.connected) {
+    return "No OAuth credential is stored. Complete provider authorization in the owning social integration before sync can resume.";
+  }
+  if (connection.tokenExpired || connection.recommendedAction === "reconnect") {
+    return "The stored provider authorization is expired or rejected. Complete provider authorization again; the background worker will verify the new credential afterward.";
+  }
+  if (connection.recommendedAction === "refresh") {
+    return "The token is nearing expiry and can be refreshed by the managed worker. Monitor the next sync cycle.";
+  }
+  if (connection.recommendedAction === "sync") {
+    return "The credential exists, but account binding or verification is stale. The managed worker should re-verify it.";
+  }
+  return "No operator action is currently required.";
+}
+
+function socialStateClasses(connection: SocialConnectionDiagnostic) {
+  if (!connection.needsAttention) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (connection.providerSetupRequired) return "border-violet-200 bg-violet-50 text-violet-700";
+  if (!connection.connected) return "border-sky-200 bg-sky-50 text-sky-700";
+  return "border-amber-200 bg-amber-50 text-amber-800";
 }
 
 export function InfrastructureHealthPanel() {
@@ -282,6 +366,10 @@ export function InfrastructureHealthPanel() {
   const socialAttention = numberValue(data.queues.socialConnections.needsAttention);
   const socialReconnect = numberValue(
     data.queues.socialConnections.reconnectRequired,
+  );
+  const socialDiagnostics = data.queues.socialConnections.connections ?? [];
+  const socialAttentionRows = socialDiagnostics.filter(
+    (connection) => connection.needsAttention,
   );
 
   const needsAttention =
@@ -714,6 +802,101 @@ export function InfrastructureHealthPanel() {
           </p>
         </article>
       </div>
+
+      {socialAttentionRows.length > 0 ? (
+        <div className="border-t border-slate-100 px-5 py-5 sm:px-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">
+                Social recovery evidence
+              </p>
+              <h3 className="mt-1 text-base font-semibold text-slate-950">
+                Provider authorization attention
+              </h3>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
+                Each row is a redacted health diagnosis. Provider authorization is not performed from this page, and no OAuth token, refresh token, credential ciphertext, or external account ID is exposed here.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+              <div className="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2">
+                <p className="font-semibold uppercase tracking-[0.08em] text-violet-600">Setup</p>
+                <p className="mt-1 text-base font-semibold text-violet-900">
+                  {data.queues.socialConnections.providerSetupRequired}
+                </p>
+              </div>
+              <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2">
+                <p className="font-semibold uppercase tracking-[0.08em] text-sky-600">Disconnected</p>
+                <p className="mt-1 text-base font-semibold text-sky-900">
+                  {data.queues.socialConnections.disconnected}
+                </p>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2">
+                <p className="font-semibold uppercase tracking-[0.08em] text-amber-700">Expired</p>
+                <p className="mt-1 text-base font-semibold text-amber-950">
+                  {data.queues.socialConnections.tokenExpired}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {socialAttentionRows.map((connection) => (
+              <article
+                key={connection.id}
+                className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {socialPlatformLabel(connection.platform)}
+                      </p>
+                      <span
+                        className={
+                          "rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] " +
+                          socialStateClasses(connection)
+                        }
+                      >
+                        {connection.summary}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-slate-600">
+                      {connection.orgName ?? connection.orgId}
+                      {connection.handle ? " · " + connection.handle : ""}
+                    </p>
+                  </div>
+                  <span className="w-fit rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-600">
+                    {connection.recommendedAction}
+                  </span>
+                </div>
+
+                <p className="mt-3 text-xs leading-5 text-slate-600">
+                  {socialActionCopy(connection)}
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-1.5 text-[9px] font-semibold uppercase tracking-[0.07em]">
+                  <span className={connection.connected ? "rounded-full bg-emerald-100 px-2 py-1 text-emerald-700" : "rounded-full bg-sky-100 px-2 py-1 text-sky-700"}>
+                    {connection.connected ? "credential present" : "credential missing"}
+                  </span>
+                  {connection.providerSetupRequired ? (
+                    <span className="rounded-full bg-violet-100 px-2 py-1 text-violet-700">provider setup</span>
+                  ) : null}
+                  {connection.tokenExpired ? (
+                    <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-800">token expired</span>
+                  ) : null}
+                  {connection.verificationStale ? (
+                    <span className="rounded-full bg-slate-200 px-2 py-1 text-slate-700">verification stale</span>
+                  ) : null}
+                </div>
+
+                <p className="mt-3 text-[10px] text-slate-400">
+                  Last verified {connection.lastVerifiedAt ? new Date(connection.lastVerifiedAt).toLocaleString() : "never"}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-[11px] text-slate-500 sm:px-6">
         <span>Snapshot {new Date(data.generatedAt).toLocaleString()}</span>

@@ -97,6 +97,24 @@ test("analyzer exposes health metadata without returning credential ciphertext",
   assert.ok(analyzer.includes("providerSetupRequired"));
 });
 
+
+
+test("operator inspection includes disconnected OAuth rows and returns only redacted health evidence", () => {
+  assert.ok(core.includes("inspectSocialConnectionHealth"));
+  const inspector = core.slice(
+    core.indexOf("export async function inspectSocialConnectionHealth"),
+    core.indexOf("async function writeWorkerAudit"),
+  );
+  assert.match(inspector, /listInspectableConnections/);
+  assert.match(inspector, /orgName/);
+  assert.match(inspector, /connected: health\.connected/);
+  assert.match(inspector, /providerSetupRequired: health\.providerSetupRequired/);
+  assert.match(inspector, /recommendedAction: health\.recommendedAction/);
+  assert.doesNotMatch(inspector, /credentialCiphertext:/);
+  assert.doesNotMatch(inspector, /refreshTokenCiphertext:/);
+  assert.doesNotMatch(inspector, /externalAccountId:/);
+});
+
 test("managed worker has heartbeat and graceful shutdown", () => {
   assert.ok(worker.includes("migrateck-social-sync/heartbeat.json"));
   assert.ok(worker.includes("SIGTERM"));

@@ -75,13 +75,23 @@ test("usage health reads the real UsageEvent export lifecycle", () => {
 });
 
 
-test("social infrastructure health includes uncredentialed reconnect-required connections", () => {
+test("social infrastructure health includes redacted diagnostics for disconnected and reconnect-required connections", () => {
   const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
-  assert.match(health, /FROM "MigraMarketSocialConnection"/);
-  assert.match(health, /"credentialCiphertext" IS NULL/);
-  assert.match(health, /"missingCredentialReconnect"/);
-  assert.match(health, /missingCredentialReconnect/);
-  assert.match(health, /socialConnectionHealth/);
+  const social = repoFile("apps/api/src/lib/social-connection-sync.ts");
+  const panel = repoFile(
+    "apps/web/src/components/platform/InfrastructureHealthPanel.tsx",
+  );
+
+  assert.match(health, /inspectSocialConnectionHealth/);
+  assert.match(health, /connections: socialConnections/);
+  assert.match(health, /providerSetupRequired/);
+  assert.match(health, /missingCredential/);
+  assert.doesNotMatch(health, /missingCredentialReconnect/);
+
+  assert.match(social, /listInspectableConnections/);
+  assert.match(social, /LEFT JOIN "Organization"/);
+  assert.match(panel, /Social recovery evidence/);
+  assert.match(panel, /Provider authorization is not performed from this page/);
 });
 
 test("host capacity makes disk and release pressure part of operator health", () => {

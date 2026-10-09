@@ -1336,6 +1336,60 @@ async function listCandidates(limit: number): Promise<SocialConnectionRecord[]> 
   return result.rows;
 }
 
+type InspectableSocialConnection = SocialConnectionRecord & {
+  orgName: string | null;
+};
+
+async function listInspectableConnections(
+  limit: number,
+): Promise<InspectableSocialConnection[]> {
+  const take = Math.min(Math.max(limit, 1), 400);
+  const result = await getDb().query<InspectableSocialConnection>(
+    `SELECT c.id,c."orgId",o.name AS "orgName",c.platform,c.handle,
+            c."profileType",c."profileUrl",c."publishMode",c."accessModel",
+            c.status,c."externalAccountId",c.scopes,c.metadata,
+            c."credentialCiphertext",c."refreshTokenCiphertext",
+            c."tokenExpiresAt",c."lastVerifiedAt",c."createdAt",c."updatedAt"
+       FROM "MigraMarketSocialConnection" c
+       LEFT JOIN "Organization" o ON o.id=c."orgId"
+      WHERE c."accessModel"=$1 AND c.status<>$2
+      ORDER BY c."updatedAt" DESC,c.platform ASC
+      LIMIT $3`,
+    ["oauth", "paused", take],
+  );
+  return result.rows;
+}
+
+export async function inspectSocialConnectionHealth(limit = 100) {
+  const connections = await listInspectableConnections(limit);
+  return connections.map((connection) => {
+    const health = assessSocialConnectionHealth(connection);
+    return {
+      id: connection.id,
+      orgId: connection.orgId,
+      orgName: connection.orgName,
+      platform: connection.platform,
+      handle: connection.handle,
+      status: connection.status,
+      state: health.state,
+      summary: health.summary,
+      recommendedAction: health.recommendedAction,
+      connected: health.connected,
+      canAutoRefresh: health.canAutoRefresh,
+      tokenExpired: health.tokenExpired,
+      tokenExpiresSoon: health.tokenExpiresSoon,
+      verificationStale: health.verificationStale,
+      missingAccountBinding: health.missingAccountBinding,
+      requiresReconnect: health.requiresReconnect,
+      providerSetupRequired: health.providerSetupRequired,
+      needsAttention: health.needsAttention,
+      expiresInHours: health.expiresInHours,
+      tokenExpiresAt: connection.tokenExpiresAt,
+      lastVerifiedAt: connection.lastVerifiedAt,
+    };
+  });
+}
+
 async function writeWorkerAudit(
   stats: SocialSyncStats,
   workerId: string | null,

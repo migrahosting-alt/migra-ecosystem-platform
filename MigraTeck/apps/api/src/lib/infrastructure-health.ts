@@ -4,7 +4,7 @@ import { getHostCapacitySnapshot } from "./host-capacity.js";
 import { getReleaseIntegritySnapshot } from "./release-provenance.js";
 import { getReleaseOverlaySnapshot } from "./release-overlay.js";
 import { getProvisioningDriftSnapshot } from "./provisioning-drift.js";
-import { analyzeSocialConnectionSyncQueue } from "./social-connection-sync.js";
+import { inspectSocialConnectionHealth } from "./social-connection-sync.js";
 
 export type WorkerState = "healthy" | "stale" | "missing";
 
@@ -150,7 +150,6 @@ export async function getInfrastructureHealthSnapshot() {
     usageExports,
     entitlements,
     socialConnections,
-    socialConnectionCoverage,
     releaseIntegrity,
     releaseOverlay,
     hostCapacity,
@@ -202,18 +201,7 @@ export async function getInfrastructureHealthSnapshot() {
          max("updatedAt") AS "lastUpdatedAt"
        FROM "OrgEntitlement"`,
     ),
-    analyzeSocialConnectionSyncQueue(100),
-    db.query(
-      `SELECT
-         count(*)::int AS total,
-         count(*) FILTER (WHERE "credentialCiphertext" IS NOT NULL)::int AS credentialed,
-         count(*) FILTER (WHERE "credentialCiphertext" IS NULL)::int AS "missingCredential",
-         count(*) FILTER (
-           WHERE "credentialCiphertext" IS NULL AND status='reconnect_required'
-         )::int AS "missingCredentialReconnect"
-       FROM "MigraMarketSocialConnection"
-       WHERE "accessModel"='oauth' AND status<>'paused'`,
-    ),
+    inspectSocialConnectionHealth(100),
     getReleaseIntegritySnapshot(),
     getReleaseOverlaySnapshot(),
     getHostCapacitySnapshot(),
@@ -221,11 +209,6 @@ export async function getInfrastructureHealthSnapshot() {
 
   const allWorkers = workers;
   const unhealthyWorkers = allWorkers.filter((worker) => worker.state !== "healthy");
-  const socialCoverage = socialConnectionCoverage.rows[0] ?? {};
-  const missingCredential = Number(socialCoverage.missingCredential ?? 0);
-  const missingCredentialReconnect = Number(
-    socialCoverage.missingCredentialReconnect ?? 0,
-  );
   const provisioningDriftHealth = {
     needsVerification: provisioningDrift.needsVerification,
     correlatedDeadJobs: provisioningDrift.correlatedDeadJobs,
@@ -240,18 +223,21 @@ export async function getInfrastructureHealthSnapshot() {
   ).length;
 
   const socialConnectionHealth = {
-    total: Number(socialCoverage.total ?? socialConnections.length),
-    credentialed: Number(
-      socialCoverage.credentialed ?? socialConnections.length,
-    ),
-    missingCredential,
-    needsAttention:
-      socialConnections.filter(
-        (connection) => connection.recommendedAction !== "monitor",
-      ).length + missingCredential,
-    reconnectRequired:
-      socialConnections.filter((connection) => connection.requiresReconnect)
-        .length + missingCredentialReconnect,
+    total: socialConnections.length,
+    credentialed: socialConnections.filter((connection) => connection.connected)
+      .length,
+    missingCredential: socialConnections.filter((connection) => !connection.connected)
+      .length,
+    disconnected: socialConnections.filter((connection) => !connection.connected)
+      .length,
+    needsAttention: socialConnections.filter((connection) => connection.needsAttention)
+      .length,
+    reconnectRequired: socialConnections.filter(
+      (connection) => connection.requiresReconnect,
+    ).length,
+    providerSetupRequired: socialConnections.filter(
+      (connection) => connection.providerSetupRequired,
+    ).length,
     tokenExpired: socialConnections.filter((connection) => connection.tokenExpired)
       .length,
     tokenExpiresSoon: socialConnections.filter(
@@ -260,6 +246,7 @@ export async function getInfrastructureHealthSnapshot() {
     verificationStale: socialConnections.filter(
       (connection) => connection.verificationStale,
     ).length,
+    connections: socialConnections,
   };
 
   return {
