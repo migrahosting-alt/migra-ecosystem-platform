@@ -10,6 +10,7 @@ import { registerCommerceUsageRoutes } from "./modules/commerce-usage.js";
 import { registerCommerceAuditRoutes } from "./modules/commerce-audit.js";
 import { registerCommerceRevenueExceptionRoutes } from "./modules/commerce-revenue-exceptions.js";
 import { registerCommerceRevenueAnalyticsRoutes } from "./modules/commerce-revenue-analytics.js";
+import { registerCommerceBillingReadinessRoutes } from "./modules/commerce-billing-readiness.js";
 import { registerHostingRoutes } from "./modules/hosting.js";
 import { registerIntakeRoutes } from "./modules/intake.js";
 import { registerOrganizationDirectoryRoutes } from "./modules/organization-directory.js";
@@ -30,6 +31,7 @@ export async function registerV1Routes(app: FastifyInstance): Promise<void> {
     await registerCommerceUsageRoutes(instance);
     await registerCommerceAuditRoutes(instance);
     await registerCommerceRevenueAnalyticsRoutes(instance);
+    await registerCommerceBillingReadinessRoutes(instance);
     await registerCommerceRevenueExceptionRoutes(instance);
     await registerHostingRoutes(instance);
     await registerIntakeRoutes(instance);
