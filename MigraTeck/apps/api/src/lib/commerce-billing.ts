@@ -1155,9 +1155,9 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
     const existing = await lockClient.query<{
       id: string;
       status: string;
-      retryCount: number;
+      attempts: number;
     }>(
-      'SELECT id,status::text AS status,"retryCount" FROM "BillingWebhookEvent" WHERE "eventId"=$1 LIMIT 1',
+      'SELECT id,status::text AS status,attempts FROM "BillingWebhookEvent" WHERE "eventId"=$1 LIMIT 1',
       [event.id],
     );
     const previous = existing.rows[0] ?? null;
@@ -1178,8 +1178,8 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
     if (!previous) {
       await lockClient.query(
         `INSERT INTO "BillingWebhookEvent"
-          (id,provider,"eventId","eventType","eventCreated",livemode,status,reason,"retryCount","rawPayload","receivedAt","updatedAt")
-         VALUES ($1,'STRIPE'::"BillingProvider",$2,$3,$4,$5,'PROCESSING'::"BillingWebhookEventStatus",NULL,0,$6::jsonb,NOW(),NOW())`,
+          (id,provider,"eventId","eventType","eventCreated",livemode,status,reason,attempts,"payloadJson","apiVersion","stripeAccountId","firstProcessedAt","lastProcessedAt","receivedAt","updatedAt")
+         VALUES ($1,'STRIPE'::"BillingProvider",$2,$3,$4,$5,'PROCESSING'::"BillingWebhookEventStatus",NULL,1,$6::jsonb,$7,$8,NOW(),NOW(),NOW(),NOW())`,
         [
           webhookRowId,
           event.id,
@@ -1187,23 +1187,34 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
           event.created ?? null,
           event.livemode ?? null,
           JSON.stringify(safePayload),
+          event.api_version ?? null,
+          event.account ?? null,
         ],
       );
     } else {
       await lockClient.query(
         `UPDATE "BillingWebhookEvent"
-         SET status='PROCESSING'::"BillingWebhookEventStatus",reason=NULL,
-             "retryCount"="retryCount" + CASE WHEN status IN ('FAILED'::"BillingWebhookEventStatus",'PROCESSING'::"BillingWebhookEventStatus") THEN 1 ELSE 0 END,
-             "rawPayload"=$2::jsonb,"updatedAt"=NOW()
+         SET status='PROCESSING'::"BillingWebhookEventStatus",reason=NULL,"errorText"=NULL,
+             attempts=attempts+1,"payloadJson"=$2::jsonb,
+             "apiVersion"=COALESCE($3,"apiVersion"),
+             "stripeAccountId"=COALESCE($4,"stripeAccountId"),
+             "firstProcessedAt"=COALESCE("firstProcessedAt",NOW()),
+             "lastProcessedAt"=NOW(),"updatedAt"=NOW()
          WHERE id=$1`,
-        [webhookRowId, JSON.stringify(safePayload)],
+        [
+          webhookRowId,
+          JSON.stringify(safePayload),
+          event.api_version ?? null,
+          event.account ?? null,
+        ],
       );
     }
 
     if (!customerId) {
       await lockClient.query(
         `UPDATE "BillingWebhookEvent"
-         SET status='IGNORED'::"BillingWebhookEventStatus",reason=$2,"processedAt"=NOW(),"updatedAt"=NOW()
+         SET status='IGNORED'::"BillingWebhookEventStatus",reason=$2,"errorText"=NULL,
+             "processedAt"=NOW(),"lastProcessedAt"=NOW(),"updatedAt"=NOW()
          WHERE id=$1`,
         [webhookRowId, "Event does not identify a Stripe customer"],
       );
@@ -1229,7 +1240,8 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
     if (!mapped) {
       await lockClient.query(
         `UPDATE "BillingWebhookEvent"
-         SET status='IGNORED'::"BillingWebhookEventStatus",reason=$2,"processedAt"=NOW(),"updatedAt"=NOW()
+         SET status='IGNORED'::"BillingWebhookEventStatus",reason=$2,"errorText"=NULL,
+             "processedAt"=NOW(),"lastProcessedAt"=NOW(),"updatedAt"=NOW()
          WHERE id=$1`,
         [webhookRowId, "Stripe customer is not mapped to a platform organization"],
       );
@@ -1262,7 +1274,8 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
 
     await lockClient.query(
       `UPDATE "BillingWebhookEvent"
-       SET status='PROCESSED'::"BillingWebhookEventStatus",reason=NULL,"processedAt"=NOW(),"updatedAt"=NOW()
+       SET status='PROCESSED'::"BillingWebhookEventStatus",reason=NULL,"errorText"=NULL,
+           "processedAt"=NOW(),"lastProcessedAt"=NOW(),"updatedAt"=NOW()
        WHERE id=$1`,
       [webhookRowId],
     );
@@ -1279,7 +1292,8 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
       await lockClient
         .query(
           `UPDATE "BillingWebhookEvent"
-           SET status='FAILED'::"BillingWebhookEventStatus",reason=$2,"processedAt"=NOW(),"updatedAt"=NOW()
+           SET status='FAILED'::"BillingWebhookEventStatus",reason='canonical_reconciliation_failed',
+               "errorText"=$2,"processedAt"=NOW(),"lastProcessedAt"=NOW(),"updatedAt"=NOW()
            WHERE id=$1`,
           [
             webhookRowId,

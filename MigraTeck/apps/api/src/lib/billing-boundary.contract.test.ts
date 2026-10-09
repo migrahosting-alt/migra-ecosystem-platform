@@ -127,3 +127,30 @@ test("signed Stripe webhook bypasses browser CSRF only to enter the canonical co
   assert.match(commerceService, /Invalid Stripe webhook signature/);
   assert.doesNotMatch(commerceService, /__billingDb/);
 });
+
+test("canonical Stripe ingestion uses the deployed webhook ledger contract", () => {
+  const commerceService = repoFile("apps/api/src/lib/commerce-billing.ts");
+  const schema = repoFile("prisma/schema.prisma");
+  const migration = repoFile(
+    "prisma/migrations/20261009104000_billing_webhook_runtime_alignment/migration.sql",
+  );
+
+  assert.match(commerceService, /SELECT id,status::text AS status,attempts FROM "BillingWebhookEvent"/);
+  assert.match(commerceService, /attempts=attempts\+1/);
+  assert.match(commerceService, /"payloadJson"=\$2::jsonb/);
+  assert.match(commerceService, /"errorText"=\$2/);
+  assert.match(commerceService, /"firstProcessedAt"=COALESCE\("firstProcessedAt",NOW\(\)\)/);
+  assert.match(commerceService, /"lastProcessedAt"=NOW\(\)/);
+  assert.doesNotMatch(commerceService, /retryCount/);
+  assert.doesNotMatch(commerceService, /rawPayload/);
+
+  assert.match(schema, /model BillingWebhookEvent {[^}]*?attempts\s+Int\s+@default\(0\)/);
+  assert.match(schema, /model BillingWebhookEvent {[^}]*?payloadJson\s+Json\?/);
+  assert.match(schema, /model BillingWebhookEvent {[^}]*?errorText\s+String\?/);
+  assert.doesNotMatch(schema, /model BillingWebhookEvent {[^}]*?retryCount/);
+  assert.doesNotMatch(schema, /model BillingWebhookEvent {[^}]*?rawPayload/);
+
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "attempts" INTEGER NOT NULL DEFAULT 0/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "payloadJson" JSONB/);
+  assert.match(migration, /ADD VALUE IF NOT EXISTS 'PROCESSING'/);
+});

@@ -1602,19 +1602,26 @@ model BillingSubscription {
 }
 
 model BillingWebhookEvent {
-  id           String                    @id @default(cuid())
-  provider     BillingProvider           @default(STRIPE)
-  eventId      String                    @unique
-  eventType    String
-  eventCreated Int?
-  livemode     Boolean?
-  status       BillingWebhookEventStatus @default(RECEIVED)
-  reason       String?
-  retryCount   Int                       @default(0)
-  rawPayload   Json?
-  processedAt  DateTime?
-  receivedAt   DateTime                  @default(now())
-  updatedAt    DateTime                  @updatedAt
+  id               String                    @id @default(cuid())
+  provider         BillingProvider           @default(STRIPE)
+  eventId          String                    @unique
+  eventType        String
+  eventCreated     Int?
+  livemode         Boolean?
+  status           BillingWebhookEventStatus @default(RECEIVED)
+  reason           String?
+  processedAt      DateTime?
+  receivedAt       DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  apiVersion       String?
+  attempts         Int                       @default(0)
+  errorText        String?
+  firstProcessedAt DateTime?
+  lastProcessedAt  DateTime?
+  lockToken        String?
+  lockedAt         DateTime?
+  payloadJson      Json?
+  stripeAccountId  String?
 
   @@index([provider, receivedAt])
   @@index([status, receivedAt])
