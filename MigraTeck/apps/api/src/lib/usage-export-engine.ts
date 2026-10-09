@@ -13,6 +13,30 @@ const RETRY_DELAYS_MS = [
   12 * 60 * 60_000,
 ] as const;
 
+export type UsageProcessorReadiness = {
+  ready: boolean;
+  checkedAt: string | null;
+  reason: string | null;
+  meters: {
+    required: number;
+    present: number;
+    missingNames: string[];
+    misconfiguredNames: string[];
+  };
+  prices: {
+    required: number;
+    present: number;
+    missingLookupKeys: string[];
+    mismatchedMeterLookupKeys: string[];
+    nonMeteredLookupKeys: string[];
+  };
+  autoProvisioning: {
+    ready: boolean;
+    missingRateLookupKeys: string[];
+    reason: string | null;
+  };
+};
+
 export type UsageExportRecord = {
   id: string;
   orgId: string;
@@ -36,6 +60,135 @@ function stripeClient(): Stripe {
     apiVersion: "2025-04-30.basil" as Stripe.LatestApiVersion,
     typescript: true,
   });
+}
+
+export async function inspectUsageProcessorTopology(): Promise<UsageProcessorReadiness> {
+  const definitions = getCatalogMeterDefinitions();
+  const requiredMeterNames = [...new Set(definitions.map((definition) => definition.meterName))].sort();
+  const requiredLookupKeys = [...new Set(definitions.map((definition) => definition.lookupKey))].sort();
+  const missingRateLookupKeys = definitions
+    .filter((definition) => definition.unitAmount === null)
+    .map((definition) => definition.lookupKey)
+    .sort();
+  const checkedAt = new Date().toISOString();
+
+  try {
+    const stripe = stripeClient();
+    const activeMeters: Stripe.Billing.Meter[] = [];
+    for await (const meter of stripe.billing.meters.list({
+      limit: 100,
+      status: "active",
+    })) {
+      if (requiredMeterNames.includes(meter.event_name)) activeMeters.push(meter);
+    }
+
+    const meterByName = new Map(activeMeters.map((meter) => [meter.event_name, meter]));
+    const missingNames = requiredMeterNames.filter((name) => !meterByName.has(name));
+    const misconfiguredNames = requiredMeterNames.filter((name) => {
+      const meter = meterByName.get(name);
+      if (!meter) return false;
+      return (
+        meter.default_aggregation.formula !== "sum" ||
+        meter.customer_mapping?.type !== "by_id" ||
+        meter.customer_mapping?.event_payload_key !== "stripe_customer_id" ||
+        meter.value_settings?.event_payload_key !== "value"
+      );
+    });
+
+    const pricePage = requiredLookupKeys.length
+      ? await stripe.prices.list({
+          active: true,
+          lookup_keys: requiredLookupKeys,
+          limit: Math.min(Math.max(requiredLookupKeys.length, 1), 100),
+        })
+      : { data: [] as Stripe.Price[] };
+    const priceByLookupKey = new Map(
+      pricePage.data
+        .filter((price) => Boolean(price.lookup_key))
+        .map((price) => [price.lookup_key as string, price]),
+    );
+    const missingLookupKeys = requiredLookupKeys.filter(
+      (lookupKey) => !priceByLookupKey.has(lookupKey),
+    );
+    const mismatchedMeterLookupKeys: string[] = [];
+    const nonMeteredLookupKeys: string[] = [];
+
+    for (const definition of definitions) {
+      const price = priceByLookupKey.get(definition.lookupKey);
+      if (!price) continue;
+      const meter = meterByName.get(definition.meterName);
+      if (!price.recurring || price.recurring.usage_type !== "metered") {
+        nonMeteredLookupKeys.push(definition.lookupKey);
+        continue;
+      }
+      if (!meter || price.recurring.meter !== meter.id) {
+        mismatchedMeterLookupKeys.push(definition.lookupKey);
+      }
+    }
+
+    const ready =
+      missingNames.length === 0 &&
+      misconfiguredNames.length === 0 &&
+      missingLookupKeys.length === 0 &&
+      mismatchedMeterLookupKeys.length === 0 &&
+      nonMeteredLookupKeys.length === 0;
+
+    return {
+      ready,
+      checkedAt,
+      reason: ready
+        ? null
+        : "Stripe usage processor topology is incomplete or inconsistent with the canonical catalog",
+      meters: {
+        required: requiredMeterNames.length,
+        present: requiredMeterNames.length - missingNames.length,
+        missingNames,
+        misconfiguredNames,
+      },
+      prices: {
+        required: requiredLookupKeys.length,
+        present: requiredLookupKeys.length - missingLookupKeys.length,
+        missingLookupKeys,
+        mismatchedMeterLookupKeys: [...new Set(mismatchedMeterLookupKeys)].sort(),
+        nonMeteredLookupKeys: [...new Set(nonMeteredLookupKeys)].sort(),
+      },
+      autoProvisioning: {
+        ready: missingRateLookupKeys.length === 0,
+        missingRateLookupKeys,
+        reason:
+          missingRateLookupKeys.length === 0
+            ? null
+            : "Canonical usage price rates are not defined; automatic Stripe price creation is disabled",
+      },
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      checkedAt,
+      reason: "Stripe usage processor inspection is unavailable",
+      meters: {
+        required: requiredMeterNames.length,
+        present: 0,
+        missingNames: requiredMeterNames,
+        misconfiguredNames: [],
+      },
+      prices: {
+        required: requiredLookupKeys.length,
+        present: 0,
+        missingLookupKeys: requiredLookupKeys,
+        mismatchedMeterLookupKeys: [],
+        nonMeteredLookupKeys: [],
+      },
+      autoProvisioning: {
+        ready: missingRateLookupKeys.length === 0,
+        missingRateLookupKeys,
+        reason:
+          missingRateLookupKeys.length === 0
+            ? null
+            : "Canonical usage price rates are not defined; automatic Stripe price creation is disabled",
+      },
+    };
+  }
 }
 
 function retryDelay(attempts: number): number {

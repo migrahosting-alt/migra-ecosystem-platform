@@ -68,6 +68,10 @@ const eventParamsSchema = z.object({
   eventId: z.string().trim().min(1).max(120),
 });
 
+const usageRetryBodySchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+
 const reconciliationParamsSchema = z.object({
   reportId: z.string().trim().min(1).max(120),
 });
@@ -169,11 +173,13 @@ export async function registerCommerceUsageRoutes(
         "platform.commerce.usage.manage",
       ]);
       const { eventId } = eventParamsSchema.parse(request.params);
+      const body = usageRetryBodySchema.parse(request.body);
 
       return reply.code(202).send({
         event: await retryUsageExport({
           eventId,
           actorId: authority.platformUserId,
+          reason: body.reason,
           request,
         }),
       });

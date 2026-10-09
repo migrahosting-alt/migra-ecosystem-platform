@@ -119,3 +119,84 @@ test("usage worker is managed, heartbeat-driven and closes DB on graceful stop",
   assert.match(unit, /RuntimeDirectory=migrateck-usage/);
   assert.match(unit, /dist\/usage-worker\.js/);
 });
+
+test("canonical usage pricing is not auto-provisionable while processor rates are undefined", () => {
+  const meters = getCatalogMeterDefinitions();
+  assert.equal(meters.length, 8);
+  assert.equal(new Set(meters.map((meter) => meter.meterName)).size, 7);
+  assert.ok(meters.some((meter) => meter.meterName === "voice_minutes"));
+  assert.ok(meters.every((meter) => meter.unitAmount === null));
+
+  const engine = repoFile("apps/api/src/lib/usage-export-engine.ts");
+  assert.match(engine, /inspectUsageProcessorTopology/);
+  assert.match(engine, /stripe\.billing\.meters\.list/);
+  assert.match(engine, /stripe\.prices\.list/);
+  assert.match(engine, /price\.recurring\.meter !== meter\.id/);
+  assert.match(engine, /price\.recurring\.usage_type !== "metered"/);
+  assert.match(engine, /meter\.default_aggregation\.formula !== "sum"/);
+  assert.match(engine, /stripe_customer_id/);
+  assert.match(engine, /event_payload_key !== "value"/);
+  assert.doesNotMatch(engine, /billing\.meters\.create/);
+  assert.doesNotMatch(engine, /prices\.create/);
+});
+
+test("billable ingestion and operator retry fail closed before ledger mutation when processor is unavailable", () => {
+  const service = repoFile("apps/api/src/lib/commerce-usage.ts");
+  const routes = repoFile("apps/api/src/routes/v1/modules/commerce-usage.ts");
+
+  const ingest = service.slice(
+    service.indexOf("export async function recordMachineUsage"),
+    service.indexOf("async function usageWorkerReadiness"),
+  );
+  assert.ok(ingest.indexOf("await requireUsageProcessorReady()") >= 0);
+  assert.ok(
+    ingest.indexOf("await requireUsageProcessorReady()") <
+      ingest.indexOf('INSERT INTO "UsageEvent"'),
+  );
+  assert.match(service, /Usage processor provisioning is incomplete/);
+  assert.match(service, /Usage export worker is unavailable/);
+
+  const retry = service.slice(
+    service.indexOf("export async function retryUsageExport"),
+    service.indexOf("export function assertUsageProduct"),
+  );
+  assert.ok(retry.indexOf("await requireUsageProcessorReady()") >= 0);
+  assert.ok(
+    retry.indexOf("await requireUsageProcessorReady()") <
+      retry.indexOf('UPDATE "UsageEvent"'),
+  );
+  assert.match(retry, /reason: input\.reason/);
+  assert.match(routes, /usageRetryBodySchema/);
+  assert.match(routes, /reason: z\.string\(\)\.trim\(\)\.min\(3\)\.max\(500\)/);
+});
+
+test("usage worker publishes processor readiness and never burns export attempts while topology is blocked", () => {
+  const worker = repoFile("apps/api/src/usage-worker.ts");
+
+  assert.match(worker, /inspectUsageProcessorTopology/);
+  assert.match(worker, /processorCheckIntervalMs/);
+  assert.match(worker, /processor,/);
+  assert.match(
+    worker,
+    /const processed = processor\.ready\s*\? await processUsageExportBatch\(batchSize\(\)\)\s*:\s*0/,
+  );
+});
+
+test("usage operator distinguishes worker liveness from processor provisioning and disables unsafe retry", () => {
+  const ui = repoFile(
+    "apps/web/src/app/(platform)/platform/commerce/usage/CommerceUsageWorkspace.tsx",
+  );
+
+  assert.match(ui, /Stripe usage processor is not provisioned/);
+  assert.match(ui, /Billable usage ingestion and manual export retry are fail-closed/);
+  assert.match(ui, /Meters \{data\.processor\.meters\.present\}/);
+  assert.match(ui, /Prices \{data\.processor\.prices\.present\}/);
+  assert.match(ui, /Automatic processor creation is intentionally disabled/);
+  assert.match(ui, /No organization has reported billable usage yet/);
+  assert.match(ui, /data\.processor\.ready \? \(/);
+  assert.match(ui, /Processor blocked/);
+  assert.match(ui, /Reason for retrying this usage export/);
+  assert.match(ui, /JSON\.stringify\(\{ reason: reason\.trim\(\) \}\)/);
+  assert.doesNotMatch(ui, /Create Stripe meter/i);
+  assert.doesNotMatch(ui, /Create Stripe price/i);
+});

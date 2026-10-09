@@ -4,8 +4,10 @@ import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { closeDb } from "./lib/db.js";
 import {
   failExpiredUsageExports,
+  inspectUsageProcessorTopology,
   processUsageExportBatch,
   recoverStaleUsageExports,
+  type UsageProcessorReadiness,
 } from "./lib/usage-export-engine.js";
 
 function workerId(): string {
@@ -24,6 +26,11 @@ function batchSize(): number {
     : 25;
 }
 
+function processorCheckIntervalMs(): number {
+  const parsed = Number(process.env.USAGE_PROCESSOR_CHECK_INTERVAL_MS ?? 60_000);
+  return Number.isFinite(parsed) && parsed >= 15_000 ? parsed : 60_000;
+}
+
 function heartbeatFile(): string {
   return (
     process.env.USAGE_WORKER_HEARTBEAT_FILE ??
@@ -31,7 +38,10 @@ function heartbeatFile(): string {
   );
 }
 
-async function writeHeartbeat(id: string): Promise<void> {
+async function writeHeartbeat(
+  id: string,
+  processor: UsageProcessorReadiness,
+): Promise<void> {
   const path = heartbeatFile();
   const temporary = path + ".tmp";
   await mkdir(dirname(path), { recursive: true });
@@ -41,6 +51,7 @@ async function writeHeartbeat(id: string): Promise<void> {
       workerId: id,
       pid: process.pid,
       lastSeenAt: new Date().toISOString(),
+      processor,
     }) + "\n",
     { mode: 0o644 },
   );
@@ -83,7 +94,9 @@ async function main(): Promise<void> {
 
   const recovered = await recoverStaleUsageExports();
   const expired = await failExpiredUsageExports();
-  await writeHeartbeat(id);
+  let processor = await inspectUsageProcessorTopology();
+  let processorCheckedAt = Date.now();
+  await writeHeartbeat(id, processor);
 
   console.log("[migrateck-usage-worker] started", {
     workerId: id,
@@ -91,20 +104,38 @@ async function main(): Promise<void> {
     expired,
     intervalMs: pollIntervalMs(),
     batchSize: batchSize(),
+    processorReady: processor.ready,
+    processorReason: processor.reason,
   });
 
   while (!stopping) {
     const started = Date.now();
     try {
+      if (Date.now() - processorCheckedAt >= processorCheckIntervalMs()) {
+        const previousReady = processor.ready;
+        processor = await inspectUsageProcessorTopology();
+        processorCheckedAt = Date.now();
+        if (processor.ready !== previousReady) {
+          console.log("[migrateck-usage-worker] processor readiness changed", {
+            workerId: id,
+            ready: processor.ready,
+            reason: processor.reason,
+          });
+        }
+      }
+
       const expiredNow = await failExpiredUsageExports();
-      const processed = await processUsageExportBatch(batchSize());
-      await writeHeartbeat(id);
+      const processed = processor.ready
+        ? await processUsageExportBatch(batchSize())
+        : 0;
+      await writeHeartbeat(id, processor);
 
       if (processed > 0 || expiredNow > 0) {
         console.log("[migrateck-usage-worker] batch processed", {
           workerId: id,
           processed,
           expired: expiredNow,
+          processorReady: processor.ready,
           durationMs: Date.now() - started,
         });
       }

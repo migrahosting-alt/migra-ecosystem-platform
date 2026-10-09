@@ -12,6 +12,7 @@ import {
   RefreshCw,
   RotateCw,
   Search,
+  ShieldAlert,
   ShieldCheck,
   TriangleAlert,
   Waypoints,
@@ -135,6 +136,29 @@ type UsagePayload = {
     pid: number | null;
     lastSeenAt: string | null;
     ageMs: number | null;
+  };
+  processor: {
+    ready: boolean;
+    checkedAt: string | null;
+    reason: string | null;
+    meters: {
+      required: number;
+      present: number;
+      missingNames: string[];
+      misconfiguredNames: string[];
+    };
+    prices: {
+      required: number;
+      present: number;
+      missingLookupKeys: string[];
+      mismatchedMeterLookupKeys: string[];
+      nonMeteredLookupKeys: string[];
+    };
+    autoProvisioning: {
+      ready: boolean;
+      missingRateLookupKeys: string[];
+      reason: string | null;
+    };
   };
 };
 
@@ -321,6 +345,18 @@ export function CommerceUsageWorkspace() {
   }, [data]);
 
   async function retryEvent(eventId: string) {
+    if (!data?.processor.ready) {
+      setError(
+        "Stripe usage processor provisioning is incomplete. Retry is disabled until the canonical meters and prices are live.",
+      );
+      return;
+    }
+    const reason = globalThis.prompt?.("Reason for retrying this usage export:") ?? "";
+    if (reason.trim().length < 3) {
+      setError("A retry reason of at least 3 characters is required.");
+      return;
+    }
+
     setBusyEvent(eventId);
     setError(null);
     try {
@@ -328,7 +364,11 @@ export function CommerceUsageWorkspace() {
         "/api/platform/commerce/usage/events/" +
           encodeURIComponent(eventId) +
           "/retry",
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: reason.trim() }),
+        },
       );
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Unable to retry usage export");
@@ -450,6 +490,48 @@ export function CommerceUsageWorkspace() {
         </div>
       ) : null}
 
+      {!data.processor.ready ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-950">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-rose-700 shadow-sm">
+              <ShieldAlert size={17} />
+            </span>
+            <div className="min-w-0">
+              <p className="font-semibold">Stripe usage processor is not provisioned</p>
+              <p className="mt-1 leading-6 text-rose-800">
+                Billable usage ingestion and manual export retry are fail-closed. The worker remains online for health reporting, but it will not claim usage events until processor topology matches the canonical catalog.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                <span className="rounded-full bg-white px-2.5 py-1">
+                  Meters {data.processor.meters.present}/{data.processor.meters.required}
+                </span>
+                <span className="rounded-full bg-white px-2.5 py-1">
+                  Prices {data.processor.prices.present}/{data.processor.prices.required}
+                </span>
+                <span className="rounded-full bg-white px-2.5 py-1">
+                  Checked {formatDate(data.processor.checkedAt)}
+                </span>
+              </div>
+              {data.processor.meters.missingNames.length > 0 ? (
+                <p className="mt-3 break-words text-xs leading-5 text-rose-800">
+                  Missing meters: {data.processor.meters.missingNames.join(", ")}
+                </p>
+              ) : null}
+              {data.processor.prices.missingLookupKeys.length > 0 ? (
+                <p className="mt-1 break-words text-xs leading-5 text-rose-800">
+                  Missing price keys: {data.processor.prices.missingLookupKeys.join(", ")}
+                </p>
+              ) : null}
+              {!data.processor.autoProvisioning.ready ? (
+                <p className="mt-3 text-xs leading-5 text-rose-800">
+                  Automatic processor creation is intentionally disabled because {data.processor.autoProvisioning.missingRateLookupKeys.length} canonical usage price rate{data.processor.autoProvisioning.missingRateLookupKeys.length === 1 ? " is" : "s are"} undefined. Define those rates in the source catalog before creating Stripe usage prices.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -489,7 +571,7 @@ export function CommerceUsageWorkspace() {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <MetricCard
           icon={<Activity size={17} />}
           label="Billable events"
@@ -520,6 +602,22 @@ export function CommerceUsageWorkspace() {
           value={data.worker.ready ? "Ready" : "Not ready"}
           detail={data.worker.lastSeenAt ? "Heartbeat " + formatDate(data.worker.lastSeenAt) : "No heartbeat"}
           good={data.worker.ready}
+        />
+        <MetricCard
+          icon={data.processor.ready ? <ShieldCheck size={17} /> : <ShieldAlert size={17} />}
+          label="Processor"
+          value={data.processor.ready ? "Ready" : "Blocked"}
+          detail={
+            data.processor.meters.present +
+            "/" +
+            data.processor.meters.required +
+            " meters · " +
+            data.processor.prices.present +
+            "/" +
+            data.processor.prices.required +
+            " prices"
+          }
+          good={data.processor.ready}
         />
       </section>
 
@@ -616,6 +714,10 @@ export function CommerceUsageWorkspace() {
                   <p className="mt-1">
                     Metered organizations without a Stripe BillingCustomer mapping cannot export. Those events fail closed and create reconciliation evidence.
                   </p>
+                </div>
+              ) : data.coverage.meteredOrgs === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+                  No organization has reported billable usage yet, so customer-mapping coverage has not been exercised.
                 </div>
               ) : (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs leading-5 text-emerald-800">
@@ -859,14 +961,20 @@ export function CommerceUsageWorkspace() {
                     </code>
                   </div>
                   {data.canManageUsage && ["FAILED", "RETRY"].includes(event.exportStatus) ? (
-                    <button
-                      onClick={() => void retryEvent(event.id)}
-                      disabled={busyEvent === event.id}
-                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-blue-200 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
-                    >
-                      {busyEvent === event.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
-                      Retry export
-                    </button>
+                    data.processor.ready ? (
+                      <button
+                        onClick={() => void retryEvent(event.id)}
+                        disabled={busyEvent === event.id}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-blue-200 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        {busyEvent === event.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+                        Retry export
+                      </button>
+                    ) : (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                        <ShieldAlert size={13} /> Processor blocked
+                      </span>
+                    )
                   ) : null}
                 </div>
               </article>

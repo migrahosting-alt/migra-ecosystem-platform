@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { PRODUCT_CATALOG } from "@migrateck/billing-core/catalog";
 import type { FastifyRequest } from "fastify";
 import type { ApiKeyPrincipal } from "./machine-auth.js";
+import type { UsageProcessorReadiness } from "./usage-export-engine.js";
 import { getDb } from "./db.js";
 import {
   CATALOG_FAMILY_TO_PRODUCT,
@@ -90,6 +91,49 @@ function meterCandidates(product: ProductKey, meterName: string): MeterDefinitio
   );
 }
 
+function unavailableUsageProcessorReadiness(
+  reason: string,
+): UsageProcessorReadiness {
+  const definitions = getCatalogMeterDefinitions();
+  const missingNames = [
+    ...new Set(definitions.map((definition) => definition.meterName)),
+  ].sort();
+  const missingLookupKeys = [
+    ...new Set(definitions.map((definition) => definition.lookupKey)),
+  ].sort();
+  const missingRateLookupKeys = definitions
+    .filter((definition) => definition.unitAmount === null)
+    .map((definition) => definition.lookupKey)
+    .sort();
+
+  return {
+    ready: false,
+    checkedAt: null,
+    reason,
+    meters: {
+      required: missingNames.length,
+      present: 0,
+      missingNames,
+      misconfiguredNames: [],
+    },
+    prices: {
+      required: missingLookupKeys.length,
+      present: 0,
+      missingLookupKeys,
+      mismatchedMeterLookupKeys: [],
+      nonMeteredLookupKeys: [],
+    },
+    autoProvisioning: {
+      ready: missingRateLookupKeys.length === 0,
+      missingRateLookupKeys,
+      reason:
+        missingRateLookupKeys.length === 0
+          ? null
+          : "Canonical usage price rates are not defined; automatic Stripe price creation is disabled",
+    },
+  };
+}
+
 function serializeUsageRow(row: Record<string, unknown>) {
   return {
     ...row,
@@ -139,6 +183,8 @@ export async function recordMachineUsage(input: {
       { statusCode: 400 },
     );
   }
+
+  await requireUsageProcessorReady();
 
   const metric = candidates[0]!.metric;
   const occurredAt = input.occurredAt ?? new Date();
@@ -260,11 +306,18 @@ async function usageWorkerReadiness() {
       workerId?: string;
       pid?: number;
       lastSeenAt?: string;
+      processor?: UsageProcessorReadiness;
     };
     const lastSeenAt = parsed.lastSeenAt
       ? new Date(parsed.lastSeenAt)
       : null;
     const ageMs = lastSeenAt ? Date.now() - lastSeenAt.getTime() : Infinity;
+    const processor =
+      parsed.processor && typeof parsed.processor.ready === "boolean"
+        ? parsed.processor
+        : unavailableUsageProcessorReadiness(
+            "Usage worker has not reported Stripe processor readiness",
+          );
 
     return {
       ready: Number.isFinite(ageMs) && ageMs <= 60_000,
@@ -272,6 +325,7 @@ async function usageWorkerReadiness() {
       pid: parsed.pid ?? null,
       lastSeenAt: parsed.lastSeenAt ?? null,
       ageMs: Number.isFinite(ageMs) ? ageMs : null,
+      processor,
     };
   } catch {
     return {
@@ -280,8 +334,27 @@ async function usageWorkerReadiness() {
       pid: null,
       lastSeenAt: null,
       ageMs: null,
+      processor: unavailableUsageProcessorReadiness(
+        "Usage worker processor readiness is unavailable",
+      ),
     };
   }
+}
+
+async function requireUsageProcessorReady() {
+  const readiness = await usageWorkerReadiness();
+  if (!readiness.ready) {
+    throw Object.assign(new Error("Usage export worker is unavailable"), {
+      statusCode: 503,
+    });
+  }
+  if (!readiness.processor.ready) {
+    throw Object.assign(
+      new Error("Usage processor provisioning is incomplete"),
+      { statusCode: 503 },
+    );
+  }
+  return readiness;
 }
 
 export async function getCommerceUsageSnapshot(window: UsageWindow) {
@@ -423,7 +496,14 @@ export async function getCommerceUsageSnapshot(window: UsageWindow) {
         orgCoverage.rows[0]?.missingCustomerMappings ?? 0,
       ),
     },
-    worker,
+    worker: {
+      ready: worker.ready,
+      workerId: worker.workerId,
+      pid: worker.pid,
+      lastSeenAt: worker.lastSeenAt,
+      ageMs: worker.ageMs,
+    },
+    processor: worker.processor,
   };
 }
 
@@ -513,8 +593,11 @@ export async function upsertUsageQuota(input: {
 export async function retryUsageExport(input: {
   eventId: string;
   actorId: string;
+  reason: string;
   request: FastifyRequest;
 }) {
+  await requireUsageProcessorReady();
+
   const db = getDb();
   const client = await db.connect();
   try {
@@ -548,7 +631,10 @@ export async function retryUsageExport(input: {
         input.eventId,
         input.request.ip ?? null,
         input.request.headers["user-agent"] ?? null,
-        JSON.stringify(event.rows[0]),
+        JSON.stringify({
+          ...event.rows[0],
+          reason: input.reason,
+        }),
       ],
     );
 
