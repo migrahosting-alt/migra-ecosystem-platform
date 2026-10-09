@@ -20,6 +20,7 @@ type WorkerHealth = {
     | "provisioning"
     | "entitlement_expiry"
     | "usage"
+    | "billing_reconciliation"
     | "social_connections"
     | "webhooks";
   label: string;

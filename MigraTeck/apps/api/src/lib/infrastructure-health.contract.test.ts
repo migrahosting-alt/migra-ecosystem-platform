@@ -33,6 +33,7 @@ test("all background workers publish or consume dedicated heartbeat paths", () =
     "/run/migrateck-provisioning/heartbeat.json",
     "/run/migrateck-entitlement-expiry/heartbeat.json",
     "/run/migrateck-usage/heartbeat.json",
+    "/run/migrateck-billing-reconcile/heartbeat.json",
     "/run/migrateck-social-sync/heartbeat.json",
     "/run/migrateck-webhook/heartbeat.json",
   ]) {
@@ -48,6 +49,19 @@ test("all background workers publish or consume dedicated heartbeat paths", () =
   assert.match(social, /removeHeartbeat/);
   assert.match(socialUnit, /dist\/social-connection-sync-worker\.js/);
   assert.match(socialUnit, /RuntimeDirectory=migrateck-social-sync/);
+});
+
+test("billing reconciliation worker participates in platform-wide liveness", () => {
+  const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
+  const panel = repoFile(
+    "apps/web/src/components/platform/InfrastructureHealthPanel.tsx",
+  );
+
+  assert.match(health, /billing_reconciliation/);
+  assert.match(health, /BILLING_RECONCILIATION_HEARTBEAT_FILE/);
+  assert.match(health, /migrateck-billing-reconcile\/heartbeat\.json/);
+  assert.match(health, /expectedMaxAgeSeconds: 195/);
+  assert.match(panel, /billing_reconciliation/);
 });
 
 test("usage health reads the real UsageEvent export lifecycle", () => {

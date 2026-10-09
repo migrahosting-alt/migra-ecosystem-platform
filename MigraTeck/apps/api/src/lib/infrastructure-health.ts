@@ -20,6 +20,7 @@ type WorkerHealth = {
     | "provisioning"
     | "entitlement_expiry"
     | "usage"
+    | "billing_reconciliation"
     | "social_connections"
     | "webhooks";
   label: string;
@@ -59,6 +60,14 @@ const WORKERS = [
     label: "Usage export",
     heartbeatPath: process.env.USAGE_WORKER_HEARTBEAT_FILE ?? "/run/migrateck-usage/heartbeat.json",
     expectedMaxAgeSeconds: 45,
+  },
+  {
+    key: "billing_reconciliation" as const,
+    label: "Billing reconciliation",
+    heartbeatPath:
+      process.env.BILLING_RECONCILIATION_HEARTBEAT_FILE ??
+      "/run/migrateck-billing-reconcile/heartbeat.json",
+    expectedMaxAgeSeconds: 195,
   },
   {
     key: "social_connections" as const,
