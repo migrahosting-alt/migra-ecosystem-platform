@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isConfigured, issueSession, verifyEmail, verifyPassword } from "../../lib/auth";
+import { verifyStaffPassword } from "../../lib/mail-identity";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +23,15 @@ export async function POST(req: NextRequest) {
   const password = String(form.get("password") || "");
   const next = String(form.get("next") || "/console");
 
-  if (!verifyEmail(email) || !verifyPassword(password)) {
+  // Two ways to authenticate: the env bootstrap admin (super_admin) OR an active
+  // staff user in mail_staff_user (multi-user RBAC for the Mail module).
+  const envAdminOk = verifyEmail(email) && verifyPassword(password);
+  const staffOk = !envAdminOk && (await verifyStaffPassword(email, password));
+  if (!envAdminOk && !staffOk) {
     return NextResponse.redirect(new URL("/console/login?error=invalid", base));
   }
 
-  await issueSession(email);
+  await issueSession(email.trim().toLowerCase());
 
   const safeNext = next.startsWith("/console") ? next : "/console";
   return NextResponse.redirect(new URL(safeNext, base));

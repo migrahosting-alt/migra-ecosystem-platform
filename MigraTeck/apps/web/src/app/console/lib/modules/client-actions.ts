@@ -17,7 +17,8 @@
  * is automatically a server action and can be passed as a form `action={...}`.
  */
 
-import { panelExec } from "../db";
+import { panelExec, panelQuery } from "../db";
+import { randomUUID } from "node:crypto";
 import { getSession } from "../auth";
 import { enqueueProvisioningTask } from "./provisioning";
 import { withAuditedAction } from "./action-runner";
@@ -29,10 +30,16 @@ import {
 import {
   createClientContact,
   updateClientContact,
+  setDefaultClientContact,
   deleteClientContact,
   CONTACT_ROLES,
   type ContactRole,
 } from "./contacts";
+import { createPaymentLink } from "./stripe-links";
+import { notifyLifecycle } from "./notifications";
+import { loadTenantHeader } from "./tenants";
+import { tenantUrl } from "../urls";
+import { ensureMailboxMaildir } from "../mailbox-provisioning";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local helpers
@@ -312,15 +319,21 @@ export async function addContact(formData: FormData): Promise<void> {
   const email = trimOrNull(formData, "email");
   const phone = trimOrNull(formData, "phone");
   const title = trimOrNull(formData, "title");
+  const notes = trimOrNull(formData, "notes");
+  const isDefault = formData.get("isDefault") === "on";
   if (!name && !email && !phone) return;
   const actor = await getActor();
+  let contactId: string | null = null;
 
   await withAuditedAction({
     tenantId, actor, action: "contact.add",
     resource: "contact",
-    metadata: { role, name, email },
+    metadata: { role, name, email, isDefault },
     run: async () => {
-      await createClientContact({ tenantId, role, name, email, phone, title });
+      contactId = await createClientContact({ tenantId, role, name, email, phone, title, notes, isDefault });
+      if (isDefault && contactId) {
+        await setDefaultClientContact(tenantId, contactId);
+      }
     },
   });
 }
@@ -334,13 +347,36 @@ export async function updateContact(formData: FormData): Promise<void> {
   const email = trimOrNull(formData, "email");
   const phone = trimOrNull(formData, "phone");
   const title = trimOrNull(formData, "title");
+  const notes = trimOrNull(formData, "notes");
+  const isDefault = formData.get("isDefault") === "on";
   const actor = await getActor();
 
   await withAuditedAction({
     tenantId, actor, action: "contact.update",
     resource: "contact", resourceId: id,
     run: async () => {
-      await updateClientContact({ id, role, name, email, phone, title });
+      await updateClientContact({ id, role, name, email, phone, title, notes, isDefault });
+      if (isDefault) {
+        await setDefaultClientContact(tenantId, id);
+      }
+    },
+  });
+}
+
+export async function makePrimaryContact(formData: FormData): Promise<void> {
+  const tenantId = str(formData, "tenantId");
+  const id = str(formData, "id");
+  if (!tenantId || !id) return;
+  const actor = await getActor();
+
+  await withAuditedAction({
+    tenantId,
+    actor,
+    action: "contact.default",
+    resource: "contact",
+    resourceId: id,
+    run: async () => {
+      await setDefaultClientContact(tenantId, id);
     },
   });
 }
@@ -356,6 +392,201 @@ export async function removeContact(formData: FormData): Promise<void> {
     resource: "contact", resourceId: id,
     run: async () => {
       await deleteClientContact(id);
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing / payment requests
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function createPaymentRequest(formData: FormData): Promise<void> {
+  const tenantId = str(formData, "tenantId");
+  const description = str(formData, "description").trim();
+  const subtotal = Number(str(formData, "amount")) || 0;
+  const taxRatePct = Math.max(0, Number(str(formData, "taxRatePct")) || 0);
+  const sendLink = formData.get("sendLink") === "on";
+  if (!tenantId || !description || subtotal <= 0) return;
+
+  const actor = await getActor();
+  const orderId = randomUUID();
+  const taxAmount = +(subtotal * (taxRatePct / 100)).toFixed(2);
+  const total = +(subtotal + taxAmount).toFixed(2);
+
+  const createOrder = await withAuditedAction({
+    tenantId,
+    actor,
+    action: "order.add",
+    resource: "order",
+    resourceId: orderId,
+    metadata: {
+      source: "client_workspace",
+      description,
+      subtotal,
+      taxRatePct,
+      taxAmount,
+      total,
+      sendLink,
+    },
+    run: async () => {
+      await panelExec(
+        `INSERT INTO orders
+           (id, tenantid, status, currency, subtotal, tax_rate, tax_amount, total, createdat)
+         VALUES ($1, $2, 'pending', 'USD', $3, $4, $5, $6, NOW())`,
+        [orderId, tenantId, subtotal, taxRatePct / 100, taxAmount, total],
+      );
+    },
+  });
+  if (!createOrder.ok) return;
+
+  if (!sendLink) return;
+
+  try {
+    const link = await createPaymentLink({
+      productName: description,
+      amountCents: Math.round(total * 100),
+      currency: "usd",
+      metadata: { tenantId, orderId, description },
+      successUrl: tenantUrl(tenantId),
+    });
+
+    if (!link) {
+      await withAuditedAction({
+        tenantId,
+        actor,
+        action: "order.payment_link_pending",
+        resource: "order",
+        resourceId: orderId,
+        metadata: { description, total },
+        skipRevalidate: true,
+        run: async () => {},
+      });
+      return;
+    }
+
+    await panelExec(
+      `UPDATE orders
+          SET payment_link_url = $2,
+              payment_link_id = $3
+        WHERE id = $1`,
+      [orderId, link.url, link.id],
+    );
+
+    await withAuditedAction({
+      tenantId,
+      actor,
+      action: "order.payment_link_sent",
+      resource: "order",
+      resourceId: orderId,
+      metadata: { description, total, paymentLinkId: link.id, paymentLinkUrl: link.url },
+      skipRevalidate: true,
+      run: async () => {},
+    });
+
+    const tenant = await loadTenantHeader(tenantId);
+    await notifyLifecycle({
+      tenantId,
+      tenantName: tenant?.name || tenantId,
+      action: "order.payment_link_sent",
+      actorEmail: actor,
+      reason: `Payment request for ${description} — $${total.toFixed(2)}: ${link.url}`,
+      url: tenantUrl(tenantId),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "payment_link_failed";
+    await withAuditedAction({
+      tenantId,
+      actor,
+      action: "order.payment_link_sent",
+      resource: "order",
+      resourceId: orderId,
+      skipRevalidate: true,
+      run: async () => {
+        throw new Error(msg);
+      },
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Domains / mailboxes
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function setDomainStatus(formData: FormData): Promise<void> {
+  const tenantId = str(formData, "tenantId");
+  const id = str(formData, "id");
+  const status = str(formData, "status").trim() || "active";
+  if (!tenantId || !id) return;
+  const actor = await getActor();
+
+  await withAuditedAction({
+    tenantId,
+    actor,
+    action: `domain.${status}`,
+    resource: "domain",
+    resourceId: id,
+    run: async () => {
+      await panelExec(
+        `UPDATE domains SET status = $2, "updatedAt" = NOW() WHERE id = $1`,
+        [id, status],
+      );
+    },
+  });
+}
+
+export async function toggleDomainAutorenew(formData: FormData): Promise<void> {
+  const tenantId = str(formData, "tenantId");
+  const id = str(formData, "id");
+  const autorenew = formData.get("autorenew") === "true";
+  if (!tenantId || !id) return;
+  const actor = await getActor();
+
+  await withAuditedAction({
+    tenantId,
+    actor,
+    action: autorenew ? "domain.autorenew_on" : "domain.autorenew_off",
+    resource: "domain",
+    resourceId: id,
+    metadata: { autorenew },
+    run: async () => {
+      await panelExec(
+        `UPDATE domains SET autorenew = $2, "updatedAt" = NOW() WHERE id = $1`,
+        [id, autorenew],
+      );
+    },
+  });
+}
+
+export async function setMailboxStatus(formData: FormData): Promise<void> {
+  const tenantId = str(formData, "tenantId");
+  const id = str(formData, "id");
+  const status = str(formData, "status").trim() || "active";
+  if (!tenantId || !id) return;
+  const actor = await getActor();
+
+  await withAuditedAction({
+    tenantId,
+    actor,
+    action: `mailbox.${status}`,
+    resource: "mailbox",
+    resourceId: id,
+    run: async () => {
+      if (status === "active") {
+        const rows = await panelQuery<{ address: string | null; passwordhash: string | null }>(
+          `SELECT address, passwordhash FROM mailboxes WHERE id = $1 LIMIT 1`,
+          [id],
+        );
+        const mailbox = rows[0];
+        if (!mailbox?.passwordhash) {
+          throw new Error("Set a password in the mailbox editor before activating this mailbox");
+        }
+        await panelExec(`UPDATE mailboxes SET status = 'active' WHERE id = $1`, [id]);
+        if (mailbox.address) {
+          await ensureMailboxMaildir(mailbox.address);
+        }
+      } else {
+        await panelExec(`UPDATE mailboxes SET status = $2 WHERE id = $1`, [id, status]);
+      }
     },
   });
 }

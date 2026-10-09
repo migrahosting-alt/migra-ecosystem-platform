@@ -21,9 +21,13 @@ export const ActivityFilterBar = ({
 
   const buildUrl = (nq: string, na: string, nf: boolean): string => {
     const sp = new URLSearchParams();
+    const tenantId = params.get("tenantId");
+    const returnTo = params.get("returnTo");
     if (nq) sp.set("q", nq);
     if (na) sp.set("action", na);
     if (nf) sp.set("failures", "1");
+    if (tenantId) sp.set("tenantId", tenantId);
+    if (returnTo) sp.set("returnTo", returnTo);
     const qs = sp.toString();
     return qs ? `/console/activity?${qs}` : "/console/activity";
   };

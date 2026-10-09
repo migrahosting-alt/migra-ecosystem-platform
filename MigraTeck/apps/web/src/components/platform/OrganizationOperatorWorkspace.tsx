@@ -41,23 +41,6 @@ type IdentityOrganization = {
   updated_at: string;
 };
 
-type IdentityUser = {
-  id: string;
-  email: string | null;
-  status: string;
-  email_verified: boolean;
-  display_name: string | null;
-  created_at: string;
-  last_login_at: string | null;
-};
-
-type IdentityUsersPayload = {
-  users: IdentityUser[];
-  total: number;
-  limit: number;
-  offset: number;
-};
-
 type PlatformOrganization = {
   id: string;
   name: string;
@@ -197,10 +180,6 @@ export function OrganizationOperatorWorkspace() {
   const [classificationPending, setClassificationPending] = useState(false);
   const [classificationMessage, setClassificationMessage] = useState<string | null>(null);
   const [linkIdentityId, setLinkIdentityId] = useState("");
-  const [identityUserQuery, setIdentityUserQuery] = useState("");
-  const [identityUsers, setIdentityUsers] = useState<IdentityUser[]>([]);
-  const [identityUsersLoading, setIdentityUsersLoading] = useState(false);
-  const [ownerUserId, setOwnerUserId] = useState("");
 
   const load = useCallback(async (search: string, background = false) => {
     if (background) setRefreshing(true);
@@ -233,45 +212,6 @@ export function OrganizationOperatorWorkspace() {
     } finally {
       setLoading(false);
       setRefreshing(false);
-    }
-  }, []);
-
-
-  const loadIdentityUsers = useCallback(async (search: string) => {
-    setIdentityUsersLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: "30", offset: "0" });
-      if (search.trim()) params.set("q", search.trim());
-
-      const response = await fetch(
-        "/api/platform/organization-directory/identity-users?" +
-          params.toString(),
-        { cache: "no-store" },
-      );
-      const body = (await response.json().catch(() => null)) as
-        | IdentityUsersPayload
-        | { error?: string }
-        | null;
-
-      if (!response.ok) {
-        throw new Error(
-          body && "error" in body && body.error
-            ? body.error
-            : "Unable to load identity owners",
-        );
-      }
-
-      setIdentityUsers(
-        body && "users" in body && Array.isArray(body.users)
-          ? body.users
-          : [],
-      );
-    } catch (err) {
-      setActionMessage(
-        err instanceof Error ? err.message : "Unable to load identity owners",
-      );
-    } finally {
-      setIdentityUsersLoading(false);
     }
   }, []);
 
@@ -314,34 +254,6 @@ export function OrganizationOperatorWorkspace() {
     [data],
   );
 
-
-  useEffect(() => {
-    setOwnerUserId("");
-    setIdentityUserQuery("");
-  }, [selected?.platform?.id]);
-
-  useEffect(() => {
-    if (
-      !data?.authority.canManage ||
-      !selected?.platform ||
-      selected.platform.authOrganizationId
-    ) {
-      setIdentityUsers([]);
-      return;
-    }
-
-    const timer = window.setTimeout(
-      () => void loadIdentityUsers(identityUserQuery),
-      250,
-    );
-    return () => window.clearTimeout(timer);
-  }, [
-    data?.authority.canManage,
-    selected?.platform,
-    identityUserQuery,
-    loadIdentityUsers,
-  ]);
-
   useEffect(() => {
     if (!selected?.platform || selected.platform.authOrganizationId) {
       setLinkIdentityId("");
@@ -379,48 +291,6 @@ export function OrganizationOperatorWorkspace() {
       await load(query, true);
     } catch (err) {
       setActionMessage(err instanceof Error ? err.message : "Unable to link organization identity");
-    } finally {
-      setActionPending(false);
-    }
-  }
-
-
-  async function createIdentityOrganization() {
-    if (!selected?.platform || !ownerUserId) return;
-    setActionPending(true);
-    setActionMessage(null);
-
-    try {
-      const response = await fetch(
-        "/api/platform/organization-directory/" +
-          encodeURIComponent(selected.platform.id) +
-          "/create-identity",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ownerUserId }),
-        },
-      );
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(
-          body?.error ??
-            "Unable to create and link the MigraAuth organization",
-        );
-      }
-
-      setActionMessage(
-        "MigraAuth organization created with the selected owner, linked to the Platform tenant, and audited.",
-      );
-      setOwnerUserId("");
-      await load(query, true);
-    } catch (err) {
-      setActionMessage(
-        err instanceof Error
-          ? err.message
-          : "Unable to create and link the MigraAuth organization",
-      );
-      await load(query, true);
     } finally {
       setActionPending(false);
     }
@@ -829,16 +699,9 @@ export function OrganizationOperatorWorkspace() {
                     availableIdentities={availableIdentityOrganizations}
                     linkIdentityId={linkIdentityId}
                     setLinkIdentityId={setLinkIdentityId}
-                    identityUsers={identityUsers}
-                    identityUsersLoading={identityUsersLoading}
-                    identityUserQuery={identityUserQuery}
-                    setIdentityUserQuery={setIdentityUserQuery}
-                    ownerUserId={ownerUserId}
-                    setOwnerUserId={setOwnerUserId}
                     pending={actionPending}
                     message={actionMessage}
                     onLink={() => void linkIdentity()}
-                    onCreateIdentity={() => void createIdentityOrganization()}
                     onSync={() => void syncIdentityMetadata()}
                   />
                 ) : (
@@ -981,40 +844,24 @@ function ReconciliationActions({
   availableIdentities,
   linkIdentityId,
   setLinkIdentityId,
-  identityUsers,
-  identityUsersLoading,
-  identityUserQuery,
-  setIdentityUserQuery,
-  ownerUserId,
-  setOwnerUserId,
   pending,
   message,
   onLink,
-  onCreateIdentity,
   onSync,
 }: {
   entry: DirectoryEntry;
   availableIdentities: IdentityOrganization[];
   linkIdentityId: string;
   setLinkIdentityId: (value: string) => void;
-  identityUsers: IdentityUser[];
-  identityUsersLoading: boolean;
-  identityUserQuery: string;
-  setIdentityUserQuery: (value: string) => void;
-  ownerUserId: string;
-  setOwnerUserId: (value: string) => void;
   pending: boolean;
   message: string | null;
   onLink: () => void;
-  onCreateIdentity: () => void;
   onSync: () => void;
 }) {
   const platform = entry.platform;
   const identity = entry.identity;
   const canLink = Boolean(platform && !platform.authOrganizationId);
   const canSync = Boolean(platform && identity && entry.classification.drift?.any);
-  const selectedOwner =
-    identityUsers.find((user) => user.id === ownerUserId) ?? null;
 
   if (!canLink && !canSync) {
     return (
@@ -1035,120 +882,35 @@ function ReconciliationActions({
       </p>
 
       {canLink ? (
-        <div className="mt-4 space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            <p className="text-xs font-semibold text-slate-800">
-              Link an existing identity organization
-            </p>
-            <p className="mt-1 text-[11px] leading-5 text-slate-500">
-              Use this when MigraAuth already has the correct organization and it is not linked to another Platform tenant.
-            </p>
-            {availableIdentities.length ? (
-              <div className="mt-3 space-y-2">
-                <select
-                  value={linkIdentityId}
-                  onChange={(event) => setLinkIdentityId(event.target.value)}
-                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-400"
-                >
-                  <option value="">Select an unlinked MigraAuth organization…</option>
-                  {availableIdentities.map((identityOption) => (
-                    <option key={identityOption.id} value={identityOption.id}>
-                      {identityOption.name} ({identityOption.slug})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={onLink}
-                  disabled={pending || !linkIdentityId}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                >
-                  {pending ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
-                  Link existing identity organization
-                </button>
-              </div>
-            ) : (
-              <p className="mt-3 text-[11px] leading-5 text-slate-500">
-                No unlinked MigraAuth organization is currently available.
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3">
-            <div className="flex items-start gap-2">
-              <Users size={15} className="mt-0.5 shrink-0 text-blue-600" />
-              <div>
-                <p className="text-xs font-semibold text-blue-950">
-                  Create an identity organization for this tenant
-                </p>
-                <p className="mt-1 text-[11px] leading-5 text-blue-800">
-                  The Platform tenant name and slug are reused. You must explicitly select the MigraAuth identity that will own the organization; ownership is never inferred from an email or runtime membership.
-                </p>
-              </div>
-            </div>
-
-            <div className="relative mt-3">
-              <Search
-                size={14}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                value={identityUserQuery}
-                onChange={(event) => setIdentityUserQuery(event.target.value)}
-                placeholder="Search MigraAuth owner by email or name…"
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs text-slate-800 outline-none focus:border-blue-400"
-              />
-              {identityUsersLoading ? (
-                <Loader2
-                  size={14}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400"
-                />
-              ) : null}
-            </div>
-
-            {identityUsers.length ? (
+        <div className="mt-4 space-y-3">
+          {availableIdentities.length ? (
+            <>
               <select
-                value={ownerUserId}
-                onChange={(event) => setOwnerUserId(event.target.value)}
-                className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-400"
+                value={linkIdentityId}
+                onChange={(event) => setLinkIdentityId(event.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-blue-400"
               >
-                <option value="">Select explicit identity owner…</option>
-                {identityUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.display_name ?? user.email ?? user.id} · {user.status}
+                <option value="">Select an unlinked MigraAuth organization…</option>
+                {availableIdentities.map((identityOption) => (
+                  <option key={identityOption.id} value={identityOption.id}>
+                    {identityOption.name} ({identityOption.slug})
                   </option>
                 ))}
               </select>
-            ) : !identityUsersLoading ? (
-              <div className="mt-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600">
-                No eligible identity matches this search. Invite or create the identity in{" "}
-                <a
-                  href="/platform/users"
-                  className="font-semibold text-blue-700 underline underline-offset-2"
-                >
-                  Users & Accounts
-                </a>
-                , then return here and select it as owner.
-              </div>
-            ) : null}
-
-            {selectedOwner ? (
-              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600">
-                Owner: <strong className="text-slate-800">{selectedOwner.display_name ?? selectedOwner.email ?? selectedOwner.id}</strong>
-                {" · "}
-                {selectedOwner.status}
-                {selectedOwner.email_verified ? " · email verified" : " · email not yet verified"}
-              </div>
-            ) : null}
-
-            <button
-              onClick={onCreateIdentity}
-              disabled={pending || !ownerUserId}
-              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {pending ? <Loader2 size={15} className="animate-spin" /> : <Building2 size={15} />}
-              Create identity organization & link tenant
-            </button>
-          </div>
+              <button
+                onClick={onLink}
+                disabled={pending || !linkIdentityId}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {pending ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
+                Link identity organization
+              </button>
+            </>
+          ) : (
+            <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-xs leading-5 text-slate-500">
+              No unlinked MigraAuth organization is available. Do not attach this runtime tenant to an identity org that is already linked elsewhere.
+            </div>
+          )}
         </div>
       ) : null}
 

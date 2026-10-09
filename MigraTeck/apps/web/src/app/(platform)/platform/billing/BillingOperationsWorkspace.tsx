@@ -252,7 +252,6 @@ type SubscriptionAction =
   | "pause_collection"
   | "resume_collection"
   | "cancel_at_period_end"
-  | "keep_active"
   | "cancel_immediate";
 
 function formatDate(value: string | null) {
@@ -502,11 +501,9 @@ export function BillingOperationsWorkspace() {
         ? "Immediately cancel this subscription and allow Stripe to prorate it now?"
         : action === "cancel_at_period_end"
           ? "Schedule this subscription to cancel at the end of its current period?"
-          : action === "keep_active"
-            ? "Keep this subscription active by removing its scheduled period-end cancellation?"
-            : action === "pause_collection"
-              ? "Pause Stripe collection for this subscription?"
-              : "Resume Stripe collection for this subscription?";
+          : action === "pause_collection"
+            ? "Pause Stripe collection for this subscription?"
+            : "Resume Stripe collection for this subscription?";
 
     if (!window.confirm(destructive)) return;
     if (
@@ -979,18 +976,12 @@ export function BillingOperationsWorkspace() {
                                         onClick={() => openAction(subscription, "pause_collection")}
                                       />
                                     )}
-                                    {subscription.cancelAtPeriodEnd ? (
-                                      <ActionButton
-                                        icon={<CirclePlay size={13} />}
-                                        label="Keep active"
-                                        onClick={() => openAction(subscription, "keep_active")}
-                                      />
-                                    ) : (
+                                    {!subscription.cancelAtPeriodEnd ? (
                                       <ActionButton
                                         label="Cancel at period end"
                                         onClick={() => openAction(subscription, "cancel_at_period_end")}
                                       />
-                                    )}
+                                    ) : null}
                                     <ActionButton
                                       danger
                                       label="Cancel now"

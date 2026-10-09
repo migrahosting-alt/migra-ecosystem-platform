@@ -40,3 +40,39 @@ export const loadAutomationData = async () => {
     webhooks: webhooks.map((w) => ({ id: w.id, url: w.url, event: w.event, status: w.status, lastFiredAt: w.lastfiredat })),
   };
 };
+
+/**
+ * All runs in one status, plus the true total.
+ *
+ * `loadAutomationData` caps runs at the 50 most recent, which is right for a
+ * browsing list and wrong for a focused arrival: Overview counts every
+ * `job_runs` row in the running state, so a link labelled "Review 32 jobs" that
+ * landed on a 50-most-recent slice could show fewer than 32 and the operator
+ * would have no way to tell. This returns the rows AND the count they were
+ * drawn from, so the view can state its own truncation instead of hiding it.
+ */
+export const loadRunsByStatus = async (
+  status: string,
+  limit = 500,
+): Promise<{ runs: JobRun[]; total: number }> => {
+  if (!isPanelDbConfigured()) return { runs: [], total: 0 };
+  const [rows, counted] = await Promise.all([
+    panelQuery<{ id: string; jobid: string | null; jobname: string | null; status: string; startedat: string | null; finishedat: string | null }>(
+      `SELECT jr.id, jr."jobId" AS jobid, j.type AS jobname,
+              COALESCE(jr.status, 'unknown') AS status,
+              jr."startedAt"::text AS startedat,
+              jr."finishedAt"::text AS finishedat
+         FROM job_runs jr
+         LEFT JOIN jobs j ON j.id = jr."jobId"
+        WHERE jr.status = $1
+        ORDER BY jr."startedAt" DESC NULLS LAST
+        LIMIT $2`,
+      [status, limit],
+    ),
+    panelQuery<{ count: string }>(`SELECT COUNT(*)::int AS count FROM job_runs WHERE status = $1`, [status]),
+  ]);
+  return {
+    runs: rows.map((r) => ({ id: r.id, jobId: r.jobid, jobName: r.jobname, status: r.status, startedAt: r.startedat, finishedAt: r.finishedat })),
+    total: Number(counted[0]?.count ?? 0) || 0,
+  };
+};

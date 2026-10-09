@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * @deprecated NOT RENDERED. Unwired from TopBar on Day 1 and must not be put back
+ * in its current form.
+ *
+ * The placeholder promises "Ask AI to monitor, create, automate, or investigate",
+ * but handleSubmit does exactly one thing: router.push('/console/support?q=' +
+ * text), which is a support-ticket text search. Typing "restart mail-core"
+ * searched tickets for that literal string and restarted nothing. That is a
+ * capability claim with an unrelated action behind it.
+ *
+ * Before this returns it needs to call the same governed control APIs the
+ * buttons call, with the same authorization, verification and audit trail. AI
+ * is an additional path to those controls, never a privileged backdoor around
+ * them. Until then the console does not advertise AI control of the estate.
+ */
+
 import { useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";

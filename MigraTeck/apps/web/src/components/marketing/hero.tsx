@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { products } from "@/data/products";
 
 export default function MigraTeckHero() {
@@ -60,9 +59,9 @@ export default function MigraTeckHero() {
               <a href="/services" className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-400">
                 Get started
               </a>
-              <Link href="/products" className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8">
+              <a href="/products" className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/[0.03] px-6 py-3.5 text-sm font-medium text-white/82 transition hover:bg-white/8">
                 Explore products
-              </Link>
+              </a>
             </div>
 
             <div className="mt-10 h-px w-full max-w-[560px] bg-gradient-to-r from-white/20 via-white/8 to-transparent" />

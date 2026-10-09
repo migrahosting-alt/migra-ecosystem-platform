@@ -46,32 +46,6 @@ type ReleaseIntegrity = {
   detail: string;
 };
 
-type ReleaseOverlay = {
-  state: "managed" | "missing" | "invalid";
-  generatedAt: string | null;
-  canonicalCommit: string | null;
-  releaseLabel: string | null;
-  installedReleaseLabel: string | null;
-  summary: {
-    totalDifferences: number;
-    productionOnly: number;
-    modifiedCanonical: number;
-    missingCanonical: number;
-    runtimeReconciliation: number;
-    highCriticality: number;
-  };
-  byClassification: Record<string, number>;
-  byAction: Record<string, number>;
-  samples: Array<{
-    path: string;
-    kind: "extra" | "modified" | "missing";
-    classification: string;
-    criticality: "low" | "medium" | "high";
-    recommendedAction: string;
-  }>;
-  detail: string;
-};
-
 type HealthPayload = {
   generatedAt: string;
   summary: {
@@ -86,17 +60,12 @@ type HealthPayload = {
     socialConnectionAttention: number;
     socialReconnectRequired: number;
     releaseIntegrityIssues: number;
-    releaseOverlayState: "managed" | "missing" | "invalid";
-    releaseOverlayDifferences: number;
-    releaseOverlayRuntimeReconciliation: number;
-    releaseOverlayHighCriticality: number;
     hostCapacityState: "healthy" | "warning" | "critical";
     diskUsedPercent: number;
     diskAvailableBytes: number;
   };
   workers: WorkerHealth[];
   releases: ReleaseIntegrity[];
-  overlay: ReleaseOverlay;
   host: {
     state: "healthy" | "warning" | "critical";
     checkedPath: string;
@@ -179,12 +148,6 @@ function formatBytes(bytes: number) {
 function capacityStateClasses(state: HealthPayload["host"]["state"]) {
   if (state === "healthy") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (state === "warning") return "border-amber-200 bg-amber-50 text-amber-800";
-  return "border-rose-200 bg-rose-50 text-rose-700";
-}
-
-function overlayStateClasses(state: ReleaseOverlay["state"]) {
-  if (state === "managed") return "border-blue-200 bg-blue-50 text-blue-700";
-  if (state === "missing") return "border-amber-200 bg-amber-50 text-amber-800";
   return "border-rose-200 bg-rose-50 text-rose-700";
 }
 
@@ -290,8 +253,6 @@ export function InfrastructureHealthPanel() {
     usageFailed > 0 ||
     data.summary.entitlementOverdue > 0 ||
     data.summary.releaseIntegrityIssues > 0 ||
-    data.summary.releaseOverlayState !== "managed" ||
-    data.summary.releaseOverlayHighCriticality > 0 ||
     data.summary.hostCapacityState !== "healthy" ||
     socialAttention > 0;
 
@@ -560,156 +521,6 @@ export function InfrastructureHealthPanel() {
             </article>
           ))}
         </div>
-      </div>
-
-      <div className="border-t border-slate-100 px-5 py-5 sm:px-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <GitCommit size={16} className="text-blue-600" />
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-                Source reconciliation
-              </p>
-            </div>
-            <h3 className="mt-1 text-sm font-semibold text-slate-950">
-              Production overlay inventory
-            </h3>
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
-              Separates verified runtime integrity from production-only source that still needs to be reconciled into Git. Inventory actions are review-only; no file is automatically deleted.
-            </p>
-          </div>
-          <span
-            className={
-              "rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] " +
-              overlayStateClasses(data.overlay.state)
-            }
-          >
-            {data.overlay.state}
-          </span>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Total differences
-            </p>
-            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-              {data.overlay.summary.totalDifferences.toLocaleString()}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-500">
-              canonical Git vs installed release
-            </p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Production-only
-            </p>
-            <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-              {data.overlay.summary.productionOnly.toLocaleString()}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-500">
-              files retained only in the release
-            </p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Runtime reconciliation
-            </p>
-            <p
-              className={
-                "mt-2 text-2xl font-semibold tracking-tight " +
-                (data.overlay.summary.runtimeReconciliation > 0
-                  ? "text-amber-800"
-                  : "text-emerald-700")
-              }
-            >
-              {data.overlay.summary.runtimeReconciliation.toLocaleString()}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-500">
-              source paths requiring deliberate Git review
-            </p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-              High criticality
-            </p>
-            <p
-              className={
-                "mt-2 text-2xl font-semibold tracking-tight " +
-                (data.overlay.summary.highCriticality > 0
-                  ? "text-rose-700"
-                  : "text-emerald-700")
-              }
-            >
-              {data.overlay.summary.highCriticality.toLocaleString()}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-500">
-              runtime-source differences
-            </p>
-          </article>
-        </div>
-
-        {Object.keys(data.overlay.byClassification).length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {Object.entries(data.overlay.byClassification)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 8)
-              .map(([classification, count]) => (
-                <span
-                  key={classification}
-                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600"
-                >
-                  {classification.replaceAll("_", " ")} · {count.toLocaleString()}
-                </span>
-              ))}
-          </div>
-        ) : null}
-
-        {data.overlay.samples.length > 0 ? (
-          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-            <div className="border-b border-slate-100 bg-slate-50 px-4 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Highest-priority reconciliation samples
-              </p>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {data.overlay.samples.slice(0, 8).map((entry) => (
-                <div
-                  key={entry.kind + ":" + entry.path}
-                  className="grid gap-2 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto]"
-                >
-                  <div className="min-w-0">
-                    <code className="block truncate text-[11px] font-semibold text-slate-700">
-                      {entry.path}
-                    </code>
-                    <p className="mt-1 text-[10px] text-slate-500">
-                      {entry.kind} · {entry.classification.replaceAll("_", " ")}
-                    </p>
-                  </div>
-                  <span
-                    className={
-                      "self-start rounded-full px-2 py-0.5 text-[9px] font-bold uppercase " +
-                      (entry.criticality === "high"
-                        ? "bg-rose-50 text-rose-700"
-                        : entry.criticality === "medium"
-                          ? "bg-amber-50 text-amber-800"
-                          : "bg-slate-100 text-slate-600")
-                    }
-                  >
-                    {entry.recommendedAction.replaceAll("_", " ")}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <p className="mt-3 text-[11px] leading-5 text-slate-500">
-          {data.overlay.detail}
-          {data.overlay.canonicalCommit ? (
-            <> Canonical reference: <code className="font-semibold text-slate-700">{shortCommit(data.overlay.canonicalCommit)}</code>.</>
-          ) : null}
-        </p>
       </div>
 
       <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-5 sm:p-6 md:grid-cols-2 xl:grid-cols-5">

@@ -5,26 +5,20 @@ import {
   Server,
   ShieldCheck,
   GitBranch,
-  Database,
   Activity,
   ExternalLink,
-  Pause,
-  Play,
 } from "lucide-react";
 
 import { getSession } from "../../lib/auth";
 import { loadWebsiteDetail } from "../../lib/modules/hosting-detail";
+import { loadHostingTargetIndex, targetStatusFor } from "../../lib/hosting/target-status";
 import {
-  pauseSite,
-  resumeSite,
-  forceSslRenew,
-  triggerDeploy,
-  triggerBackup,
 } from "../../lib/modules/hosting-server-actions";
 import { ConsolePageShell } from "../../components/ConsolePageShell";
 import { SectionCard } from "../../components/SectionCard";
 import { DataTable, StatusPill } from "../../components/DataTable";
 import { SubmitButton } from "../../components/SubmitButton";
+import { WebsiteTargetPanel } from "../../components/WebsiteTargetPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +31,10 @@ export default async function HostingDetailPage({
   if (!session) redirect("/console/login");
 
   const { id } = await params;
-  const site = await loadWebsiteDetail(id);
+  const [site, targetIndex] = await Promise.all([
+    loadWebsiteDetail(id),
+    loadHostingTargetIndex(),
+  ]);
   if (!site) notFound();
 
   const isActive = site.status === "active";
@@ -77,51 +74,91 @@ export default async function HostingDetailPage({
       }
     >
       {/* Action toolbar */}
+      {(() => {
+        const t = targetStatusFor(targetIndex, { id, domain: (site as any)?.domain ?? (site as any)?.primaryDomain });
+        return t?.blocked ? (
+          <>
+            {/* The panel carries the explanation and the evidence. Operations
+                then says only that actions are withheld and why, without
+                repeating the reasoning or leading with a VM number. */}
+            <SectionCard title="Website target">
+              <WebsiteTargetPanel status={t} />
+            </SectionCard>
+            <SectionCard title="Operations">
+              {/* Guest-modifying actions are not rendered at all for an
+                  unreconciled target. A disabled button with no explanation still
+                  advertises a capability; an explanation with no button states the
+                  situation and stops there. The backend refuses these regardless —
+                  this is so the operator knows before clicking, not after. */}
+              <div className="rounded-lg border border-rose-400/25 bg-rose-500/[0.06] p-4">
+                <p className="text-sm font-semibold text-white">Server-changing actions are unavailable</p>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-200">
+                  {t.headline} Until the target is reconciled, anything that would modify a server is
+                  withheld. Read-only information on this page remains available.
+                </p>
+                <Link
+                  href="/console/infrastructure"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-200 transition hover:border-rose-400/40 hover:bg-white/10"
+                >
+                  View reconciliation details <span aria-hidden>→</span>
+                </Link>
+              </div>
+            </SectionCard>
+          </>
+        ) : (
+      <>
+      {/* Shown for reconciled sites too. An operator should be able to see WHY a
+          site is considered settled, not only be told that it is — and it is the
+          same panel, so the two states cannot drift into different vocabularies. */}
+      {t ? (
+        <SectionCard title="Website target">
+          <WebsiteTargetPanel status={t} />
+        </SectionCard>
+      ) : null}
       <SectionCard title="Operations">
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          {isActive ? (
-            <form action={pauseSite}>
-              <input type="hidden" name="id" value={id} />
-              <input type="hidden" name="tenantId" value={site.tenantId || ""} />
-              <SubmitButton tone="warn">
-                <Pause className="h-3.5 w-3.5" /> Suspend site
-              </SubmitButton>
-            </form>
-          ) : (
-            <form action={resumeSite}>
-              <input type="hidden" name="id" value={id} />
-              <input type="hidden" name="tenantId" value={site.tenantId || ""} />
-              <SubmitButton tone="ok">
-                <Play className="h-3.5 w-3.5" /> Resume site
-              </SubmitButton>
-            </form>
-          )}
-          <form action={triggerDeploy}>
-            <input type="hidden" name="id" value={id} />
-            <input type="hidden" name="tenantId" value={site.tenantId || ""} />
-            <SubmitButton tone="accent">
-              <GitBranch className="h-3.5 w-3.5" /> Deploy latest
-            </SubmitButton>
-          </form>
-          <form action={forceSslRenew}>
-            <input type="hidden" name="id" value={id} />
-            <input type="hidden" name="tenantId" value={site.tenantId || ""} />
-            <SubmitButton>
-              <ShieldCheck className="h-3.5 w-3.5" /> Force SSL renew
-            </SubmitButton>
-          </form>
-          <form action={triggerBackup}>
-            <input type="hidden" name="id" value={id} />
-            <input type="hidden" name="tenantId" value={site.tenantId || ""} />
-            <SubmitButton>
-              <Database className="h-3.5 w-3.5" /> Run backup now
-            </SubmitButton>
-          </form>
+        {/* THE OPERATIONS BLOCK IS DELIBERATELY EMPTY OF CONTROLS.
+
+            Suspend and Resume were removed alongside Deploy / SSL renew / Backup,
+            for a different reason: they executed, but they did not achieve what
+            they promised. `pauseSite` wrote `UPDATE websites SET status =
+            'suspended'` and nothing else. The site kept serving.
+
+            Real enforcement exists on the edge — a `tenant-suspended.map` entry
+            makes nginx return 503 while leaving ACME challenges reachable — but
+            it could not honestly be wired yet:
+
+              · setEdgeSuspension returns ok for an EMPTY domain list
+              · only 16 of 65 edge vhosts include the enforcement snippet, so
+                just 3 of 7 real customer sites can be suspended at all
+              · the platform models 33 domains while the edge answers on 85
+                distinct server_names, so the control does not know the full
+                serving surface of a site
+
+            A control that cannot enumerate every hostname it must silence cannot
+            prove it suspended anything. Removed until the hostname model and the
+            edge coverage are reconciled. */}
+        <div className="rounded-lg border border-amber-400/25 bg-amber-500/[0.06] p-4">
+          <p className="text-sm font-semibold text-white">Operations are temporarily unavailable</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-200">
+            Suspending and resuming a site are unavailable from the Control Center until edge
+            enforcement covers every hostname a site answers on. Deploying, forcing an SSL renewal and
+            running a backup are unavailable while their execution path is reconciled.
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-300">
+            These are withheld rather than shown because each previously reported success without
+            achieving what it promised. Nothing about this site has changed, and no customer site is
+            affected.
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+            Read-only information on this page remains available, and the site continues to serve
+            normally.
+          </p>
         </div>
-        <p className="mt-3 text-[10px] text-slate-500">
-          Action buttons queue tasks in <code className="rounded bg-white/5 px-1 py-0.5 font-mono text-[10px] text-slate-300">provisioning_tasks</code>. Backend workers pick them up — typically completes in 30-120 seconds.
-        </p>
       </SectionCard>
+      </>
+        );
+      })()}
+
 
       {/* Top metrics */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

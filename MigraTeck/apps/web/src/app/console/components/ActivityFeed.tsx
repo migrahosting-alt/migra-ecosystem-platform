@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { Server, Receipt, Megaphone, Phone, Inbox, ShieldAlert, FileText } from "lucide-react";
+import { Server, Receipt, Megaphone, Phone, Inbox, ShieldAlert, FileText, Mail } from "lucide-react";
 
 export type ActivityEvent = {
   id: string;
-  kind: "hosting" | "billing" | "marketing" | "voice" | "intake" | "security" | "dns";
+  kind: "hosting" | "billing" | "marketing" | "voice" | "intake" | "security" | "dns" | "email";
   title: string;
   context?: string;
   actor?: string;
+  href?: string;
   isoTime: string;
   relativeTime: string;
 };
@@ -16,18 +17,32 @@ const ICONS: Record<ActivityEvent["kind"], { icon: React.ComponentType<{ classNa
   billing: { icon: Receipt, tone: "from-emerald-500/20 to-teal-500/20 text-emerald-300" },
   marketing: { icon: Megaphone, tone: "from-pink-500/20 to-rose-500/20 text-pink-300" },
   voice: { icon: Phone, tone: "from-rose-500/20 to-orange-500/20 text-rose-300" },
+  email: { icon: Mail, tone: "from-emerald-500/20 to-teal-500/20 text-emerald-300" },
   intake: { icon: Inbox, tone: "from-amber-500/20 to-yellow-500/20 text-amber-300" },
   security: { icon: ShieldAlert, tone: "from-violet-500/20 to-purple-500/20 text-violet-300" },
   dns: { icon: FileText, tone: "from-indigo-500/20 to-blue-500/20 text-indigo-300" },
 };
 
-export const ActivityFeed = ({ events }: { events: ReadonlyArray<ActivityEvent> }) => {
+export const ActivityFeed = ({
+  events,
+  sourceLabel,
+}: {
+  events: ReadonlyArray<ActivityEvent>;
+  /** Which source produced these rows. Required: this feed has a fallback path
+   *  that reads object CREATION times instead of audit events, and the operator
+   *  must be able to tell the two apart. */
+  sourceLabel: string;
+}) => {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-xl shadow-slate-950/30 backdrop-blur">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-base font-semibold text-white">Unified Activity Feed</h2>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-white">Unified Activity Feed</h2>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">{sourceLabel}</p>
+        </div>
         <Link
-          href="/console/analytics"
+          href="/console/activity"
+          prefetch
           className="text-[11px] font-medium text-fuchsia-300 hover:text-fuchsia-200"
         >
           View All
@@ -42,8 +57,8 @@ export const ActivityFeed = ({ events }: { events: ReadonlyArray<ActivityEvent> 
         <ul className="space-y-2.5">
           {events.map((evt) => {
             const Icon = ICONS[evt.kind].icon;
-            return (
-              <li key={evt.id} className="flex items-start gap-3">
+            const row = (
+              <>
                 <span
                   className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${ICONS[evt.kind].tone}`}
                 >
@@ -60,6 +75,22 @@ export const ActivityFeed = ({ events }: { events: ReadonlyArray<ActivityEvent> 
                 <time className="shrink-0 text-[11px] text-slate-500" dateTime={evt.isoTime}>
                   {evt.relativeTime}
                 </time>
+              </>
+            );
+
+            return (
+              <li key={evt.id}>
+                {evt.href ? (
+                  <Link
+                    href={evt.href}
+                    prefetch
+                    className="flex items-start gap-3 rounded-lg px-1 py-1 transition hover:bg-white/[0.03]"
+                  >
+                    {row}
+                  </Link>
+                ) : (
+                  <div className="flex items-start gap-3">{row}</div>
+                )}
               </li>
             );
           })}

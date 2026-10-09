@@ -2,23 +2,41 @@ import type { ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { panelQuery, isPanelDbConfigured } from "../lib/db";
+import { OPEN_TICKET_PREDICATE } from "../lib/support-tickets";
 
 export type ShellSession = {
   email: string;
 };
 
+/**
+ * Badge counts for every console page that uses this shell.
+ *
+ * These previously counted `chat_tickets` — the retired generation of the
+ * support schema (1 row, closed, last written 2026-02-09). Every page in the
+ * console therefore showed 0 open tickets while 7 were genuinely open. The
+ * Universe page was fixed on Day 1; this is the same defect in the shared shell,
+ * which is what the other ~20 pages render through.
+ *
+ * Now uses the one canonical predicate (lib/support-tickets.ts), so the shell,
+ * the Universe tile and /console/support cannot disagree.
+ */
 const loadCounts = async (): Promise<{ notifications: number; messages: number }> => {
   if (!isPanelDbConfigured()) return { notifications: 0, messages: 0 };
-  const rows = await panelQuery<{ open: string; unread: string }>(
-    `SELECT
-       (SELECT COUNT(*)::int FROM chat_tickets WHERE status NOT IN ('closed','resolved'))::text AS open,
-       (SELECT COUNT(*)::int FROM chat_tickets WHERE status = 'new' AND assigned_to IS NULL)::text AS unread`,
-  );
-  const r = rows[0];
-  return {
-    notifications: r ? Number(r.open) : 0,
-    messages: r ? Number(r.unread) : 0,
-  };
+  try {
+    const rows = await panelQuery<{ open: string; unassigned: string }>(
+      `SELECT
+         (SELECT COUNT(*)::int FROM chat_conversations
+           WHERE ${OPEN_TICKET_PREDICATE})::text AS open,
+         (SELECT COUNT(*)::int FROM chat_conversations
+           WHERE ${OPEN_TICKET_PREDICATE} AND "assignedUserId" IS NULL)::text AS unassigned`,
+    );
+    const r = rows[0];
+    if (!r) return { notifications: 0, messages: 0 };
+    return { notifications: Number(r.unassigned) || 0, messages: Number(r.open) || 0 };
+  } catch {
+    // A badge is a convenience; a failed count must not take down every page.
+    return { notifications: 0, messages: 0 };
+  }
 };
 
 export const ConsolePageShell = async ({
@@ -27,6 +45,9 @@ export const ConsolePageShell = async ({
   title,
   subtitle,
   actions,
+  showPageHeader = true,
+  viewportLocked = false,
+  mainClassName,
   children,
 }: {
   session: ShellSession;
@@ -34,15 +55,30 @@ export const ConsolePageShell = async ({
   title: string;
   subtitle?: string | undefined;
   actions?: ReactNode;
+  showPageHeader?: boolean;
+  viewportLocked?: boolean;
+  mainClassName?: string;
   children: ReactNode;
 }) => {
   const display = session.email.split("@")[0] || "Admin";
   const counts = await loadCounts();
 
   return (
-    <div className="flex min-h-screen">
+    <div className={viewportLocked ? "flex h-screen overflow-hidden" : "flex min-h-screen"}>
       <Sidebar activePath={activePath} />
-      <div className="flex flex-1 flex-col">
+      {/* min-w-0 is load-bearing, and it is a LAYOUT INVARIANT of the shell, not
+          a per-page choice. A flex child defaults to min-width:auto, so this
+          column cannot shrink below the widest thing any page puts inside it —
+          a wide table, a code block, a long unbroken string. Below the lg
+          breakpoint, where the sidebar is already hidden, that pushes the whole
+          document wider than the viewport and the PAGE scrolls sideways instead
+          of the wide element scrolling inside its own overflow container.
+
+          Proven on Overview (page.tsx), which renders its own shell and was
+          fixed there first; /console/ecosystem was measured at 390px and 768px
+          still overflowing because it goes through THIS component, as do 47
+          console pages. */}
+      <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
           session={{
             displayName: display,
@@ -51,10 +87,20 @@ export const ConsolePageShell = async ({
             avatarUrl: null,
           }}
           notifications={counts.notifications}
+          notificationsLabel="Unassigned tickets"
+          notificationsUnit="ticket"
+          notificationsHref="/console/support"
           messages={counts.messages}
         />
-        <main className="flex-1 space-y-4 p-6 lg:p-8">
-          <PageHeader title={title} subtitle={subtitle} actions={actions} />
+        <main
+          className={
+            mainClassName ||
+            (viewportLocked
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden p-6 lg:p-8"
+              : "flex-1 space-y-4 p-6 lg:p-8")
+          }
+        >
+          {showPageHeader ? <PageHeader title={title} subtitle={subtitle} actions={actions} /> : null}
           {children}
         </main>
       </div>

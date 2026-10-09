@@ -1,5 +1,64 @@
 import { panelQuery, isPanelDbConfigured } from "../db";
-import { buildClientByEmailQuery } from "./client-lookup-query";
+
+/**
+ * WHO COUNTS AS A CLIENT — one definition, used by every surface.
+ *
+ * Overview's "Clients" card counted `tenants WHERE COALESCE(is_active, TRUE)`,
+ * which is every tenant row that has not been switched off: internal tenants,
+ * the premium test account and any partner or system tenant included. That is a
+ * database row count presented as a commercial fact.
+ *
+ * `tenant_type` is the column that separates them, and it defaults to CLIENT,
+ * so this predicate only excludes rows somebody explicitly typed as something
+ * else. It cannot silently drop a real customer.
+ *
+ * Exported so the Overview card and the client inventory read the SAME rule —
+ * the pattern that stopped the open-ticket count and the support queue from
+ * disagreeing. If this definition changes, it changes in one place.
+ */
+export const COMMERCIAL_CLIENT_PREDICATE =
+  `COALESCE(tenant_type, 'CLIENT') = 'CLIENT' AND COALESCE(is_active, TRUE) = TRUE`;
+
+export const COMMERCIAL_CLIENT_SOURCE =
+  "panel DB · tenants where tenant_type = CLIENT and is_active (internal/test tenants excluded)";
+
+export interface CommercialClientCount {
+  /** null means not measured — render an em dash, never 0. */
+  count: number | null;
+  /** How many tenant rows were excluded as non-commercial, when known. */
+  excluded: number | null;
+  reason?: string;
+  source: string;
+}
+
+export const loadCommercialClientCount = async (): Promise<CommercialClientCount> => {
+  if (!isPanelDbConfigured()) {
+    return { count: null, excluded: null, reason: "panel database not configured", source: COMMERCIAL_CLIENT_SOURCE };
+  }
+  try {
+    const rows = await panelQuery<{ clients: string; total: string }>(
+      `SELECT COUNT(*) FILTER (WHERE ${COMMERCIAL_CLIENT_PREDICATE})::int AS clients,
+              COUNT(*) FILTER (WHERE COALESCE(is_active, TRUE) = TRUE)::int AS total
+         FROM tenants`,
+    );
+    const r = rows[0];
+    if (!r) return { count: null, excluded: null, reason: "client query returned no result", source: COMMERCIAL_CLIENT_SOURCE };
+    const clients = Number(r.clients);
+    const total = Number(r.total);
+    if (!Number.isFinite(clients)) {
+      return { count: null, excluded: null, reason: "client count was not numeric", source: COMMERCIAL_CLIENT_SOURCE };
+    }
+    return {
+      count: clients,
+      excluded: Number.isFinite(total) ? total - clients : null,
+      source: COMMERCIAL_CLIENT_SOURCE,
+    };
+  } catch {
+    return { count: null, excluded: null, reason: "client query failed", source: COMMERCIAL_CLIENT_SOURCE };
+  }
+};
+
+
 
 export type ClientListItem = {
   id: string;
@@ -19,7 +78,7 @@ export type ClientDetail = {
   status: string;
   tenantType: string;
   createdAt: string | null;
-  domains: ReadonlyArray<{ id: string; domain: string; status: string }>;
+  domains: ReadonlyArray<{ id: string; domain: string; status: string; autorenew: boolean }>;
   subscriptions: ReadonlyArray<{
     id: string;
     status: string;
@@ -29,7 +88,7 @@ export type ClientDetail = {
     createdAt: string | null;
   }>;
   invoices: ReadonlyArray<{ id: string; status: string; total: number; createdAt: string | null }>;
-  mailboxes: ReadonlyArray<{ id: string; address: string; status: string }>;
+  mailboxes: ReadonlyArray<{ id: string; address: string; status: string; hasPassword: boolean }>;
   websites: ReadonlyArray<{ id: string; domain: string | null; status: string }>;
 };
 
@@ -37,6 +96,13 @@ export type ClientsQuery = {
   q?: string;
   status?: string;
   limit?: number;
+  /** Restrict to the commercial-client population — the exact predicate the
+   *  Overview card counts with. Applied in SQL, not by post-filtering the
+   *  returned rows: filtering afterwards on tenantType alone reproduced the
+   *  original defect from the other side (the page showed 26 rows under a
+   *  banner that said 10, because the row filter dropped the is_active half of
+   *  the predicate). One predicate, one place. */
+  commercialOnly?: boolean;
 };
 
 export const loadAllClients = async (
@@ -52,7 +118,9 @@ export const loadAllClients = async (
 
   // Build dynamic WHERE clause defensively — only include the filters that are
   // set, and parameterize every value to keep this injection-safe.
-  const where: string[] = ["COALESCE(t.is_active, TRUE) = TRUE OR t.status IS NOT NULL"];
+  const where: string[] = query.commercialOnly
+    ? [COMMERCIAL_CLIENT_PREDICATE.replace(/tenant_type/g, "t.tenant_type").replace(/is_active/g, "t.is_active")]
+    : ["COALESCE(t.is_active, TRUE) = TRUE OR t.status IS NOT NULL"];
   const params: Array<string | number | boolean | null | Date> = [];
 
   if (q) {
@@ -127,23 +195,6 @@ export const loadDistinctClientStatuses = async (): Promise<string[]> => {
   return Array.from(seen).sort();
 };
 
-/**
- * Resolves a customer by an inbound email address — matching either the tenant's
- * billing email or one of its mailbox addresses — then returns the full detail.
- * Used by the Mail module's sender → customer context panel. Read-only, reuses
- * the same migrapanel access as the Clients module (no new cross-DB access).
- */
-export const loadClientByEmail = async (email: string): Promise<ClientDetail | null> => {
-  if (!isPanelDbConfigured()) return null;
-  // Precedence and tiebreaks live in buildClientByEmailQuery so the rule is testable and
-  // cannot drift into an arbitrary planner-order result again.
-  const built = buildClientByEmailQuery(email);
-  if (!built) return null;
-  const rows = await panelQuery<{ id: string }>(built.sql, built.params);
-  if (rows.length === 0) return null;
-  return loadClientDetail(rows[0]!.id);
-};
-
 export const loadClientDetail = async (id: string): Promise<ClientDetail | null> => {
   if (!isPanelDbConfigured()) return null;
   const baseRows = await panelQuery<{
@@ -168,8 +219,9 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
   const base = baseRows[0]!;
 
   const [domains, subs, invoices, mailboxes, websites] = await Promise.all([
-    panelQuery<{ id: string; domain: string; status: string }>(
-      `SELECT id, domain, status FROM domains WHERE "tenantId" = $1 ORDER BY "createdAt" DESC`,
+    panelQuery<{ id: string; domain: string; status: string; autorenew: boolean | null }>(
+      `SELECT id, domain, status, COALESCE(autorenew, FALSE) AS autorenew
+         FROM domains WHERE "tenantId" = $1 ORDER BY "createdAt" DESC`,
       [id],
     ),
     panelQuery<{
@@ -192,8 +244,9 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
          FROM invoices WHERE tenantid = $1 ORDER BY createdat DESC LIMIT 20`,
       [id],
     ),
-    panelQuery<{ id: string; address: string; status: string }>(
-      `SELECT id, address, COALESCE(status, 'active') AS status
+    panelQuery<{ id: string; address: string; status: string; haspassword: boolean }>(
+      `SELECT id, address, COALESCE(status, 'active') AS status,
+              CASE WHEN passwordhash IS NOT NULL AND LENGTH(TRIM(passwordhash)) > 0 THEN TRUE ELSE FALSE END AS haspassword
          FROM mailboxes WHERE tenantid = $1`,
       [id],
     ),
@@ -210,7 +263,12 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
     status: base.status,
     tenantType: base.tenanttype,
     createdAt: base.createdat,
-    domains,
+    domains: domains.map((domain) => ({
+      id: domain.id,
+      domain: domain.domain,
+      status: domain.status,
+      autorenew: !!domain.autorenew,
+    })),
     subscriptions: subs.map((s) => ({
       id: s.id,
       status: s.status,
@@ -225,7 +283,12 @@ export const loadClientDetail = async (id: string): Promise<ClientDetail | null>
       total: Number(i.total) || 0,
       createdAt: i.createdat,
     })),
-    mailboxes,
+    mailboxes: mailboxes.map((mailbox) => ({
+      id: mailbox.id,
+      address: mailbox.address,
+      status: mailbox.status,
+      hasPassword: mailbox.haspassword,
+    })),
     websites,
   };
 };

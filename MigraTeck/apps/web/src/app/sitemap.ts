@@ -16,6 +16,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/company",
     "/security",
     "/legal",
+    "/support/elize-foundation-mail",
   ];
 
   return [

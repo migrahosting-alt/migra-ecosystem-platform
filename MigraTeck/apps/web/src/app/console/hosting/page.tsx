@@ -2,21 +2,38 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "../lib/auth";
 import { loadHostingData, loadHostingKpis } from "../lib/modules/hosting";
+import { loadHostingTargetIndex, targetStatusFor } from "../lib/hosting/target-status";
 import { ConsolePageShell } from "../components/ConsolePageShell";
+import { FocusBanner } from "../components/FocusBanner";
 import { SectionCard } from "../components/SectionCard";
 import { DataTable, StatusPill } from "../components/DataTable";
+import { TargetStatePill } from "../components/WebsiteTargetPanel";
 import { StatsRow } from "../components/StatsRow";
 
 export const dynamic = "force-dynamic";
 
-export default async function HostingPage() {
+export default async function HostingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string }>;
+}) {
   const session = await getSession();
   if (!session) redirect("/console/login");
 
-  const [{ websites, deployments, tasks }, kpis] = await Promise.all([
+  const [{ websites, deployments, tasks }, kpis, targetIndex] = await Promise.all([
     loadHostingData(),
     loadHostingKpis(),
+    loadHostingTargetIndex(),
   ]);
+
+  // Focused arrival from Overview's "Active websites" card. kpis.activeSites is
+  // computed with the SAME predicate Overview counts with (status = 'active'),
+  // so the number on the card and the number here cannot drift. The website
+  // list itself is capped at 50, so if the cap bites, the banner says so rather
+  // than quietly showing fewer than the card promised.
+  const focusKey = (await searchParams).focus;
+  const focusedActive = focusKey === "active";
+  const shownWebsites = focusedActive ? websites.filter((w) => w.status === "active") : websites;
 
   return (
     <ConsolePageShell
@@ -33,6 +50,41 @@ export default async function HostingPage() {
         </Link>
       }
     >
+      {focusedActive ? (
+        <FocusBanner
+          shown={shownWebsites.length}
+          total={kpis.activeSites}
+          noun="active websites"
+          because="Websites whose status is active — the same count the Overview card reports, from the same predicate."
+          clearHref="/console/hosting"
+          {...(shownWebsites.length < kpis.activeSites
+            ? { excluded: `${kpis.activeSites - shownWebsites.length} more are active but fall outside the 50 most recent websites loaded here.` }
+            : {})}
+        />
+      ) : null}
+
+      {/* Operator preflight. The backend guard is the authority; this exists so
+          nobody is invited into an action that is already known to be refused. */}
+      {targetIndex.available && targetIndex.unreconciled > 0 ? (
+        <section className="rounded-xl border border-rose-400/25 bg-rose-500/[0.06] p-4">
+          <h2 className="text-sm font-semibold text-white">Target reconciliation required</h2>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-200">
+            {targetIndex.unreconciled} of {targetIndex.total} websites record a hosting target that does
+            not match an authorized customer workload. Server-changing actions on those sites are
+            temporarily blocked for safety.{" "}
+            <strong className="text-white">The sites themselves are not necessarily offline</strong> —
+            this is about where the platform believes their server is. Each row below carries its own
+            target state.
+          </p>
+          <Link
+            href="/console/infrastructure"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-200 transition hover:border-rose-400/40 hover:bg-white/10"
+          >
+            View reconciliation details <span aria-hidden>→</span>
+          </Link>
+        </section>
+      ) : null}
+
       <StatsRow
         stats={[
           { label: "Total Sites", value: kpis.totalSites },
@@ -61,6 +113,17 @@ export default async function HostingPage() {
             { key: "client", header: "Client", render: (w) => w.tenantName || "—" },
             { key: "status", header: "Status", render: (w) => <StatusPill status={w.status} /> },
             {
+              key: "target",
+              header: "Target",
+              /* Same status object the detail page renders, from the same
+                 control-plane resolver. No second summary logic: if this column
+                 and the website page ever disagreed, the operator would have no
+                 way to tell which one was lying. */
+              render: (w) => (
+                <TargetStatePill status={targetStatusFor(targetIndex, { id: w.id, domain: w.domain })} />
+              ),
+            },
+            {
               key: "updated",
               header: "Updated",
               render: (w) =>
@@ -88,7 +151,7 @@ export default async function HostingPage() {
               ),
             },
           ]}
-          rows={websites}
+          rows={shownWebsites}
           rowKey={(w) => w.id}
           emptyTitle="No websites yet"
           emptyDescription="Add your first hosting account to get started."

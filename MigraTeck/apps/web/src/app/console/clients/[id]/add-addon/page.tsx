@@ -220,15 +220,15 @@ async function addAddon(formData: FormData) {
     try {
       await panelExec(
         `INSERT INTO orders
-           (id, tenantid, status, currency, subtotal, total, createdat, updated_at)
-         VALUES ($1, $2, 'pending', 'USD', $3, $3, NOW(), NOW())`,
+           (id, tenantid, status, currency, subtotal, total, createdat)
+         VALUES ($1, $2, 'pending', 'USD', $3, $3, NOW())`,
         [orderId, tenantId, proration.prorated],
       );
       await panelExec(
         `INSERT INTO order_items
-           (id, orderid, productid, qty, unitprice, total, createdat)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [randomUUID(), orderId, productId, qty, +(proration.prorated / qty).toFixed(2), proration.prorated],
+           (id, orderid, productid, qty, unitprice, createdat)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [randomUUID(), orderId, productId, qty, +(proration.prorated / qty).toFixed(2)],
       );
       await logClientEvent({
         tenantId, actorEmail: actor, action: "order.add",
@@ -364,7 +364,7 @@ export default async function AddAddonPage({
             Charge prorated amount for the remainder of the current period
           </label>
           <p className="text-[10px] text-slate-500">
-            Recommended. Computes the partial-period charge from the parent subscription&apos;s start date and billing cycle,
+            Recommended. Computes the partial-period charge from the parent subscription's start date and billing cycle,
             then creates a one-shot order. Uncheck if the customer should only be charged starting at the next renewal.
           </p>
         </div>

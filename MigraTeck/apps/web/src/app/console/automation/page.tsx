@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "../lib/auth";
-import { loadAutomationData } from "../lib/modules/automation";
+import { loadAutomationData, loadRunsByStatus } from "../lib/modules/automation";
+import { FocusBanner } from "../components/FocusBanner";
 import { ConsolePageShell } from "../components/ConsolePageShell";
 import { SectionCard } from "../components/SectionCard";
 import { DataTable, StatusPill } from "../components/DataTable";
@@ -9,10 +10,21 @@ import { StatsRow } from "../components/StatsRow";
 
 export const dynamic = "force-dynamic";
 
-export default async function AutomationPage() {
+export default async function AutomationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string }>;
+}) {
   const session = await getSession();
   if (!session) redirect("/console/login");
   const { jobs, runs, webhooks } = await loadAutomationData();
+
+  // Focused arrival from Overview's "Execution integrity" item. The normal runs
+  // list is the 50 most recent, which would silently under-report the set
+  // Overview counted, so a focused view queries that status directly.
+  const focusKey = (await searchParams).focus;
+  const focused = focusKey === "running" ? await loadRunsByStatus("running") : null;
+  const shownRuns = focused ? focused.runs : runs;
 
   const activeJobs = jobs.filter((j) => j.status === "active").length;
   const succeeded = runs.filter((r) => r.status === "succeeded").length;
@@ -34,6 +46,19 @@ export default async function AutomationPage() {
         </Link>
       }
     >
+      {focused ? (
+        <FocusBanner
+          shown={focused.runs.length}
+          total={focused.total}
+          noun="job runs"
+          because="Runs still recorded as running. These predate execution leases, so they carry no lease metadata and are preserved as evidence pending reconciliation — they are not necessarily executing now."
+          clearHref="/console/automation"
+          {...(focused.runs.length < focused.total
+            ? { excluded: `${focused.total - focused.runs.length} more match but are not listed here (display cap).` }
+            : {})}
+        />
+      ) : null}
+
       <StatsRow
         stats={[
           { label: "Jobs", value: jobs.length },
@@ -83,7 +108,7 @@ export default async function AutomationPage() {
           />
         </SectionCard>
 
-        <SectionCard title="Recent Runs">
+        <SectionCard title={focused ? "Runs in the running state" : "Recent Runs"}>
           <DataTable
             columns={[
               { key: "job", header: "Job", render: (r) => r.jobName || r.jobId || r.id },
@@ -94,7 +119,7 @@ export default async function AutomationPage() {
                 render: (r) => r.startedAt ? new Date(r.startedAt).toLocaleString() : "—",
               },
             ]}
-            rows={runs}
+            rows={shownRuns}
             rowKey={(r) => r.id}
             emptyTitle="No runs yet"
           />

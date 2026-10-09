@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { Plus, Settings } from "lucide-react";
 
 import { getSession } from "../lib/auth";
-import { loadAllClients, loadDistinctClientStatuses } from "../lib/modules/clients";
+import { loadAllClients, loadDistinctClientStatuses, loadCommercialClientCount } from "../lib/modules/clients";
 import { ConsolePageShell } from "../components/ConsolePageShell";
+import { FocusBanner } from "../components/FocusBanner";
 import { SectionCard } from "../components/SectionCard";
 import { DataTable, StatusPill } from "../components/DataTable";
 import { StatsRow } from "../components/StatsRow";
@@ -14,7 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<{ q?: string; status?: string; focus?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/console/login");
@@ -23,10 +25,21 @@ export default async function ClientsPage({
   const q = (sp.q || "").trim();
   const statusFilter = (sp.status || "").trim();
 
-  const [clients, statuses] = await Promise.all([
-    loadAllClients({ q, status: statusFilter, limit: 500 }),
+  // Focused arrival from Overview's "Clients" card. That card counts COMMERCIAL
+  // clients (tenant_type = CLIENT), not every tenant row, so the focused list
+  // must be the same population or the card and the inventory would disagree
+  // the moment an internal or test tenant exists.
+  const focusCommercial = (sp.focus || "") === "commercial";
+
+  const [clients, statuses, commercial] = await Promise.all([
+    loadAllClients({ q, status: statusFilter, limit: 500, ...(focusCommercial ? { commercialOnly: true } : {}) }),
     loadDistinctClientStatuses(),
+    focusCommercial ? loadCommercialClientCount() : Promise.resolve(null),
   ]);
+
+  // No post-filter: the query above already applied the commercial predicate,
+  // so these rows ARE the population the Overview card counted.
+  const shownClients = clients;
 
   const now = new Date();
   const activeCount = clients.filter((c) => c.status === "active").length;
@@ -61,6 +74,19 @@ export default async function ClientsPage({
         </Link>
       }
     >
+      {focusCommercial && commercial ? (
+        <FocusBanner
+          shown={shownClients.length}
+          total={commercial.count ?? shownClients.length}
+          noun="commercial clients"
+          because="Tenants typed CLIENT and still active — the population the Overview card counts. Internal, test and system tenants are tenant rows, not customers, and are excluded."
+          clearHref="/console/clients"
+          {...(commercial.excluded && commercial.excluded > 0
+            ? { excluded: `${commercial.excluded} active tenant row(s) are not commercial clients and are not shown.` }
+            : {})}
+        />
+      ) : null}
+
       <StatsRow
         stats={[
           { label: "Total Clients", value: clients.length },
@@ -96,13 +122,21 @@ export default async function ClientsPage({
               header: "",
               align: "right" as const,
               render: (c) => (
-                <Link href={`/console/clients/${c.id}`} className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white">
-                  View
-                </Link>
+                <div className="inline-flex items-center gap-1">
+                  <Link href={`/console/clients/${c.id}`} className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white">
+                    View
+                  </Link>
+                  <Link href={`/console/clients/${c.id}/add-service`} className="rounded-md border border-fuchsia-400/30 bg-fuchsia-500/10 px-2 py-1 text-[10px] font-medium text-fuchsia-200 transition hover:bg-fuchsia-500/20">
+                    <Plus className="inline h-3 w-3" /> Service
+                  </Link>
+                  <Link href={`/console/clients/${c.id}/edit`} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white">
+                    <Settings className="inline h-3 w-3" />
+                  </Link>
+                </div>
               ),
             },
           ]}
-          rows={clients}
+          rows={shownClients}
           rowKey={(c) => c.id}
           emptyTitle={filtered ? "No matches" : "No clients yet"}
           emptyDescription={

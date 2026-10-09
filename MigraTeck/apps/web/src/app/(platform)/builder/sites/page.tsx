@@ -16,9 +16,6 @@ export const dynamic = "force-dynamic";
 export default async function BuilderSitesPage() {
   ensureAuthClientInitialized();
   const session = await requirePermission("platform.read");
-  if (!session) {
-    throw new Error("Authenticated platform session is required");
-  }
   const commercial = await getCommercialSnapshot(session.activeOrgId);
   const currentPlan = getCurrentCommercialPlan(commercial.subscriptions);
   const builderEnabled = hasProductAccess(commercial.entitlements, "builder");

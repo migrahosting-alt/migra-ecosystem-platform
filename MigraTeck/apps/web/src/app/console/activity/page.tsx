@@ -8,6 +8,7 @@ import {
   loadDistinctActions,
   describeAction,
 } from "../lib/modules";
+import { loadTenantHeader } from "../lib/modules/tenants";
 import { tenantPath } from "../lib/urls";
 import { ConsolePageShell } from "../components/ConsolePageShell";
 import { SectionCard } from "../components/SectionCard";
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function GlobalActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; action?: string; failures?: string }>;
+  searchParams: Promise<{ q?: string; action?: string; failures?: string; tenantId?: string; returnTo?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/console/login");
@@ -27,15 +28,19 @@ export default async function GlobalActivityPage({
   const q = (sp.q || "").trim();
   const action = (sp.action || "").trim();
   const failuresOnly = sp.failures === "1";
+  const tenantId = (sp.tenantId || "").trim();
+  const returnTo = (sp.returnTo || "").trim();
 
-  const [events, distinctActions] = await Promise.all([
+  const [events, distinctActions, tenant] = await Promise.all([
     loadAllRecentEvents({
       ...(q && { q }),
       ...(action && { actions: [action] }),
+      ...(tenantId && { tenantId }),
       failuresOnly,
       limit: 200,
     }),
     loadDistinctActions(60),
+    tenantId ? loadTenantHeader(tenantId) : Promise.resolve(null),
   ]);
 
   const failureCount = events.filter((e) => e.result === "failure").length;
@@ -47,7 +52,7 @@ export default async function GlobalActivityPage({
       title="Activity"
       subtitle={`${events.length} recent event${events.length === 1 ? "" : "s"}${
         failuresOnly ? " · failures only" : ""
-      }`}
+      }${tenant ? ` · ${tenant.name}` : ""}`}
     >
       <SectionCard
         title={
@@ -56,14 +61,28 @@ export default async function GlobalActivityPage({
             All client events
           </span>
         }
-        subtitle="Every lifecycle action, note, contact change, order, and worker task — across every client."
+        subtitle={
+          tenant
+            ? `Lifecycle actions, notes, contacts, orders, and worker tasks for ${tenant.name}.`
+            : "Every lifecycle action, note, contact change, order, and worker task — across every client."
+        }
         actions={
-          failureCount > 0 ? (
-            <span className="inline-flex items-center gap-1 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[10px] font-medium text-rose-200">
-              <AlertTriangle className="h-3 w-3" />
-              {failureCount} failure{failureCount === 1 ? "" : "s"}
-            </span>
-          ) : null
+          <div className="flex items-center gap-2">
+            {tenant && returnTo ? (
+              <Link
+                href={returnTo}
+                className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-medium text-slate-300 transition hover:bg-white/10"
+              >
+                Back to Client
+              </Link>
+            ) : null}
+            {failureCount > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[10px] font-medium text-rose-200">
+                <AlertTriangle className="h-3 w-3" />
+                {failureCount} failure{failureCount === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
         }
       >
         <div className="mb-3">

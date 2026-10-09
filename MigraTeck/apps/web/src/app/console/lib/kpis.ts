@@ -6,6 +6,7 @@ export type Kpi = {
   raw: number;
   delta: { direction: "up" | "down" | "flat"; pct: number | null };
   hint?: string;
+  href?: string;
 };
 
 export type KpiSet = {
@@ -29,12 +30,12 @@ const fmtUsd = (n: number) =>
 const emptyDelta = { direction: "flat" as const, pct: null };
 
 const fallback = (): KpiSet => ({
-  totalClients: { label: "Total Clients", value: "0", raw: 0, delta: emptyDelta },
-  activeServices: { label: "Active Services", value: "0", raw: 0, delta: emptyDelta },
-  monthlyRevenue: { label: "Monthly Revenue", value: "$0", raw: 0, delta: emptyDelta },
-  openTickets: { label: "Open Tickets", value: "0", raw: 0, delta: emptyDelta },
-  automationRuns: { label: "Automation Runs", value: "0", raw: 0, delta: emptyDelta },
-  platformHealth: { label: "Platform Health", value: "Unknown", raw: 0, delta: emptyDelta, hint: "—" },
+  totalClients: { label: "Total Clients", value: "0", raw: 0, delta: emptyDelta, href: "/console/clients" },
+  activeServices: { label: "Active Services", value: "0", raw: 0, delta: emptyDelta, href: "/console/billing" },
+  monthlyRevenue: { label: "Monthly Revenue", value: "$0", raw: 0, delta: emptyDelta, href: "/console/billing" },
+  openTickets: { label: "Open Tickets", value: "0", raw: 0, delta: emptyDelta, href: "/console/support" },
+  automationRuns: { label: "Automation Runs", value: "0", raw: 0, delta: emptyDelta, href: "/console/automation" },
+  platformHealth: { label: "Platform Health", value: "Unknown", raw: 0, delta: emptyDelta, hint: "—", href: "/console/security" },
   configured: false,
 });
 
@@ -87,26 +88,23 @@ export const loadKpis = async (): Promise<KpiSet> => {
     panelQuery<{ count: string }>(
       `SELECT COUNT(*)::int AS count FROM chat_tickets WHERE status NOT IN ('closed','resolved')`
     ),
+    Promise.resolve([{ count: "0" }] as Array<{ count: string }>),
     panelQuery<{ count: string }>(
       `SELECT COUNT(*)::int AS count
-         FROM chat_tickets
-        WHERE status NOT IN ('closed','resolved')
-          AND created_at <= NOW() - INTERVAL '30 days'`
+         FROM job_runs
+        WHERE COALESCE("startedAt", "createdAt") >= date_trunc('month', NOW())`
     ),
     panelQuery<{ count: string }>(
       `SELECT COUNT(*)::int AS count FROM job_runs
-        WHERE "startedAt" >= date_trunc('month', NOW())`
-    ),
-    panelQuery<{ count: string }>(
-      `SELECT COUNT(*)::int AS count FROM job_runs
-        WHERE "startedAt" >= date_trunc('month', NOW() - INTERVAL '1 month')
-          AND "startedAt" <  date_trunc('month', NOW())`
+        WHERE COALESCE("startedAt", "createdAt") >= date_trunc('month', NOW() - INTERVAL '1 month')
+          AND COALESCE("startedAt", "createdAt") <  date_trunc('month', NOW())`
     ),
     panelQuery<{ status: string; count: string }>(
       `SELECT status, COUNT(*)::int AS count
          FROM (
-           SELECT DISTINCT ON (integration_key) status
+           SELECT DISTINCT ON (integration_key) integration_key, status
              FROM integration_health_checks
+            WHERE checked_at >= NOW() - INTERVAL '15 minutes'
             ORDER BY integration_key, checked_at DESC
          ) latest
         GROUP BY status`
@@ -169,30 +167,35 @@ export const loadKpis = async (): Promise<KpiSet> => {
       value: fmtNumber(clientsNow),
       raw: clientsNow,
       delta: computeDelta(clientsNow, clientsPrev),
+      href: "/console/clients",
     },
     activeServices: {
       label: "Active Services",
       value: fmtNumber(subsNow),
       raw: subsNow,
       delta: computeDelta(subsNow, subsPrev),
+      href: "/console/billing",
     },
     monthlyRevenue: {
       label: "Monthly Revenue",
       value: fmtUsd(revNow),
       raw: revNow,
       delta: computeDelta(revNow, revPrev),
+      href: "/console/billing",
     },
     openTickets: {
       label: "Open Tickets",
       value: fmtNumber(openTickets),
       raw: openTickets,
-      delta: computeDelta(openTickets, openTicketsPrev),
+      delta: openTickets === 0 ? emptyDelta : computeDelta(openTickets, openTicketsPrev),
+      href: "/console/support",
     },
     automationRuns: {
       label: "Automation Runs",
       value: fmtNumber(autoNow),
       raw: autoNow,
       delta: computeDelta(autoNow, autoPrev),
+      href: "/console/automation",
     },
     platformHealth: {
       label: "Platform Health",
@@ -200,6 +203,7 @@ export const loadKpis = async (): Promise<KpiSet> => {
       raw: totalCount === 0 ? 0 : Math.round((healthyN / totalCount) * 100),
       delta: emptyDelta,
       hint: healthHint,
+      href: "/console/security",
     },
     configured: true,
   };

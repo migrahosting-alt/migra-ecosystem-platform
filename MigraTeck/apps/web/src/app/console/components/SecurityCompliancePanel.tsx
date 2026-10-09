@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export type SecurityComplianceData = {
   loginAnomalies: { count: number; period: string };
   backups: { successPct: number; period: string };
@@ -30,9 +32,13 @@ export const SecurityCompliancePanel = ({ data }: { data: SecurityComplianceData
     <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 shadow-xl shadow-slate-950/30 backdrop-blur">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-base font-semibold text-white">Security &amp; Compliance</h2>
-        <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-400">
-          Risk Score
-        </span>
+        <Link
+          href="/console/security"
+          prefetch
+          className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-400 transition hover:bg-white/10 hover:text-white"
+        >
+          Open Security
+        </Link>
       </div>
 
       <div className="grid grid-cols-5 gap-3">

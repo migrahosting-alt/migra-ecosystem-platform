@@ -13,11 +13,24 @@ const KIND_MAP: Record<string, ActivityEvent["kind"]> = {
   campaign: "marketing",
   voice: "voice",
   voicemail: "voice",
+  email: "email",
+  mailbox: "email",
   intake: "intake",
   form: "intake",
   security: "security",
   login: "security",
   auth: "security",
+};
+
+const KIND_HREF: Record<ActivityEvent["kind"], string> = {
+  hosting: "/console/hosting",
+  billing: "/console/billing",
+  marketing: "/console/marketing",
+  voice: "/console/voice",
+  email: "/console/email",
+  intake: "/console/intake",
+  security: "/console/security",
+  dns: "/console/domains",
 };
 
 const mapKind = (action: string | null): ActivityEvent["kind"] => {
@@ -39,8 +52,29 @@ const relativeTime = (iso: string): string => {
   return `${Math.floor(diff / 86400)}d ago`;
 };
 
-export const loadRecentActivity = async (limit = 8): Promise<ReadonlyArray<ActivityEvent>> => {
-  if (!isPanelDbConfigured()) return [];
+/**
+ * What the feed is actually showing.
+ *
+ * This loader has two sources and used to switch between them silently. When
+ * `audit_events` is empty it falls back to a UNION over object CREATION
+ * timestamps (mailboxes, domains, invoices, websites). Those rows are real, but
+ * "a mailbox exists and was created on this date" is not the same claim as
+ * "someone performed this action" — and the operator had no way to tell which
+ * of the two they were reading. The source now travels with the data.
+ */
+export type ActivitySource = "audit_events" | "derived_from_object_creation" | "unavailable";
+
+export interface RecentActivity {
+  events: ReadonlyArray<ActivityEvent>;
+  source: ActivitySource;
+  /** Operator-facing description of the source. */
+  sourceLabel: string;
+}
+
+export const loadRecentActivity = async (limit = 8): Promise<RecentActivity> => {
+  if (!isPanelDbConfigured()) {
+    return { events: [], source: "unavailable", sourceLabel: "panel database not configured" };
+  }
   const rows = await panelQuery<{
     id: string;
     action: string | null;
@@ -68,7 +102,75 @@ export const loadRecentActivity = async (limit = 8): Promise<ReadonlyArray<Activ
       LIMIT $1`,
     [limit],
   );
-  return rows.map((r) => {
+  if (rows.length === 0) {
+    const fallbackRows = await panelQuery<{
+      id: string;
+      kind: ActivityEvent["kind"];
+      title: string;
+      context: string | null;
+      actor: string | null;
+      createdat: string;
+    }>(
+      `SELECT *
+         FROM (
+           SELECT m.id,
+                  'email'::text AS kind,
+                  CONCAT('Mailbox provisioned: ', m.address) AS title,
+                  t.name AS context,
+                  NULL::text AS actor,
+                  m.createdat::text AS createdat
+             FROM mailboxes m
+             LEFT JOIN tenants t ON t.id = m.tenantid
+            UNION ALL
+           SELECT d.id,
+                  'dns'::text AS kind,
+                  CONCAT('Domain onboarded: ', d.domain) AS title,
+                  t.name AS context,
+                  NULL::text AS actor,
+                  d."createdAt"::text AS createdat
+             FROM domains d
+             LEFT JOIN tenants t ON t.id = d."tenantId"
+            UNION ALL
+           SELECT i.id,
+                  'billing'::text AS kind,
+                  CONCAT('Invoice ', UPPER(COALESCE(i.status, 'created')), ' · $', ROUND(COALESCE(i.total, 0)::numeric, 2)) AS title,
+                  t.name AS context,
+                  NULL::text AS actor,
+                  i.createdat::text AS createdat
+             FROM invoices i
+             LEFT JOIN tenants t ON t.id = i.tenantid
+            UNION ALL
+           SELECT w.id,
+                  'hosting'::text AS kind,
+                  CONCAT('Website provisioned: ', COALESCE(w.name, w."primaryDomain")) AS title,
+                  t.name AS context,
+                  NULL::text AS actor,
+                  w."createdAt"::text AS createdat
+             FROM websites w
+             LEFT JOIN tenants t ON t.id = w."tenantId"
+         ) recent
+        ORDER BY createdat DESC
+        LIMIT $1`,
+      [limit],
+    );
+
+    return {
+      source: "derived_from_object_creation",
+      sourceLabel: "derived from object creation times — no audit events recorded",
+      events: fallbackRows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      title: r.title,
+      ...(r.context ? { context: `for ${r.context}` } : {}),
+      ...(r.actor ? { actor: r.actor } : {}),
+      href: KIND_HREF[r.kind],
+      isoTime: r.createdat,
+      relativeTime: relativeTime(r.createdat),
+      })),
+    };
+  }
+
+  const events = rows.map((r) => {
     const evt: ActivityEvent = {
       id: r.id,
       kind: mapKind(r.action),
@@ -78,6 +180,9 @@ export const loadRecentActivity = async (limit = 8): Promise<ReadonlyArray<Activ
     };
     if (r.tenantname) evt.context = `for ${r.tenantname}`;
     if (r.actor) evt.actor = r.actor;
+    evt.href = KIND_HREF[evt.kind];
     return evt;
   });
+
+  return { events, source: "audit_events", sourceLabel: "panel DB · audit_events" };
 };

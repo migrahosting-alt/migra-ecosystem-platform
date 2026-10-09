@@ -44,6 +44,7 @@ export const TeamPerformance = ({ members }: { members: ReadonlyArray<TeamMember
                 <th className="px-4 py-2 font-medium">Active Tasks</th>
                 <th className="px-4 py-2 font-medium">Workload</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 font-medium text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -75,6 +76,15 @@ export const TeamPerformance = ({ members }: { members: ReadonlyArray<TeamMember
                       <span className={`h-2 w-2 rounded-full ${STATUS_DOT[m.status]}`} />
                       {m.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <Link
+                      href={m.activeTasks > 0 ? "/console/support" : "/console/team"}
+                      prefetch
+                      className="text-[11px] font-medium text-fuchsia-300 transition hover:text-fuchsia-200"
+                    >
+                      {m.activeTasks > 0 ? "Open Queue" : "View Team"}
+                    </Link>
                   </td>
                 </tr>
               ))}

@@ -11,7 +11,6 @@ import {
   ChartNoAxesCombined,
   ClipboardList,
   Code2,
-  PackageCheck,
   CreditCard,
   Gauge,
   Server,
@@ -74,7 +73,6 @@ const platformNav: PlatformNavGroup[] = [
     items: [
       { href: "/platform/hosting", label: "Hosting", icon: Server },
       { href: "/platform/intake", label: "Intake", icon: ClipboardList },
-      { href: "/platform/distribution", label: "Releases & Downloads", icon: PackageCheck },
     ],
   },
   {

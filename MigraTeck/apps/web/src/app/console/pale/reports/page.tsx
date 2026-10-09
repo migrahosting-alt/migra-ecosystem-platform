@@ -16,8 +16,6 @@ import {
   paleRoleLabel,
 } from "../../lib/pale-rbac";
 import { isBridgeConfigured } from "../../lib/pale-admin";
-import { ReportFiltersBar } from "./ReportFilters";
-import { toFilterView, toReportFilters } from "./report-filter-params";
 import { ReportActions } from "./ReportActions";
 
 export const dynamic = "force-dynamic";
@@ -47,14 +45,7 @@ const Td = ({ children, right, className = "" }: { children: ReactNode; right?: 
   <td className={`px-2 py-2.5 align-middle text-[12px] ${right ? "text-right" : "text-left"} ${className}`}>{children}</td>
 );
 
-/** The page's canonical limit, unchanged from before filtering existed. */
-const PAGE_LIMIT = 25;
-
-export default async function PaleReportsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+export default async function PaleReportsPage() {
   const session = await getSession();
   if (!session) redirect("/console/login");
 
@@ -75,12 +66,7 @@ export default async function PaleReportsPage({
   }
 
   const dbConfigured = isPaleDbConfigured();
-  // Server-side only: searchParams are read here and passed to the additive
-  // getPaleReports(options) overload. No client-side fetching is introduced.
-  const sp = await searchParams;
-  const view = toFilterView(sp);
-  const hasFilters = Boolean(view.status || view.type || view.from || view.to);
-  const reports = dbConfigured ? await getPaleReports(toReportFilters(sp, PAGE_LIMIT)) : [];
+  const reports = dbConfigured ? await getPaleReports(25) : [];
   const mayMutate = canMutateReports(role);
   const bridgeReady = isBridgeConfigured();
 
@@ -112,11 +98,7 @@ export default async function PaleReportsPage({
         </div>
       )}
 
-      {dbConfigured && (
-        <ReportFiltersBar status={view.status} type={view.type} from={view.from} to={view.to} />
-      )}
-
-      <SectionCard title="Reports" subtitle={dbConfigured ? `${reports.length} ${hasFilters ? "matching" : "most recent"}` : undefined}>
+      <SectionCard title="Reports" subtitle={dbConfigured ? `${reports.length} most recent` : undefined}>
         {!dbConfigured ? (
           <div className="rounded-lg border border-dashed border-white/10 bg-white/[0.01] px-4 py-8 text-center text-[11px] text-slate-500">
             Pale DB not configured — no live reports.
@@ -131,16 +113,7 @@ export default async function PaleReportsPage({
             <tbody className="divide-y divide-white/5">
               {reports.map((r) => (
                 <tr key={r.id}>
-                  <Td className="font-mono">
-                    {/* The list is the only entry point to a report's detail view; without
-                        this link the detail route is reachable only by typing its URL. */}
-                    <Link
-                      href={`/console/pale/reports/${r.id}`}
-                      className="text-fuchsia-300 underline-offset-2 transition hover:text-fuchsia-200 hover:underline"
-                    >
-                      {r.id.slice(0, 8)}
-                    </Link>
-                  </Td>
+                  <Td className="font-mono text-slate-400">{r.id.slice(0, 8)}</Td>
                   <Td className="text-slate-200">{r.targetType}</Td>
                   <Td className="max-w-[16rem] truncate text-slate-400">{r.reason}</Td>
                   <Td className="font-mono text-slate-400">{maskPhone(r.reporterPhone)}</Td>

@@ -130,7 +130,7 @@ export const legalDocuments: LegalDocument[] = [
       "The shared privacy policy for identity, product usage, communications, and operational data across the MigraTeck ecosystem.",
     description:
       "How MigraTeck collects, uses, stores, shares, and protects personal and service data across products.",
-    lastUpdated,
+    lastUpdated: "June 7, 2026",
     version,
     appliesTo: [
       "Identity and account data",
@@ -141,6 +141,7 @@ export const legalDocuments: LegalDocument[] = [
       { href: "/legal/terms", label: "Terms of Service" },
       { href: "/legal/security", label: "Security Policy" },
       { href: "/legal/migramail", label: "MigraMail Addendum" },
+      { href: "/legal/migradrive", label: "MigraDrive Addendum" },
     ],
     sections: [
       {
@@ -193,7 +194,15 @@ export const legalDocuments: LegalDocument[] = [
       {
         title: "7. Product-specific disclosures",
         paragraphs: [
-          "Certain services may collect or process additional data specific to their functionality, as described in product-specific disclosures and addenda.",
+          "Certain services collect or process additional data specific to their functionality. The product addenda below extend this policy with the data each one handles, the permissions it requests, and the third parties it relies on. Where an addendum and this base policy disagree, the addendum controls for that product.",
+          "Active product addenda: MigraMail (mailbox and outbound sending), MigraDrive (file storage, photo library access, share links, subscription billing via Stripe), MigraHosting (hosting and DNS), MigraVoice (calling and recordings, where enabled), MigraBuilder (workspace authoring), and MigraCredit (informational eligibility tooling).",
+        ],
+      },
+      {
+        title: "SMS and mobile messaging",
+        paragraphs: [
+          "If you opt in to text messages from MigraTeck LLC (Pale / AnnouPale), we collect your mobile number and a record of your consent in order to send account verification, security, and service notifications.",
+          "Mobile opt-in information and consent are not sold or shared with third parties for their own marketing purposes. Message and data rates may apply, and you can opt out at any time by replying STOP.",
         ],
       },
     ],
@@ -602,6 +611,152 @@ export const legalDocuments: LegalDocument[] = [
       },
     ],
   },
+  {
+    slug: "migradrive",
+    title: "MigraDrive Service Addendum",
+    shortTitle: "MigraDrive",
+    category: "product",
+    summary:
+      "Product-specific terms and privacy disclosures for file storage, photo backup, sharing, and subscription billing in the MigraDrive consumer and team apps.",
+    description:
+      "Addendum covering object storage, encryption, media library access, share links, and the data MigraDrive collects or processes beyond the shared MigraTeck privacy policy.",
+    lastUpdated,
+    version,
+    appliesTo: [
+      "MigraDrive web console, native mobile apps, and S3-compatible API endpoints",
+      "Files, photos, and metadata uploaded to a MigraDrive account",
+      "Per-mailbox IAM identities provisioned against the MigraDrive object store",
+    ],
+    relatedLinks: [
+      { href: "/legal/terms", label: "Terms of Service" },
+      { href: "/legal/privacy", label: "Privacy Policy" },
+      { href: "/legal/payment", label: "Payment Policy" },
+      { href: "/legal/acceptable-use", label: "Acceptable Use Policy" },
+      { href: "/legal/security", label: "Security Policy" },
+    ],
+    sections: [
+      {
+        title: "1. What MigraDrive stores",
+        bullets: [
+          "Files, photos, and videos you choose to upload, organized under a per-account bucket prefix on MigraTeck-operated object storage.",
+          "Object metadata such as filename, size, MIME type, creation and modification timestamps, and the bucket prefix it resides under.",
+          "Per-account IAM credentials (access key and encrypted secret) scoped to that prefix only — accounts are not commingled at the storage layer.",
+          "Account-level state: email, name, scrypt-hashed password, plan tier, subscription status, soft-quota usage, and last-seen timestamp.",
+        ],
+      },
+      {
+        title: "2. How MigraDrive uses your data",
+        bullets: [
+          "Deliver the storage service: list, upload, download, share, restore, and permanently delete the objects you control.",
+          "Enforce per-plan soft quotas, transfer caps, and abuse-prevention limits.",
+          "Generate and validate share links, including password-protected and expiring variants you create.",
+          "Operate Trash (30-day recoverable deletion) and file versioning windows that vary by plan tier.",
+          "Process subscription upgrades, renewals, cancellations, and reactivations.",
+        ],
+      },
+      {
+        title: "3. What MigraDrive does not do",
+        bullets: [
+          "We do not scan, profile, index for advertising, or train machine-learning models on the contents of files you upload.",
+          "We do not sell or share file contents, file metadata, or account identifiers with advertisers or data brokers.",
+          "We do not access your photo library, camera, or microphone unless you grant the corresponding OS permission and initiate the action.",
+          "We do not show ads in any MigraDrive surface.",
+        ],
+      },
+      {
+        title: "4. Mobile permissions",
+        bullets: [
+          "Camera — used only when you explicitly tap the Camera quick action or enable Camera Upload to capture or back up photos.",
+          "Photo library (READ_MEDIA_IMAGES / READ_MEDIA_VIDEO on Android, NSPhotoLibraryUsageDescription on iOS) — used only when you initiate an upload from the picker.",
+          "Microphone — used only if you choose to record video directly inside the app.",
+          "Notifications — used to surface upload completions and quota or share-link events.",
+          "Network access — required to sign object-storage requests and reach the authentication service.",
+        ],
+      },
+      {
+        title: "5. Sharing and disclosure",
+        paragraphs: [
+          "Share links you create are public to anyone who holds the link until you revoke or expire them. Password-protected links additionally require the password you set.",
+          "Subscription transactions are processed by Stripe under its own privacy policy; MigraTeck receives transaction status and subscription metadata, but does not receive or store full payment card numbers.",
+        ],
+      },
+      {
+        title: "6. Retention and deletion",
+        bullets: [
+          "Files in Trash are retained for 30 days from the time of deletion, then permanently removed.",
+          "Files outside Trash are retained until you delete them or close the account.",
+          "Account closure removes the account record, IAM identity, and all bucket-prefix contents within 30 days. Stripe billing records may be retained as required by US tax and accounting rules.",
+          "Server logs (request IP, User-Agent, session timestamps) are retained 90 days for abuse defense and forensic review.",
+        ],
+      },
+      {
+        title: "7. Customer responsibility",
+        paragraphs: [
+          "You are responsible for the lawfulness of content you upload, for the recipients of any share links you generate, and for any password you set on a protected share. MigraTeck does not pre-screen file content and cannot recover share-link passwords on your behalf.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "sms-terms",
+    title: "MigraTeck SMS / Messaging Terms",
+    shortTitle: "SMS Terms",
+    category: "product",
+    summary:
+      "The text messaging program terms for the Pale / AnnouPale platform, covering consent, message frequency, opt-out, and support.",
+    description:
+      "How the Pale / AnnouPale SMS messaging program works, including how users opt in and consent, message frequency and cost, and how to stop or get help.",
+    lastUpdated,
+    version,
+    appliesTo: [
+      "The Pale / AnnouPale SMS messaging program",
+      "Users who opt in to receive text messages from MigraTeck LLC",
+    ],
+    relatedLinks: [
+      { href: "/legal/privacy", label: "Privacy Policy" },
+      { href: "/sms", label: "SMS Opt-In" },
+    ],
+    sections: [
+      {
+        title: "1. Program description",
+        paragraphs: [
+          "MigraTeck LLC (DBA Pale) operates the Pale / AnnouPale platform and sends recurring text messages for account verification, security alerts, and account/service notifications related to a user's Pale / AnnouPale account.",
+        ],
+      },
+      {
+        title: "2. How to opt in",
+        paragraphs: [
+          "Users opt in at https://migrateck.com/sms by entering their mobile number and checking the (unchecked-by-default) consent checkbox, or where an equivalent consent checkbox is presented. Consent is not a condition of any purchase.",
+        ],
+      },
+      {
+        title: "3. Message frequency and cost",
+        bullets: [
+          "Message frequency varies based on account activity.",
+          "Message and data rates may apply.",
+          "Carriers are not liable for delayed or undelivered messages.",
+        ],
+      },
+      {
+        title: "4. STOP — opt out",
+        paragraphs: [
+          "Reply STOP to any message to unsubscribe. After STOP, a single confirmation message is sent and no further messages are sent unless the user opts in again.",
+        ],
+      },
+      {
+        title: "5. HELP — support",
+        paragraphs: [
+          "Reply HELP for assistance, or contact support@migrateck.com.",
+        ],
+      },
+      {
+        title: "6. Privacy",
+        paragraphs: [
+          "Mobile opt-in data and consent are never sold or shared with third parties for their own marketing. See the Privacy Policy at /legal/privacy.",
+        ],
+      },
+    ],
+  },
 ];
 
 export const legalDocumentsBySlug = new Map(
@@ -632,6 +787,7 @@ const productLegalSlugs = new Set([
   "migrahosting",
   "migravoice",
   "migramail",
+  "migradrive",
 ]);
 
 export function getProductLegalHref(productSlug: string): string | null {

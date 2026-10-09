@@ -90,15 +90,15 @@ async function addProduct(formData: FormData) {
   try {
     await panelExec(
       `INSERT INTO orders
-         (id, tenantid, status, currency, subtotal, tax_rate, tax_amount, total, createdat, updated_at)
-       VALUES ($1, $2, 'pending', 'USD', $3, $4, $5, $6, NOW(), NOW())`,
+         (id, tenantid, status, currency, subtotal, tax_rate, tax_amount, total, createdat)
+       VALUES ($1, $2, 'pending', 'USD', $3, $4, $5, $6, NOW())`,
       [orderId, tenantId, subtotal, taxRatePct / 100, taxAmount, total],
     );
     await panelExec(
       `INSERT INTO order_items
-         (id, orderid, productid, qty, unitprice, total, createdat)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-      [randomUUID(), orderId, productId, qty, unitPrice, subtotal],
+         (id, orderid, productid, qty, unitprice, createdat)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [randomUUID(), orderId, productId, qty, unitPrice],
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "insert_failed";
@@ -132,7 +132,7 @@ async function addProduct(formData: FormData) {
       });
       if (link) {
         await panelExec(
-          `UPDATE orders SET payment_link_url = $2, payment_link_id = $3, updated_at = NOW() WHERE id = $1`,
+          `UPDATE orders SET payment_link_url = $2, payment_link_id = $3 WHERE id = $1`,
           [orderId, link.url, link.id],
         ).catch((e) => console.error("[addProduct] could not persist payment link", e));
 
