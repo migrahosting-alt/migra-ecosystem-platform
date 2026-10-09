@@ -109,6 +109,13 @@ const deadLetterCancelSchema = z.object({
 const manualEntitlementMutationEnabled =
   process.env.MANUAL_ENTITLEMENT_MUTATION_ENABLED === "true";
 
+function canManageEntitlements(permissions: string[]): boolean {
+  return (
+    manualEntitlementMutationEnabled &&
+    permissions.includes("platform.commerce.entitlements.manage")
+  );
+}
+
 export async function registerCommerceCatalogRoutes(
   app: FastifyInstance,
 ): Promise<void> {
@@ -118,6 +125,9 @@ export async function registerCommerceCatalogRoutes(
     ]);
 
     const worker = await getProvisioningWorkerStatus();
+    const entitlementManagementEnabled = canManageEntitlements(
+      authority.permissions,
+    );
 
     return {
       authority: {
@@ -130,14 +140,12 @@ export async function registerCommerceCatalogRoutes(
       ...(await getCommerceCatalogSnapshot()),
       mutationReadiness: {
         bindings: authority.permissions.includes("platform.commerce.catalog.manage"),
-        entitlements: authority.permissions.includes(
-          "platform.commerce.entitlements.manage",
-        ),
-        entitlementReason: authority.permissions.includes(
-          "platform.commerce.entitlements.manage",
-        )
-          ? "Each transition is evaluated independently. Unsafe product lanes remain locked."
-          : "platform.commerce.entitlements.manage is required.",
+        entitlements: entitlementManagementEnabled,
+        entitlementReason: !manualEntitlementMutationEnabled
+          ? "Manual entitlement mutation is disabled by production policy."
+          : entitlementManagementEnabled
+            ? "Each transition is evaluated independently. Unsafe product lanes remain locked."
+            : "platform.commerce.entitlements.manage is required.",
         worker,
       },
     };
@@ -182,9 +190,7 @@ export async function registerCommerceCatalogRoutes(
     const query = organizationQuerySchema.parse(request.query);
 
     return {
-      canManageEntitlements: authority.permissions.includes(
-        "platform.commerce.entitlements.manage",
-      ),
+      canManageEntitlements: canManageEntitlements(authority.permissions),
       organizations: await searchCommerceOrganizations(query.q, query.limit),
     };
   });
@@ -201,9 +207,7 @@ export async function registerCommerceCatalogRoutes(
     });
 
     return {
-      canManageEntitlements: authority.permissions.includes(
-        "platform.commerce.entitlements.manage",
-      ),
+      canManageEntitlements: canManageEntitlements(authority.permissions),
       ...access,
       ...readiness,
     };

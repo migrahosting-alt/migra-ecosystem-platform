@@ -192,6 +192,23 @@ test("provisioning drift separates actionable access from test and rollout-polic
   }
 });
 
+test("manual entitlement mutation remains hidden unless production policy explicitly enables it", () => {
+  assert.match(
+    routes,
+    /const manualEntitlementMutationEnabled =[\s\S]*?MANUAL_ENTITLEMENT_MUTATION_ENABLED === "true"/,
+  );
+  assert.match(
+    routes,
+    /function canManageEntitlements\(permissions: string\[\]\): boolean {[\s\S]*?manualEntitlementMutationEnabled[\s\S]*?platform\.commerce\.entitlements\.manage/,
+  );
+  assert.match(routes, /entitlements: entitlementManagementEnabled/);
+  assert.match(
+    routes,
+    /Manual entitlement mutation is disabled by production policy\./,
+  );
+  assert.match(routes, /if \(manualEntitlementMutationEnabled\) {[\s\S]*?app\.put/);
+});
+
 test("manual entitlement mutation is permission-gated and transition-preflighted", () => {
   assert.match(
     routes,
