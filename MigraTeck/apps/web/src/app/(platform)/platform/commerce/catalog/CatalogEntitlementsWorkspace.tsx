@@ -21,6 +21,10 @@ import {
   SlidersHorizontal,
   XCircle,
 } from "lucide-react";
+import {
+  RuntimeReconstructionPanel,
+  type RuntimeReconstructionContext,
+} from "./RuntimeReconstructionPanel";
 
 type ProductKey =
   | "MIGRATECK"
@@ -575,6 +579,13 @@ export function CatalogEntitlementsWorkspace({
   const [tenantHandoff, setTenantHandoff] = useState<TenantHandoffState | null>(
     null,
   );
+  const [runtimeContext, setRuntimeContext] =
+    useState<RuntimeReconstructionContext | null>(null);
+  const [runtimeContextLoadingKey, setRuntimeContextLoadingKey] =
+    useState<string | null>(null);
+  const [runtimeContextError, setRuntimeContextError] = useState<string | null>(
+    null,
+  );
 
   const loadCatalog = useCallback(async () => {
     setLoading(true);
@@ -745,6 +756,48 @@ export function CatalogEntitlementsWorkspace({
         .getElementById("organization-access")
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 0);
+  }
+
+  async function inspectRuntimeReconstruction(input: {
+    orgId: string;
+    product: string | null;
+  }) {
+    if (!input.product) return;
+    const key = input.orgId + ":" + input.product;
+    setRuntimeContextLoadingKey(key);
+    setRuntimeContextError(null);
+
+    try {
+      const response = await fetch(
+        "/api/platform/commerce/provisioning/drift/" +
+          encodeURIComponent(input.orgId) +
+          "/" +
+          encodeURIComponent(input.product) +
+          "/context",
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          body.error ?? "Unable to load runtime reconstruction evidence",
+        );
+      }
+      setRuntimeContext(body as RuntimeReconstructionContext);
+      window.setTimeout(() => {
+        document
+          .getElementById("runtime-reconstruction")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    } catch (error) {
+      setRuntimeContext(null);
+      setRuntimeContextError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load runtime reconstruction evidence",
+      );
+    } finally {
+      setRuntimeContextLoadingKey(null);
+    }
   }
 
   async function bindReturnedTenant() {
@@ -1382,6 +1435,27 @@ export function CatalogEntitlementsWorkspace({
         </div>
       ) : null}
 
+      {runtimeContextError ? (
+        <section className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          {runtimeContextError}
+        </section>
+      ) : null}
+
+      {runtimeContext ? (
+        <div id="runtime-reconstruction">
+          <RuntimeReconstructionPanel
+            context={runtimeContext}
+            consoleBaseUrl={consoleBaseUrl}
+            platformBaseUrl={platformBaseUrl}
+            onClose={() => setRuntimeContext(null)}
+            onInspectAccess={() =>
+              void inspectDriftOrganization(runtimeContext.organization.id)
+            }
+            onOpenDeadLetter={(jobId) => void openDeadLetter(jobId)}
+          />
+        </div>
+      ) : null}
+
       {tenantHandoff ? (
         <section
           className={
@@ -1606,14 +1680,41 @@ export function CatalogEntitlementsWorkspace({
                         {row.provenanceTenantId ? <span>Historical tenant: {row.provenanceTenantId}</span> : null}
                       </div>
                     </div>
-                    {(row.actionable ?? row.classification === "active_access_needs_verification") ? (
-                      <button
-                        type="button"
-                        onClick={() => void inspectDriftOrganization(row.orgId)}
-                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-50"
-                      >
-                        <Layers3 size={13} /> Inspect access
-                      </button>
+                    {(row.actionable ??
+                    row.classification === "active_access_needs_verification") ? (
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        {row.product === "MIGRAHOSTING" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void inspectRuntimeReconstruction({
+                                orgId: row.orgId,
+                                product: row.product,
+                              })
+                            }
+                            disabled={
+                              runtimeContextLoadingKey ===
+                              row.orgId + ":" + row.product
+                            }
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {runtimeContextLoadingKey ===
+                            row.orgId + ":" + row.product ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <ShieldCheck size={13} />
+                            )}
+                            Inspect runtime
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void inspectDriftOrganization(row.orgId)}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-50"
+                        >
+                          <Layers3 size={13} /> Inspect access
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 </article>

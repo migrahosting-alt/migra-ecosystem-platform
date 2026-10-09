@@ -23,6 +23,9 @@ import {
   getDeadLetterRemediation,
   retryDeadProvisioningJob,
 } from "../../../lib/provisioning-remediation.js";
+import {
+  getProvisioningRuntimeReconstructionContext,
+} from "../../../lib/provisioning-runtime-reconstruction.js";
 
 const organizationQuerySchema = z.object({
   q: z.string().trim().max(120).default(""),
@@ -86,6 +89,11 @@ const entitlementReconciliationSchema = z.object({
 
 const provisioningJobParamsSchema = z.object({
   jobId: z.string().trim().min(1).max(120),
+});
+
+const provisioningDriftContextParamsSchema = z.object({
+  orgId: z.string().trim().min(1).max(120),
+  product: z.enum(PRODUCT_KEYS),
 });
 
 const deadLetterRecoveryContextSchema = z.object({
@@ -268,6 +276,31 @@ export async function registerCommerceCatalogRoutes(
     );
 
   }
+
+  app.get(
+    "/commerce/provisioning/drift/:orgId/:product/context",
+    async (request) => {
+      const authority = await requirePlatformAuthority(request, [
+        "platform.commerce.read",
+      ]);
+      const { orgId, product } = provisioningDriftContextParamsSchema.parse(
+        request.params,
+      );
+
+      return {
+        authority: {
+          canManageBindings: authority.permissions.includes(
+            "platform.hosting.bindings.manage",
+          ),
+          canManageEntitlements: canManageEntitlements(authority.permissions),
+        },
+        ...(await getProvisioningRuntimeReconstructionContext({
+          orgId,
+          product,
+        })),
+      };
+    },
+  );
 
   app.get(
     "/commerce/provisioning/jobs/:jobId/remediation",
