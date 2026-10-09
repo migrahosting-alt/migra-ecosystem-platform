@@ -28,6 +28,7 @@ type PlatformNavItem = {
   label: string;
   icon: LucideIcon;
   planned?: boolean;
+  unavailable?: boolean;
 };
 
 type PlatformNavGroup = {
@@ -55,7 +56,7 @@ const platformNav: PlatformNavGroup[] = [
       { href: "/platform/developers", label: "Developer Platform", icon: Code2 },
       { href: "/platform/developers/api-keys", label: "API Keys", icon: KeyRound },
       { href: "/platform/developers/oauth", label: "OAuth Apps", icon: Boxes },
-      { href: "/platform/developers/webhooks", label: "Webhooks & Events", icon: Webhook },
+      { href: "/platform/developers/webhooks", label: "Webhooks & Events", icon: Webhook, unavailable: true },
       { href: "/platform/usage", label: "API & Usage", icon: Activity },
     ],
   },
@@ -140,7 +141,11 @@ export function PlatformSidebar() {
                         className={cn(active ? "text-cyan-300" : "text-slate-500 group-hover:text-slate-300")}
                       />
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      {item.planned ? (
+                      {item.unavailable ? (
+                        <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-amber-300">
+                          offline
+                        </span>
+                      ) : item.planned ? (
                         <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                           next
                         </span>

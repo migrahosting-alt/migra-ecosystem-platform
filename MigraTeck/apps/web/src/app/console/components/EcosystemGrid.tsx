@@ -1,20 +1,10 @@
 import Link from "next/link";
 import type { ProductTile } from "../lib/ecosystem";
+// One vocabulary for operational state — this grid used to say "Operational"
+// for the same state the service table called "Healthy".
+import { HealthBadge, provenanceOf } from "./HealthState";
+import { current } from "../lib/fleet/health-contract";
 import { ProductLogo } from "./ProductLogo";
-
-const STATUS_DOT: Record<ProductTile["status"], string> = {
-  operational: "bg-emerald-400",
-  degraded: "bg-amber-400",
-  down: "bg-rose-400",
-  unknown: "bg-slate-500",
-};
-
-const STATUS_LABEL: Record<ProductTile["status"], string> = {
-  operational: "Operational",
-  degraded: "Degraded",
-  down: "Down",
-  unknown: "Unknown",
-};
 
 export const EcosystemGrid = ({ tiles }: { tiles: ReadonlyArray<ProductTile> }) => {
   return (
@@ -29,7 +19,7 @@ export const EcosystemGrid = ({ tiles }: { tiles: ReadonlyArray<ProductTile> }) 
         </Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
         {tiles.map((t) => (
           <EcosystemTile key={t.id} tile={t} />
         ))}
@@ -44,23 +34,34 @@ const EcosystemTile = ({ tile }: { tile: ProductTile }) => {
       <div className="flex items-start gap-3">
         <ProductLogo src={tile.logoSrc} alt={tile.logoAlt} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-white">{tile.name}</p>
-          <p className="truncate text-[11px] text-slate-400">{tile.subtitle}</p>
+          <p className="text-sm font-semibold leading-tight text-white" title={tile.name}>{tile.name}</p>
+          <p className="mt-0.5 truncate text-[11px] text-slate-400" title={tile.subtitle}>{tile.subtitle}</p>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-1.5 text-[11px]">
-        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[tile.status]}`} />
-        <span className="text-slate-300">{STATUS_LABEL[tile.status]}</span>
-      </div>
+      {/* Expiry is applied at render time, so a verdict ages while the operator
+          is looking at it. A state is never shown without its provenance:
+          either how recently it was verified, or why it is unknown. */}
+      {(() => {
+        const h = current(tile.health);
+        return (
+          <div className="mt-3 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <HealthBadge health={tile.health} />
+            </div>
+            <p className="mt-0.5 truncate text-[10px] text-slate-500" title={provenanceOf(h)}>
+              {provenanceOf(h)}
+            </p>
+          </div>
+        );
+      })()}
 
-      <div className="mt-3">
-        <p className="text-xl font-bold text-white">
-          {tile.usagePct.toFixed(1)}
-          <span className="text-base font-medium text-slate-400">%</span>
-        </p>
-        <p className="text-[10px] uppercase tracking-wider text-slate-500">Usage</p>
-      </div>
+      {/* REMOVED: a bare "N% Usage" figure. The percentage was real per tile but
+          each denominator was different — % of users who logged in this week,
+          % of websites active, audit events vs a trailing average, % of phone
+          extensions enabled, % of successful job runs. Rendering all of them
+          under one word "Usage" told the operator a number that answers no
+          single question. It returns when each tile can state its own metric. */}
 
       <div className="mt-4 flex gap-2">
         <Link

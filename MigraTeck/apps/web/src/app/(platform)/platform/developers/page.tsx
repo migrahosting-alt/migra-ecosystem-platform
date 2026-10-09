@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { requirePermission } from "@migrateck/auth-client";
-import { Code2, KeyRound, Boxes, Webhook, Activity, ArrowRight } from "lucide-react";
+import {
+  Code2,
+  KeyRound,
+  Boxes,
+  Webhook,
+  Activity,
+  ArrowRight,
+} from "lucide-react";
 import { ensureAuthClientInitialized } from "@/lib/auth/init";
 import { PlatformPageHeader } from "@/components/platform/PlatformPageHeader";
 
@@ -10,28 +17,32 @@ const capabilities = [
   {
     title: "API Keys",
     state: "Connected",
-    description: "Create, scope, expire, audit, and revoke organization-level machine credentials through the live Platform API.",
+    description:
+      "Create, scope, expire, audit, and revoke organization-level machine credentials through the live Platform API.",
     icon: KeyRound,
     href: "/platform/developers/api-keys",
   },
   {
     title: "OAuth Applications",
     state: "Connected",
-    description: "Register and manage MigraAuth OAuth clients, PKCE, redirect boundaries, scopes, confidential secrets, and lifecycle state.",
+    description:
+      "Register and manage MigraAuth OAuth clients, PKCE, redirect boundaries, scopes, confidential secrets, and lifecycle state.",
     icon: Boxes,
     href: "/platform/developers/oauth",
   },
   {
     title: "Webhooks & Events",
-    state: "Connected",
-    description: "Register signed HTTPS endpoints, subscribe to real platform events, inspect retry evidence, test delivery, rotate secrets, and replay failed deliveries.",
+    state: "Not registered",
+    description:
+      "The event-delivery contract is defined, but the developer webhook runtime is intentionally not registered in production. Endpoint, delivery, secret-rotation, test, and replay controls remain disabled.",
     icon: Webhook,
     href: "/platform/developers/webhooks",
   },
   {
     title: "API & Usage",
     state: "Connected",
-    description: "Inspect credential-attributed requests, success rate, latency, route behavior, throttling, machine-key activity, and product quota boundaries.",
+    description:
+      "Inspect credential-attributed requests, success rate, latency, route behavior, throttling, machine-key activity, and product quota boundaries.",
     icon: Activity,
     href: "/platform/usage",
   },
@@ -46,7 +57,7 @@ export default async function DeveloperPlatformPage() {
       <PlatformPageHeader
         eyebrow="Developer infrastructure"
         title="Developer Platform"
-        description="Create and govern how software talks to MigraTeck: machine credentials, OAuth applications, event delivery, API usage, and environment boundaries."
+        description="Create and govern how software talks to MigraTeck: machine credentials, OAuth applications, event delivery contracts, API usage, and environment boundaries."
         actions={
           <Link
             href="/platform/usage"
@@ -67,13 +78,21 @@ export default async function DeveloperPlatformPage() {
               One developer contract across every MigraTeck product.
             </h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Products should consume shared identity, commerce, entitlement, and event contracts instead of inventing credentials and integration rules independently.
+              Products should consume shared identity, commerce, entitlement,
+              and event contracts instead of inventing credentials and
+              integration rules independently.
             </p>
           </div>
           <div className="rounded-2xl border border-white/80 bg-white/85 p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Current operator</p>
-            <p className="mt-2 text-sm font-semibold text-slate-900">{session.email}</p>
-            <p className="mt-1 text-sm text-slate-500">{session.permissions.length} platform permission(s) active</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              Current operator
+            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {session.email}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              {session.permissions.length} platform permission(s) active
+            </p>
           </div>
         </div>
       </section>
@@ -81,6 +100,7 @@ export default async function DeveloperPlatformPage() {
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
         {capabilities.map((capability) => {
           const Icon = capability.icon;
+          const connected = capability.state === "Connected";
           const content = (
             <>
               <div className="flex items-start justify-between gap-4">
@@ -89,13 +109,29 @@ export default async function DeveloperPlatformPage() {
                     <Icon size={19} />
                   </span>
                   <div>
-                    <h3 className="text-base font-semibold text-slate-950">{capability.title}</h3>
-                    <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">{capability.state}</p>
+                    <h3 className="text-base font-semibold text-slate-950">
+                      {capability.title}
+                    </h3>
+                    <p
+                      className={
+                        "mt-0.5 text-xs font-semibold uppercase tracking-[0.14em] " +
+                        (connected ? "text-blue-600" : "text-amber-700")
+                      }
+                    >
+                      {capability.state}
+                    </p>
                   </div>
                 </div>
-                {capability.href ? <ArrowRight size={16} className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600" /> : null}
+                {capability.href ? (
+                  <ArrowRight
+                    size={16}
+                    className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600"
+                  />
+                ) : null}
               </div>
-              <p className="mt-4 text-sm leading-6 text-slate-600">{capability.description}</p>
+              <p className="mt-4 text-sm leading-6 text-slate-600">
+                {capability.description}
+              </p>
             </>
           );
 
@@ -108,7 +144,10 @@ export default async function DeveloperPlatformPage() {
               {content}
             </Link>
           ) : (
-            <article key={capability.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <article
+              key={capability.title}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            >
               {content}
             </article>
           );
@@ -116,14 +155,28 @@ export default async function DeveloperPlatformPage() {
       </div>
 
       <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-950">Implementation contract</h2>
+        <h2 className="text-base font-semibold text-slate-950">
+          Implementation contract
+        </h2>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           {[
-            ["Identity", "Human authentication stays in MigraAuth. Machine access uses scoped credentials owned by the developer platform."],
-            ["Environment", "Sandbox, staging, and production credentials must be distinct and independently revocable."],
-            ["Audit", "Credential creation, rotation, revoke, scope changes, webhook replay, and OAuth changes must be auditable."],
+            [
+              "Identity",
+              "Human authentication stays in MigraAuth. Machine access uses scoped credentials owned by the developer platform.",
+            ],
+            [
+              "Environment",
+              "Sandbox, staging, and production credentials must be distinct and independently revocable.",
+            ],
+            [
+              "Audit",
+              "Credential creation, rotation, revoke, scope changes, webhook replay, and OAuth changes must be auditable when their owning runtime is enabled.",
+            ],
           ].map(([title, body]) => (
-            <div key={title} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div
+              key={title}
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+            >
               <p className="text-sm font-semibold text-slate-900">{title}</p>
               <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
             </div>

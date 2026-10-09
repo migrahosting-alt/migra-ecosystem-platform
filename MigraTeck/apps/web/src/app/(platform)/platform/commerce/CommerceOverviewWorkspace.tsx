@@ -10,6 +10,7 @@ import {
   Boxes,
   CheckCircle2,
   CreditCard,
+  FileClock,
   Loader2,
   RefreshCw,
   ShieldAlert,
@@ -96,6 +97,18 @@ type UsageOverview = {
     meters: { required: number; present: number; missingNames: string[] };
     prices: { required: number; present: number; missingLookupKeys: string[] };
     checkedAt: string | null;
+  };
+};
+
+type AuditOverview = {
+  total: number;
+  evidenceWindow: { newestAt: string | null; oldestAt: string | null };
+  familyCounts: {
+    billing: number;
+    entitlement: number;
+    provisioning: number;
+    revenue: number;
+    usage: number;
   };
 };
 
@@ -221,6 +234,10 @@ export function CommerceOverviewWorkspace() {
     data: null,
     error: null,
   });
+  const [audit, setAudit] = useState<LoadState<AuditOverview>>({
+    data: null,
+    error: null,
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -228,16 +245,18 @@ export function CommerceOverviewWorkspace() {
     if (background) setRefreshing(true);
     else setLoading(true);
 
-    const [catalogResult, billingResult, usageResult] =
+    const [catalogResult, billingResult, usageResult, auditResult] =
       await Promise.allSettled([
         fetchJson<CatalogOverview>("/api/platform/commerce/catalog"),
         fetchJson<BillingOverview>("/api/platform/commerce/billing?limit=1"),
         fetchJson<UsageOverview>("/api/platform/commerce/usage?window=24h"),
+        fetchJson<AuditOverview>("/api/platform/commerce/audit?limit=1"),
       ]);
 
     setCatalog(settledState(catalogResult));
     setBilling(settledState(billingResult));
     setUsage(settledState(usageResult));
+    setAudit(settledState(auditResult));
     setLoading(false);
     setRefreshing(false);
   }, []);
@@ -355,9 +374,12 @@ export function CommerceOverviewWorkspace() {
     );
   }
 
-  const systemsAvailable = [catalog.data, billing.data, usage.data].filter(
-    Boolean,
-  ).length;
+  const systemsAvailable = [
+    catalog.data,
+    billing.data,
+    usage.data,
+    audit.data,
+  ].filter(Boolean).length;
 
   return (
     <div className="space-y-6">
@@ -370,9 +392,9 @@ export function CommerceOverviewWorkspace() {
             Commerce control plane
           </h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-            This view reads the canonical platform-scoped Catalog, MigraPay, and
-            Usage authorities. It is not tied to the active organization in the
-            session.
+            This view reads the canonical platform-scoped Catalog, MigraPay,
+            Usage, and Audit authorities. It is not tied to the active
+            organization in the session.
           </p>
         </div>
         <button
@@ -389,10 +411,10 @@ export function CommerceOverviewWorkspace() {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label="Operator systems"
-          value={systemsAvailable + "/3"}
+          value={systemsAvailable + "/4"}
           detail={
-            systemsAvailable === 3
-              ? "Catalog, billing, and usage reads available"
+            systemsAvailable === 4
+              ? "Catalog, billing, usage, and audit reads available"
               : "One or more canonical reads are unavailable"
           }
         />
@@ -425,7 +447,7 @@ export function CommerceOverviewWorkspace() {
         />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-3">
+      <section className="grid gap-5 xl:grid-cols-4">
         <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700">
@@ -608,6 +630,71 @@ export function CommerceOverviewWorkspace() {
             Open usage & metering <ArrowRight size={14} />
           </Link>
         </article>
+
+        <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+              <FileClock size={18} />
+            </span>
+            {audit.data ? (
+              <StatusBadge
+                good={audit.data.total > 0}
+                label={
+                  audit.data.total > 0
+                    ? "Evidence available"
+                    : "No evidence yet"
+                }
+              />
+            ) : null}
+          </div>
+          <h3 className="mt-4 text-base font-semibold text-slate-950">
+            Commerce audit
+          </h3>
+          {audit.data ? (
+            <>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Metric
+                  label="Audit rows"
+                  value={audit.data.total.toLocaleString()}
+                  detail={
+                    audit.data.evidenceWindow.newestAt
+                      ? "Latest " +
+                        new Date(
+                          audit.data.evidenceWindow.newestAt,
+                        ).toLocaleString()
+                      : "No captured evidence yet"
+                  }
+                />
+                <Metric
+                  label="Families"
+                  value={
+                    Object.values(audit.data.familyCounts).filter(
+                      (count) => count > 0,
+                    ).length + "/5"
+                  }
+                  detail="commerce action families with evidence"
+                />
+              </div>
+              <p className="mt-4 text-xs leading-5 text-slate-600">
+                Read-only, server-filtered evidence with sensitive metadata
+                removed before browser delivery.
+              </p>
+            </>
+          ) : (
+            <div className="mt-4">
+              <SubsystemUnavailable
+                title="Commerce audit"
+                error={audit.error}
+              />
+            </div>
+          )}
+          <Link
+            href="/platform/commerce/audit"
+            className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-blue-600"
+          >
+            Open commerce audit <ArrowRight size={14} />
+          </Link>
+        </article>
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -636,7 +723,7 @@ export function CommerceOverviewWorkspace() {
                   No detected commerce attention items
                 </p>
                 <p className="mt-1 text-xs leading-5 text-emerald-800">
-                  All three canonical reads are available and no configured
+                  All four canonical reads are available and no configured
                   thresholds currently require operator review.
                 </p>
               </div>
