@@ -285,6 +285,10 @@ export async function getInfrastructureHealthSnapshot() {
       releaseOverlayRuntimeReconciliation:
         releaseOverlay.summary.runtimeReconciliation,
       releaseOverlayHighCriticality: releaseOverlay.summary.highCriticality,
+      releaseOverlayIntentionalExclusions:
+        releaseOverlay.summary.intentionalExclusions,
+      releaseOverlayOverdueExclusions:
+        releaseOverlay.summary.overdueExclusions,
       hostCapacityState: hostCapacity.state,
       diskUsedPercent: hostCapacity.disk.usedPercent,
       diskAvailableBytes: hostCapacity.disk.availableBytes,

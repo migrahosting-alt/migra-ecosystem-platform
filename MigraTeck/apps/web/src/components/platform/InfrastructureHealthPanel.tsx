@@ -61,12 +61,51 @@ type HealthPayload = {
     socialConnectionAttention: number;
     socialReconnectRequired: number;
     releaseIntegrityIssues: number;
+    releaseOverlayState: "managed" | "missing" | "invalid";
+    releaseOverlayDifferences: number;
+    releaseOverlayRuntimeReconciliation: number;
+    releaseOverlayHighCriticality: number;
+    releaseOverlayIntentionalExclusions: number;
+    releaseOverlayOverdueExclusions: number;
     hostCapacityState: "healthy" | "warning" | "critical";
     diskUsedPercent: number;
     diskAvailableBytes: number;
   };
   workers: WorkerHealth[];
   releases: ReleaseIntegrity[];
+  overlay: {
+    state: "managed" | "missing" | "invalid";
+    generatedAt: string | null;
+    canonicalCommit: string | null;
+    releaseLabel: string | null;
+    installedReleaseLabel: string | null;
+    summary: {
+      totalDifferences: number;
+      productionOnly: number;
+      modifiedCanonical: number;
+      missingCanonical: number;
+      runtimeReconciliation: number;
+      highCriticality: number;
+      intentionalExclusions: number;
+      overdueExclusions: number;
+    };
+    byClassification: Record<string, number>;
+    byAction: Record<string, number>;
+    samples: Array<{
+      path: string;
+      kind: "extra" | "modified" | "missing";
+      classification: string;
+      criticality: "low" | "medium" | "high";
+      recommendedAction: string;
+      policyDecision?: "intentionally_excluded";
+      policyGroup?: string;
+      policyOwner?: string;
+      policyReason?: string;
+      policyReviewAfter?: string;
+      policyOverdue?: boolean;
+    }>;
+    detail: string;
+  };
   host: {
     state: "healthy" | "warning" | "critical";
     checkedPath: string;
@@ -254,6 +293,9 @@ export function InfrastructureHealthPanel() {
     usageFailed > 0 ||
     data.summary.entitlementOverdue > 0 ||
     data.summary.releaseIntegrityIssues > 0 ||
+    data.summary.releaseOverlayState !== "managed" ||
+    data.summary.releaseOverlayRuntimeReconciliation > 0 ||
+    data.summary.releaseOverlayOverdueExclusions > 0 ||
     data.summary.hostCapacityState !== "healthy" ||
     socialAttention > 0;
 
@@ -522,6 +564,91 @@ export function InfrastructureHealthPanel() {
             </article>
           ))}
         </div>
+
+        <article
+          className={
+            "mt-4 rounded-2xl border p-4 " +
+            (data.overlay.state !== "managed" ||
+            data.overlay.summary.runtimeReconciliation > 0 ||
+            data.overlay.summary.overdueExclusions > 0
+              ? "border-amber-200 bg-amber-50/70"
+              : "border-violet-200 bg-violet-50/60")
+          }
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">
+                Release overlay policy
+              </p>
+              <h4 className="mt-1 text-sm font-semibold text-slate-950">
+                Runtime source reconciliation
+              </h4>
+              <p className="mt-1 max-w-4xl text-[11px] leading-5 text-slate-600">
+                {data.overlay.detail}
+              </p>
+            </div>
+            <span
+              className={
+                "w-fit rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.1em] " +
+                (data.overlay.state === "managed"
+                  ? "border-violet-200 bg-white text-violet-700"
+                  : "border-amber-200 bg-amber-100 text-amber-800")
+              }
+            >
+              {data.overlay.state}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            {[
+              [
+                "Unresolved runtime",
+                data.overlay.summary.runtimeReconciliation,
+                data.overlay.summary.runtimeReconciliation > 0,
+              ],
+              [
+                "Intentional exclusions",
+                data.overlay.summary.intentionalExclusions,
+                false,
+              ],
+              [
+                "Overdue reviews",
+                data.overlay.summary.overdueExclusions,
+                data.overlay.summary.overdueExclusions > 0,
+              ],
+              [
+                "High criticality",
+                data.overlay.summary.highCriticality,
+                data.overlay.summary.highCriticality > 0,
+              ],
+              ["Total differences", data.overlay.summary.totalDifferences, false],
+            ].map(([label, value, alert]) => (
+              <div
+                key={String(label)}
+                className={
+                  "rounded-xl border bg-white px-3 py-2.5 " +
+                  (alert ? "border-amber-200" : "border-violet-100")
+                }
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">
+                  {label}
+                </p>
+                <p
+                  className={
+                    "mt-1 text-lg font-semibold " +
+                    (alert ? "text-amber-800" : "text-slate-950")
+                  }
+                >
+                  {Number(value).toLocaleString()}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-3 text-[10px] leading-5 text-slate-500">
+            Canonical {shortCommit(data.overlay.canonicalCommit)} · installed {data.overlay.installedReleaseLabel ?? "unknown release"}
+          </p>
+        </article>
       </div>
 
       <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 p-5 sm:p-6 md:grid-cols-2 xl:grid-cols-5">

@@ -150,3 +150,26 @@ test("provisioning health reports shared active-access drift instead of dead let
   assert.match(panel, /provisioningDriftNeedsVerification/);
   assert.match(panel, /href="\/platform\/commerce\/catalog"/);
 });
+
+test("release overlay health separates unresolved drift from governed exclusions", () => {
+  const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
+  const overlay = repoFile("apps/api/src/lib/release-overlay.ts");
+  const panel = repoFile(
+    "apps/web/src/components/platform/InfrastructureHealthPanel.tsx",
+  );
+
+  assert.match(health, /releaseOverlayIntentionalExclusions/);
+  assert.match(health, /releaseOverlayOverdueExclusions/);
+  assert.match(health, /releaseOverlay\.summary\.intentionalExclusions/);
+  assert.match(health, /releaseOverlay\.summary\.overdueExclusions/);
+
+  assert.match(overlay, /policyDecision/);
+  assert.match(overlay, /policyOverdue/);
+  assert.match(overlay, /time-bounded intentional exclusion/);
+
+  assert.match(panel, /Release overlay policy/);
+  assert.match(panel, /Unresolved runtime/);
+  assert.match(panel, /Intentional exclusions/);
+  assert.match(panel, /Overdue reviews/);
+  assert.match(panel, /releaseOverlayOverdueExclusions > 0/);
+});

@@ -198,3 +198,146 @@ test("inventory ignores retained Next build backups and downgrades non-runtime e
   assert.equal(manifest.summary.highCriticality, 0);
   assert.equal(manifest.summary.runtimeReconciliation, 0);
 });
+
+test("overlay policy keeps intentional exclusions visible and reopens overdue review debt", () => {
+  const root = mkdtempSync(join(tmpdir(), "migrateck-overlay-policy-"));
+  const canonical = join(root, "canonical");
+  const release = join(root, "release");
+  mkdirSync(canonical, { recursive: true });
+  mkdirSync(release, { recursive: true });
+
+  file(canonical, "src/app/active/page.tsx", "active canonical page");
+  file(release, "src/app/active/page.tsx", "active canonical page");
+  file(canonical, "src/app/future/page.tsx", "future migration page");
+  file(canonical, "src/app/overdue/page.tsx", "overdue migration page");
+
+  const policy = join(canonical, "release-overlay-policy.json");
+  writeFileSync(
+    policy,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        policyId: "fixture-policy",
+        reviewedAt: "2026-10-09T00:00:00.000Z",
+        groups: [
+          {
+            id: "future-review",
+            owner: "Platform operations",
+            reason:
+              "This runtime source is intentionally excluded until its controlled migration is accepted.",
+            reviewAfter: "2099-01-01T00:00:00.000Z",
+            paths: ["src/app/future/page.tsx"],
+          },
+          {
+            id: "overdue-review",
+            owner: "Platform operations",
+            reason:
+              "This runtime source exclusion is intentionally overdue so the test verifies fail-closed review behavior.",
+            reviewAfter: "2000-01-01T00:00:00.000Z",
+            paths: ["src/app/overdue/page.tsx"],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const output = join(release, "OVERLAY_INVENTORY.json");
+  execFileSync(
+    "node",
+    [
+      join(repoRoot(), "scripts/write-overlay-inventory.mjs"),
+      "--canonical",
+      canonical,
+      "--release",
+      release,
+      "--output",
+      output,
+      "--commit",
+      "fixture-policy-commit",
+      "--policy",
+      policy,
+    ],
+    { encoding: "utf8" },
+  );
+
+  const manifest = JSON.parse(readFileSync(output, "utf8")) as {
+    summary: Record<string, number>;
+    entries: Array<Record<string, unknown>>;
+  };
+  const byPath = new Map(manifest.entries.map((entry) => [String(entry.path), entry]));
+
+  assert.equal(manifest.summary.totalDifferences, 3);
+  assert.equal(manifest.summary.runtimeReconciliation, 1);
+  assert.equal(manifest.summary.highCriticality, 1);
+  assert.equal(manifest.summary.intentionalExclusions, 1);
+  assert.equal(manifest.summary.overdueExclusions, 1);
+
+  const future = byPath.get("src/app/future/page.tsx");
+  assert.equal(future?.policyDecision, "intentionally_excluded");
+  assert.equal(future?.policyGroup, "future-review");
+  assert.equal(future?.policyOwner, "Platform operations");
+  assert.equal(future?.policyOverdue, false);
+  assert.equal(future?.recommendedAction, "review_intentional_exclusion");
+
+  const overdue = byPath.get("src/app/overdue/page.tsx");
+  assert.equal(overdue?.policyDecision, "intentionally_excluded");
+  assert.equal(overdue?.policyGroup, "overdue-review");
+  assert.equal(overdue?.policyOverdue, true);
+  assert.equal(overdue?.recommendedAction, "review_expired_exclusion");
+});
+
+test("overlay policy fails closed when an exclusion path is stale or no longer missing runtime source", () => {
+  const root = mkdtempSync(join(tmpdir(), "migrateck-overlay-policy-stale-"));
+  const canonical = join(root, "canonical");
+  const release = join(root, "release");
+  mkdirSync(canonical, { recursive: true });
+  mkdirSync(release, { recursive: true });
+
+  file(canonical, "src/app/page.tsx", "same page");
+  file(release, "src/app/page.tsx", "same page");
+
+  const policy = join(canonical, "release-overlay-policy.json");
+  writeFileSync(
+    policy,
+    JSON.stringify({
+      schemaVersion: 1,
+      policyId: "stale-fixture-policy",
+      reviewedAt: "2026-10-09T00:00:00.000Z",
+      groups: [
+        {
+          id: "stale-path",
+          owner: "Platform operations",
+          reason:
+            "This fixture intentionally points at a path that is no longer missing from production.",
+          reviewAfter: "2099-01-01T00:00:00.000Z",
+          paths: ["src/app/page.tsx"],
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  assert.throws(
+    () =>
+      execFileSync(
+        "node",
+        [
+          join(repoRoot(), "scripts/write-overlay-inventory.mjs"),
+          "--canonical",
+          canonical,
+          "--release",
+          release,
+          "--output",
+          join(release, "OVERLAY_INVENTORY.json"),
+          "--commit",
+          "fixture-policy-commit",
+          "--policy",
+          policy,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ),
+  );
+});

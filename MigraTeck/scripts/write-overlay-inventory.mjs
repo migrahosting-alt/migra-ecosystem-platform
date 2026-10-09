@@ -13,6 +13,84 @@ function isInside(root, candidate) {
   return rel === "" || (rel !== ".." && !rel.startsWith(".." + sep));
 }
 
+function hasParentTraversal(path) {
+  return path.split("/").some((segment) => segment === "..");
+}
+
+function validPolicyPath(path) {
+  return (
+    typeof path === "string" &&
+    path.length > 0 &&
+    !path.startsWith("/") &&
+    !hasParentTraversal(path) &&
+    !/[?*]/.test(path)
+  );
+}
+
+async function loadPolicy(policyPath, generatedAt) {
+  if (!policyPath) {
+    return { configured: false, policyId: null, groups: [], byPath: new Map() };
+  }
+
+  const value = JSON.parse(await readFile(policyPath, "utf8"));
+  if (
+    value?.schemaVersion !== 1 ||
+    typeof value.policyId !== "string" ||
+    value.policyId.trim().length === 0 ||
+    typeof value.reviewedAt !== "string" ||
+    !Number.isFinite(Date.parse(value.reviewedAt)) ||
+    !Array.isArray(value.groups) ||
+    value.groups.length > 1000
+  ) {
+    throw new Error("Release overlay policy schema is invalid");
+  }
+
+  const byPath = new Map();
+  for (const group of value.groups) {
+    if (
+      !group ||
+      typeof group !== "object" ||
+      typeof group.id !== "string" ||
+      !/^[a-z0-9][a-z0-9-]{1,79}$/.test(group.id) ||
+      typeof group.owner !== "string" ||
+      group.owner.trim().length < 3 ||
+      typeof group.reason !== "string" ||
+      group.reason.trim().length < 20 ||
+      typeof group.reviewAfter !== "string" ||
+      !Number.isFinite(Date.parse(group.reviewAfter)) ||
+      !Array.isArray(group.paths) ||
+      group.paths.length === 0 ||
+      group.paths.length > 5000
+    ) {
+      throw new Error("Release overlay policy group is invalid");
+    }
+
+    for (const path of group.paths) {
+      if (!validPolicyPath(path)) {
+        throw new Error("Release overlay policy path is invalid: " + String(path));
+      }
+      if (byPath.has(path)) {
+        throw new Error("Release overlay policy path is duplicated: " + path);
+      }
+      byPath.set(path, {
+        group: group.id,
+        owner: group.owner.trim(),
+        reason: group.reason.trim(),
+        reviewAfter: new Date(group.reviewAfter).toISOString(),
+        overdue: Date.parse(group.reviewAfter) < Date.parse(generatedAt),
+      });
+    }
+  }
+
+  return {
+    configured: true,
+    policyId: value.policyId.trim(),
+    reviewedAt: new Date(value.reviewedAt).toISOString(),
+    groups: value.groups,
+    byPath,
+  };
+}
+
 const SKIP_DIRECTORIES = new Set([
   ".git",
   ".next",
@@ -185,9 +263,13 @@ async function buildInventory(
   outputPath,
   commit,
   releaseLabelOverride = null,
+  policyPath = null,
 ) {
   const canonical = await realpath(canonicalRoot);
   const release = await realpath(releaseRoot);
+  const generatedAt = new Date().toISOString();
+  const policy = await loadPolicy(policyPath, generatedAt);
+  const matchedPolicyPaths = new Set();
   if (canonical === release) throw new Error("Canonical and release roots must be different");
 
   const outputAbsolute = resolve(outputPath);
@@ -223,15 +305,51 @@ async function buildInventory(
       kind = "modified";
     }
 
+    const classification = classifyPath(path, kind);
+    const policyEntry = policy.byPath.get(path) ?? null;
+    if (policyEntry) {
+      if (kind !== "missing" || classification.classification !== "runtime_source") {
+        throw new Error(
+          "Release overlay policy may only exclude missing runtime source: " + path,
+        );
+      }
+      matchedPolicyPaths.add(path);
+    }
+
     entries.push({
       path,
       kind,
       canonicalSha256,
       releaseSha256,
-      ...classifyPath(path, kind),
+      ...classification,
+      ...(policyEntry
+        ? {
+            recommendedAction: policyEntry.overdue
+              ? "review_expired_exclusion"
+              : "review_intentional_exclusion",
+            policyDecision: "intentionally_excluded",
+            policyGroup: policyEntry.group,
+            policyOwner: policyEntry.owner,
+            policyReason: policyEntry.reason,
+            policyReviewAfter: policyEntry.reviewAfter,
+            policyOverdue: policyEntry.overdue,
+          }
+        : {}),
     });
   }
 
+  for (const path of policy.byPath.keys()) {
+    if (!matchedPolicyPaths.has(path)) {
+      throw new Error(
+        "Release overlay policy path is not a missing runtime-source difference: " + path,
+      );
+    }
+  }
+
+  const activeExclusion = (entry) =>
+    entry.policyDecision === "intentionally_excluded" && entry.policyOverdue === false;
+  const overdueExclusion = (entry) =>
+    entry.policyDecision === "intentionally_excluded" && entry.policyOverdue === true;
   const count = (predicate) => entries.filter(predicate).length;
   const byClassification = {};
   const byAction = {};
@@ -244,9 +362,16 @@ async function buildInventory(
 
   const manifest = {
     schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     canonicalCommit: commit,
     releaseLabel: releaseLabelOverride || basename(release),
+    policy: {
+      configured: policy.configured,
+      policyId: policy.policyId,
+      reviewedAt: policy.reviewedAt ?? null,
+      groups: policy.groups.length,
+      entries: policy.byPath.size,
+    },
     summary: {
       totalDifferences: entries.length,
       productionOnly: count((entry) => entry.kind === "extra"),
@@ -255,9 +380,13 @@ async function buildInventory(
       runtimeReconciliation: count(
         (entry) =>
           entry.classification === "runtime_source" &&
-          entry.recommendedAction !== "retain",
+          !activeExclusion(entry),
       ),
-      highCriticality: count((entry) => entry.criticality === "high"),
+      highCriticality: count(
+        (entry) => entry.criticality === "high" && !activeExclusion(entry),
+      ),
+      intentionalExclusions: count(activeExclusion),
+      overdueExclusions: count(overdueExclusion),
     },
     byClassification,
     byAction,
@@ -285,10 +414,21 @@ const releaseArg = arg("release");
 const outputArg = arg("output");
 const commitArg = arg("commit");
 const releaseLabelArg = arg("release-label");
+const policyArg = arg("policy");
 
 if (canonicalArg && releaseArg && outputArg) {
   await stat(canonicalArg);
   await stat(releaseArg);
+  let policyPath = policyArg;
+  if (!policyPath) {
+    const defaultPolicy = resolve(canonicalArg, "release-overlay-policy.json");
+    try {
+      await stat(defaultPolicy);
+      policyPath = defaultPolicy;
+    } catch (error) {
+      if (!(error && typeof error === "object" && error.code === "ENOENT")) throw error;
+    }
+  }
   const commit = commitArg || gitCommit(canonicalArg);
   const inventory = await buildInventory(
     canonicalArg,
@@ -296,6 +436,7 @@ if (canonicalArg && releaseArg && outputArg) {
     outputArg,
     commit,
     releaseLabelArg,
+    policyPath,
   );
   console.log(JSON.stringify({
     output: resolve(outputArg),
@@ -305,8 +446,8 @@ if (canonicalArg && releaseArg && outputArg) {
   }));
 } else if (process.argv[1]?.endsWith("write-overlay-inventory.mjs")) {
   throw new Error(
-    "Usage: node write-overlay-inventory.mjs --canonical <dir> --release <dir> --output <file> [--commit <sha>] [--release-label <name>]",
+    "Usage: node write-overlay-inventory.mjs --canonical <dir> --release <dir> --output <file> [--commit <sha>] [--release-label <name>] [--policy <file>]",
   );
 }
 
-export { buildInventory, classifyPath };
+export { buildInventory, classifyPath, loadPolicy };

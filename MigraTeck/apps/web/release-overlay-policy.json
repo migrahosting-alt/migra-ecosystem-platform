@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "policyId": "migrateck-web-production-exclusions",
+  "reviewedAt": "2026-10-09T23:20:00.000Z",
+  "groups": [
+    {
+      "id": "intake-native-migration",
+      "owner": "MigraIntake platform operations",
+      "reviewAfter": "2026-11-15T00:00:00.000Z",
+      "reason": "Tenant-native Intake remains a migration target. Production intentionally exposes sanitized legacy-runtime visibility while native persistence, authentication, and tenant-scoped mutation are not yet accepted end to end.",
+      "paths": [
+        "src/app/(platform)/platform/intake/IntakeNativeWorkspace.tsx",
+        "src/app/api/intake/forms/[publicKey]/route.ts",
+        "src/app/api/intake/forms/[publicKey]/submissions/route.ts",
+        "src/app/api/platform/intake/native/forms/[formId]/route.ts",
+        "src/app/api/platform/intake/native/forms/[formId]/submissions/route.ts",
+        "src/app/api/platform/intake/native/organizations/[orgId]/forms/route.ts",
+        "src/app/api/platform/intake/native/organizations/route.ts",
+        "src/app/api/platform/intake/native/status/route.ts",
+        "src/app/api/platform/intake/native/submissions/[submissionId]/route.ts"
+      ]
+    },
+    {
+      "id": "legacy-annoupale-submodules",
+      "owner": "MigraPanel platform operations",
+      "reviewAfter": "2026-11-15T00:00:00.000Z",
+      "reason": "Legacy AnnouPale operator submodules are superseded by the Frendelo control-plane migration. The compatibility root remains live, but these stale submodules are not production-authoritative and must not be deployed without an explicit Frendelo port and acceptance pass.",
+      "paths": [
+        "src/app/annoupale/page.tsx",
+        "src/app/console/annoupale/analytics/page.tsx",
+        "src/app/console/annoupale/appeals/page.tsx",
+        "src/app/console/annoupale/audit/page.tsx",
+        "src/app/console/annoupale/compliance/[caseId]/page.tsx",
+        "src/app/console/annoupale/compliance/page.tsx",
+        "src/app/console/annoupale/moderation/page.tsx",
+        "src/app/console/annoupale/settings/page.tsx",
+        "src/app/console/annoupale/staff/page.tsx",
+        "src/app/console/components/AnnoupaleAddNoteForm.tsx",
+        "src/app/console/components/annoupale/AnnoupaleCaseTriageForm.tsx",
+        "src/app/console/components/annoupale/AnnoupaleMobileNav.tsx",
+        "src/app/console/components/annoupale/AnnoupaleShell.tsx",
+        "src/app/console/components/annoupale/AnnoupaleSidebar.tsx",
+        "src/app/console/components/annoupale/AnnoupaleTopbar.tsx",
+        "src/app/console/components/annoupale/AuditLogView.tsx",
+        "src/app/console/components/annoupale/annoupale-nav.tsx",
+        "src/app/console/components/annoupale/annoupale-ui.tsx",
+        "src/app/console/lib/annoupale/admin-fetch.ts",
+        "src/app/console/lib/annoupale/analytics-contract.ts",
+        "src/app/console/lib/annoupale/analytics.ts",
+        "src/app/console/lib/annoupale/audit-contract.ts",
+        "src/app/console/lib/annoupale/audit.ts",
+        "src/app/console/lib/annoupale/bridge-core.ts",
+        "src/app/console/lib/annoupale/bridge.ts",
+        "src/app/console/lib/annoupale/compliance-appeals.ts",
+        "src/app/console/lib/annoupale/compliance-contract.ts",
+        "src/app/console/lib/annoupale/compliance-detail-contract.ts",
+        "src/app/console/lib/annoupale/compliance-detail.ts",
+        "src/app/console/lib/annoupale/compliance-note-contract.ts",
+        "src/app/console/lib/annoupale/compliance-note.ts",
+        "src/app/console/lib/annoupale/compliance-status-contract.ts",
+        "src/app/console/lib/annoupale/compliance-status.ts",
+        "src/app/console/lib/annoupale/compliance.ts",
+        "src/app/console/lib/annoupale/health.ts",
+        "src/app/console/lib/annoupale/moderation-contract.ts",
+        "src/app/console/lib/annoupale/moderation.ts",
+        "src/app/console/lib/annoupale/note-actions.ts",
+        "src/app/console/lib/annoupale/status-actions.ts"
+      ]
+    },
+    {
+      "id": "legacy-console-auth",
+      "owner": "MigraPanel security",
+      "reviewAfter": "2026-10-23T00:00:00.000Z",
+      "reason": "Legacy console password/session helpers are not part of the current authenticated runtime. They remain excluded to avoid reintroducing parallel authentication paths while retirement is reviewed.",
+      "paths": [
+        "src/app/console/lib/password-hash.ts",
+        "src/app/console/lib/session-cookie.ts"
+      ]
+    },
+    {
+      "id": "legacy-nav-model",
+      "owner": "MigraPanel platform operations",
+      "reviewAfter": "2026-10-23T00:00:00.000Z",
+      "reason": "The old capability nav model is no longer imported after SidebarChrome and the reconciled navigation model became authoritative. It remains excluded pending deletion.",
+      "paths": [
+        "src/app/console/components/nav-model.ts"
+      ]
+    },
+    {
+      "id": "organization-directory-identity",
+      "owner": "MigraAuth platform operations",
+      "reviewAfter": "2026-10-23T00:00:00.000Z",
+      "reason": "Identity-creation and identity-user proxy routes are not surfaced by the accepted Organization Directory workflow. Current production uses audited link/sync identity operations; these additional routes remain excluded pending authority and lifecycle review.",
+      "paths": [
+        "src/app/api/platform/organization-directory/[orgId]/create-identity/route.ts",
+        "src/app/api/platform/organization-directory/identity-users/route.ts"
+      ]
+    },
+    {
+      "id": "pale-admin-stale-subroutes",
+      "owner": "Pale platform operations",
+      "reviewAfter": "2026-10-23T00:00:00.000Z",
+      "reason": "These Pale report-detail and account-administration subroutes depend on stale pale-live/pale-rbac contracts and currently fail canonical typecheck. The live Pale overview and base report queue remain available; stale subroutes stay excluded until ported to current contracts.",
+      "paths": [
+        "src/app/console/lib/pale-reports-query.ts",
+        "src/app/console/pale/reports/ReportFilters.tsx",
+        "src/app/console/pale/reports/[id]/page.tsx",
+        "src/app/console/pale/reports/activity/page.tsx",
+        "src/app/console/pale/reports/report-filter-params.ts",
+        "src/app/console/pale/users/UserAccountActions.tsx",
+        "src/app/console/pale/users/[id]/page.tsx",
+        "src/app/console/pale/users/actions.ts",
+        "src/app/console/pale/users/page.tsx"
+      ]
+    },
+    {
+      "id": "unused-console-helpers",
+      "owner": "MigraPanel platform operations",
+      "reviewAfter": "2026-10-23T00:00:00.000Z",
+      "reason": "These helper modules are not imported by the reconciled production console. They remain canonical-only pending deletion or a demonstrated live consumer.",
+      "paths": [
+        "src/app/console/lib/modules/client-lookup-query.ts",
+        "src/app/console/lib/modules/number-ordering.ts"
+      ]
+    }
+  ]
+}

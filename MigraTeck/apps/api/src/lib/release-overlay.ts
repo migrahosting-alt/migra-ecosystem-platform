@@ -19,6 +19,12 @@ export type ReleaseOverlayEntry = {
   classification: OverlayClassification;
   criticality: OverlayCriticality;
   recommendedAction: string;
+  policyDecision?: "intentionally_excluded" | undefined;
+  policyGroup?: string | undefined;
+  policyOwner?: string | undefined;
+  policyReason?: string | undefined;
+  policyReviewAfter?: string | undefined;
+  policyOverdue?: boolean | undefined;
 };
 
 type OverlayManifestEntry = ReleaseOverlayEntry & {
@@ -38,6 +44,8 @@ type OverlayManifest = {
     missingCanonical: number;
     runtimeReconciliation: number;
     highCriticality: number;
+    intentionalExclusions: number;
+    overdueExclusions: number;
   };
   byClassification: Record<string, number>;
   byAction: Record<string, number>;
@@ -66,6 +74,8 @@ const EMPTY_SUMMARY: OverlayManifest["summary"] = {
   missingCanonical: 0,
   runtimeReconciliation: 0,
   highCriticality: 0,
+  intentionalExclusions: 0,
+  overdueExclusions: 0,
 };
 
 const CACHE_MS = 60_000;
@@ -103,6 +113,34 @@ function hasParentTraversal(path: string) {
   return path.split("/").some((segment) => segment === "..");
 }
 
+function validPolicyMetadata(entry: Partial<OverlayManifestEntry>) {
+  const hasPolicy = entry.policyDecision !== undefined;
+  if (!hasPolicy) {
+    return (
+      entry.policyGroup === undefined &&
+      entry.policyOwner === undefined &&
+      entry.policyReason === undefined &&
+      entry.policyReviewAfter === undefined &&
+      entry.policyOverdue === undefined
+    );
+  }
+
+  return (
+    entry.policyDecision === "intentionally_excluded" &&
+    entry.kind === "missing" &&
+    entry.classification === "runtime_source" &&
+    typeof entry.policyGroup === "string" &&
+    entry.policyGroup.length > 0 &&
+    typeof entry.policyOwner === "string" &&
+    entry.policyOwner.length > 0 &&
+    typeof entry.policyReason === "string" &&
+    entry.policyReason.length > 0 &&
+    typeof entry.policyReviewAfter === "string" &&
+    Number.isFinite(new Date(entry.policyReviewAfter).getTime()) &&
+    typeof entry.policyOverdue === "boolean"
+  );
+}
+
 function validateEntry(value: unknown): value is OverlayManifestEntry {
   if (!value || typeof value !== "object") return false;
   const entry = value as Partial<OverlayManifestEntry>;
@@ -126,7 +164,8 @@ function validateEntry(value: unknown): value is OverlayManifestEntry {
     typeof entry.recommendedAction === "string" &&
     entry.recommendedAction.length > 0 &&
     validSha256(entry.canonicalSha256) &&
-    validSha256(entry.releaseSha256)
+    validSha256(entry.releaseSha256) &&
+    validPolicyMetadata(entry)
   );
 }
 
@@ -137,12 +176,25 @@ function publicEntry(entry: OverlayManifestEntry): ReleaseOverlayEntry {
     classification: entry.classification,
     criticality: entry.criticality,
     recommendedAction: entry.recommendedAction,
+    ...(entry.policyDecision
+      ? {
+          policyDecision: entry.policyDecision,
+          policyGroup: entry.policyGroup,
+          policyOwner: entry.policyOwner,
+          policyReason: entry.policyReason,
+          policyReviewAfter: entry.policyReviewAfter,
+          policyOverdue: entry.policyOverdue,
+        }
+      : {}),
   };
 }
 
 function parseManifest(raw: string): OverlayManifest {
   const value = JSON.parse(raw) as Partial<OverlayManifest>;
   const summary = value.summary as Partial<OverlayManifest["summary"]> | undefined;
+
+  const intentionalExclusions = summary?.intentionalExclusions ?? 0;
+  const overdueExclusions = summary?.overdueExclusions ?? 0;
 
   if (
     value.schemaVersion !== 1 ||
@@ -159,6 +211,8 @@ function parseManifest(raw: string): OverlayManifest {
     !isNonNegativeInteger(summary.missingCanonical) ||
     !isNonNegativeInteger(summary.runtimeReconciliation) ||
     !isNonNegativeInteger(summary.highCriticality) ||
+    !isNonNegativeInteger(intentionalExclusions) ||
+    !isNonNegativeInteger(overdueExclusions) ||
     !value.byClassification ||
     typeof value.byClassification !== "object" ||
     !value.byAction ||
@@ -174,7 +228,30 @@ function parseManifest(raw: string): OverlayManifest {
     throw new Error("Release overlay inventory totals do not match entries");
   }
 
-  return value as OverlayManifest;
+  const policyEntries = value.entries.filter(
+    (entry) => entry.policyDecision === "intentionally_excluded",
+  );
+  const activePolicyEntries = policyEntries.filter(
+    (entry) => entry.policyOverdue === false,
+  );
+  const overduePolicyEntries = policyEntries.filter(
+    (entry) => entry.policyOverdue === true,
+  );
+  if (
+    activePolicyEntries.length !== intentionalExclusions ||
+    overduePolicyEntries.length !== overdueExclusions
+  ) {
+    throw new Error("Release overlay policy totals do not match entries");
+  }
+
+  return {
+    ...value,
+    summary: {
+      ...(summary as OverlayManifest["summary"]),
+      intentionalExclusions,
+      overdueExclusions,
+    },
+  } as OverlayManifest;
 }
 
 function samples(entries: OverlayManifestEntry[]) {
@@ -240,8 +317,14 @@ export async function getReleaseOverlaySnapshot(
       samples: samples(manifest.entries),
       detail:
         manifest.summary.runtimeReconciliation > 0
-          ? "Production overlay is inventoried; runtime-source differences require deliberate reconciliation and are never auto-deleted."
-          : "Production overlay is inventoried and has no runtime-source reconciliation debt.",
+          ? "Production overlay is inventoried; unresolved runtime-source differences require deliberate reconciliation. Time-bounded intentional exclusions remain visible separately and are never auto-deleted."
+          : manifest.summary.intentionalExclusions > 0
+            ? "Production overlay is inventoried with " +
+              manifest.summary.intentionalExclusions +
+              " time-bounded intentional exclusion" +
+              (manifest.summary.intentionalExclusions === 1 ? "" : "s") +
+              " and no unresolved runtime-source reconciliation debt."
+            : "Production overlay is inventoried and has no runtime-source reconciliation debt.",
     };
 
     cached = { at: now, manifest, snapshot };
