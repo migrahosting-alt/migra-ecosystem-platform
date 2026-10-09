@@ -1,4 +1,4 @@
-import { handleOAuthCallback } from "@migrateck/auth-client";
+import { clearPkceCookies, handleOAuthCallback } from "@migrateck/auth-client";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { bootstrapPlatformUser } from "@/lib/auth/bootstrap";
@@ -33,7 +33,14 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.redirect(new URL("/dashboard", baseUrl));
-  } catch {
-    return NextResponse.redirect(new URL("/login?error=auth_failed", baseUrl));
+  } catch (error) {
+    await clearPkceCookies(state);
+    console.error("MigraAuth callback failed", {
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
+
+    // Do not send an authenticated MigraAuth session straight back through
+    // /login: that recreates the authorize/callback loop indefinitely.
+    return NextResponse.redirect(new URL("/?auth_error=auth_failed", baseUrl));
   }
 }

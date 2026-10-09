@@ -1,19 +1,20 @@
 import Link from "next/link";
 import type { ServiceHealth } from "../lib/health";
+import { ageLabel, current, type HealthState } from "../lib/fleet/health-contract";
 import { aggregateHealth } from "../lib/health";
 
-const STATUS_COLOR: Record<ServiceHealth["status"], string> = {
-  ok: "from-emerald-500 to-teal-500",
+const STATUS_COLOR: Record<HealthState, string> = {
+  operational: "from-emerald-500 to-teal-500",
   degraded: "from-amber-500 to-orange-500",
   down: "from-rose-500 to-red-500",
   unknown: "from-slate-500 to-slate-700",
 };
 
-const STATUS_LABEL: Record<ServiceHealth["status"], string> = {
-  ok: "Operational",
+const STATUS_LABEL: Record<HealthState, string> = {
+  operational: "Operational",
   degraded: "Degraded",
   down: "Down",
-  unknown: "Unknown",
+  unknown: "Unverified",
 };
 
 export const ServiceHealthPanel = ({ services }: { services: ReadonlyArray<ServiceHealth> }) => {
@@ -33,18 +34,39 @@ export const ServiceHealthPanel = ({ services }: { services: ReadonlyArray<Servi
       <ul className="space-y-3">
         {services.map((s) => (
           <li key={s.id}>
-            <div className="mb-1 flex items-center justify-between text-xs">
-              <span className="font-medium text-slate-200">{s.label}</span>
-              <span className="font-mono text-slate-400">
-                {s.uptime == null ? STATUS_LABEL[s.status] : `${s.uptime.toFixed(2)}%`}
-              </span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-              <div
-                className={`h-full rounded-full bg-gradient-to-r ${STATUS_COLOR[s.status]} transition-all`}
-                style={{ width: s.uptime == null ? (s.status === "ok" ? "100%" : "50%") : `${s.uptime}%` }}
-              />
-            </div>
+            {(() => {
+              const h = current(s.health);
+              return (
+                <>
+                  <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-medium text-slate-200">{s.label}</span>
+                    <span className="shrink-0 font-mono text-slate-400">
+                      {s.uptime == null ? STATUS_LABEL[h.state] : `${s.uptime.toFixed(2)}%`}
+                    </span>
+                  </div>
+                  {/* The progress bar previously rendered 100% width whenever the
+                      state was "ok" — but `uptime` is ALWAYS null in this module,
+                      so a full green bar implied a 100% uptime figure that was
+                      never measured. Only draw a gauge when a real percentage
+                      exists; otherwise show the state's provenance instead. */}
+                  {s.uptime == null ? (
+                    <p
+                      className="truncate text-[10px] text-slate-500"
+                      title={h.state === "unknown" ? h.reason : h.source}
+                    >
+                      {h.state === "unknown" ? h.reason : `${h.source} · ${ageLabel(h)}`}
+                    </p>
+                  ) : (
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+                      <div
+                        className={`h-full rounded-full bg-gradient-to-r ${STATUS_COLOR[h.state]} transition-all`}
+                        style={{ width: `${s.uptime}%` }}
+                      />
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </li>
         ))}
       </ul>

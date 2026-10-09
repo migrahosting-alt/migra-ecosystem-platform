@@ -238,8 +238,15 @@ export const getPaleDashboardView = async (): Promise<PaleDashboardView> => {
     details: a.reason ?? (a.actorRole ? `Role: ${a.actorRole}` : "—"),
   }));
 
+  // Scoped to what was actually probed. This previously read "All Systems
+  // Operational" — an estate-wide claim derived from a single HTTP probe of
+  // pale-api. The probe itself is sound; the sentence was not.
   const backendValue =
-    health.status === "live" ? "All Systems Operational" : health.status === "down" ? "Backend degraded" : "Backend unreachable";
+    health.status === "live"
+      ? "pale-api responding"
+      : health.status === "down"
+        ? "pale-api degraded"
+        : "pale-api unreachable";
 
   const release: ReleaseRow[] = [
     clientVersion

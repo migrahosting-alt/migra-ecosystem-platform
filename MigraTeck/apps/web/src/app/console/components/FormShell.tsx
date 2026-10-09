@@ -80,7 +80,7 @@ export const Field = ({
 }: {
   label: string;
   name: string;
-  type?: "text" | "email" | "number" | "select" | "textarea";
+  type?: "text" | "email" | "number" | "password" | "select" | "textarea";
   required?: boolean;
   placeholder?: string;
   defaultValue?: string;

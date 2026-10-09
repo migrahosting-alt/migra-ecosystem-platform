@@ -77,18 +77,31 @@ export const KpiCard = ({ kpi, variant, icon: Icon, sparkline = [] }: KpiCardPro
 
       <div className="relative mt-3">
         <p className="text-xs font-medium text-slate-400">{kpi.label}</p>
-        <p className="mt-1 text-3xl font-bold tracking-tight text-white">
+        <p
+          className={[
+            "mt-1 font-bold tracking-tight text-white",
+            // Long non-numeric values ("Unknown", "Degraded") overflowed a fixed
+            // text-3xl and collided with the card edge.
+            String(kpi.value ?? "").length > 11
+              ? "text-base"
+              : String(kpi.value ?? "").length > 5
+                ? "text-xl"
+                : "text-3xl",
+          ].join(" ")}
+        >
           {kpi.value}
         </p>
-        {kpi.hint && (
+        {kpi.hint && kpi.hint.trim() !== "—" && (
           <p className="mt-1 text-xs font-medium text-emerald-300">{kpi.hint}</p>
         )}
       </div>
 
-      <div className="relative mt-3 flex items-center gap-1.5 text-[11px]">
-        <DeltaIcon className={`h-3 w-3 ${deltaColor}`} />
-        <span className={`font-semibold ${deltaColor}`}>{deltaLabel}</span>
-      </div>
+      {kpi.delta.pct != null && (
+        <div className="relative mt-3 flex items-center gap-1.5 text-[11px]">
+          <DeltaIcon className={`h-3 w-3 ${deltaColor}`} />
+          <span className={`font-semibold ${deltaColor}`}>{deltaLabel}</span>
+        </div>
+      )}
 
       {spark && (
         <svg

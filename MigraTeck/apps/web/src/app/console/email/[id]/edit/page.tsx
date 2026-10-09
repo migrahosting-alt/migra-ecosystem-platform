@@ -1,6 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getSession } from "../../../lib/auth";
 import { panelExec, panelQuery } from "../../../lib/db";
+import { ensureMailboxMaildir, hashMailboxPassword } from "../../../lib/mailbox-provisioning";
 import { ConsolePageShell } from "../../../components/ConsolePageShell";
 import { FormShell, Field } from "../../../components/FormShell";
 
@@ -8,24 +9,53 @@ export const dynamic = "force-dynamic";
 
 async function updateMailbox(formData: FormData) {
   "use server";
+  if (!(await getSession())) redirect("/console/login");
   const id = String(formData.get("id") || "");
   const status = String(formData.get("status") || "active");
+  const password = String(formData.get("password") || "");
   if (!id) redirect("/console/email");
+  if (!["pending", "active", "suspended", "disabled"].includes(status)) {
+    redirect(`/console/email/${encodeURIComponent(id)}/edit?error=invalid_status`);
+  }
+
+  const rows = await panelQuery<{ address: string; passwordhash: string | null }>(
+    `SELECT address, passwordhash FROM mailboxes WHERE id = $1 LIMIT 1`,
+    [id],
+  );
+  const mailbox = rows[0];
+  if (!mailbox) redirect("/console/email");
+
+  if (status === "active" && !password && !mailbox.passwordhash) {
+    redirect(`/console/email/${id}/edit?error=${encodeURIComponent("Set a password before activating this mailbox")}`);
+  }
+
   try {
-    await panelExec(`UPDATE mailboxes SET status = $2 WHERE id = $1`, [id, status]);
-  } catch (err) {
-    redirect(`/console/email/${id}/edit?error=${encodeURIComponent(err instanceof Error ? err.message : "update_failed")}`);
+    if (password) {
+      const passwordHash = await hashMailboxPassword(password);
+      await ensureMailboxMaildir(mailbox.address);
+      await panelExec(`UPDATE mailboxes SET status = $2, passwordhash = $3 WHERE id = $1`, [id, status, passwordHash]);
+    } else {
+      if (status === "active") {
+        await ensureMailboxMaildir(mailbox.address);
+      }
+      await panelExec(`UPDATE mailboxes SET status = $2 WHERE id = $1`, [id, status]);
+    }
+  } catch {
+    redirect(`/console/email/${encodeURIComponent(id)}/edit?error=update_failed`);
   }
   redirect("/console/email");
 }
 
 async function deleteMailbox(formData: FormData) {
   "use server";
+  if (!(await getSession())) redirect("/console/login");
   const id = String(formData.get("id") || "");
   if (!id) return;
   try {
     await panelExec(`UPDATE mailboxes SET status = 'deleted' WHERE id = $1`, [id]);
-  } catch {}
+  } catch {
+    redirect(`/console/email/${encodeURIComponent(id)}/edit?error=update_failed`);
+  }
   redirect("/console/email");
 }
 
@@ -54,8 +84,8 @@ export default async function EditMailboxPage({
         backHref="/console/email"
         backLabel="Back to Email"
         title={m.address}
-        description="Mailbox address is immutable. Edit status only — password changes happen on mail-core via doveadm."
-        error={sp.error || null}
+        description="Mailbox address is immutable. Update status here, and optionally rotate the mailbox password."
+        error={sp.error ? (sp.error === "invalid_status" ? "Choose a valid mailbox status." : "Unable to save mailbox changes. Check the password requirements and contact the administrator if this continues.") : null}
         action={updateMailbox}
         submitLabel="Save Changes"
       >
@@ -71,6 +101,12 @@ export default async function EditMailboxPage({
             { value: "suspended", label: "Suspended (no auth, mail still delivered)" },
             { value: "disabled", label: "Disabled (auth fails, mail rejected)" },
           ]}
+        />
+        <Field
+          label="New Password"
+          name="password"
+          type="password"
+          hint="Optional. Use up to 72 UTF-8 bytes, without line breaks. Leave empty to keep the current password."
         />
       </FormShell>
 

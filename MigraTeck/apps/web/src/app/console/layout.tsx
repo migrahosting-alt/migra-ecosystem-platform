@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "./console.css";
 
 export const metadata: Metadata = {
   title: "MigraPanel Control Center",
@@ -19,5 +20,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
-  return <div className="min-h-screen bg-slate-950 text-slate-100 antialiased">{children}</div>;
+  return (
+    <div className="console-root min-h-screen bg-slate-950 text-slate-100 antialiased">{children}</div>
+  );
 }

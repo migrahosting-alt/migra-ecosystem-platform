@@ -61,6 +61,30 @@ export const panelQuery = async <T extends QueryRow = QueryRow>(
 
 export const isPanelDbConfigured = () => Boolean(process.env.MIGRAPANEL_DB_URL);
 
+export const getPanelDbStatus = async (): Promise<{
+  configured: boolean;
+  connected: boolean;
+  error?: string;
+}> => {
+  const p = getPanelPool();
+  if (!p) return { configured: false, connected: false, error: "MIGRAPANEL_DB_URL is missing" };
+
+  let client: PoolClient | null = null;
+  try {
+    client = await p.connect();
+    await client.query("SELECT 1");
+    return { configured: true, connected: true };
+  } catch (err) {
+    return {
+      configured: true,
+      connected: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    if (client) client.release();
+  }
+};
+
 /**
  * panelExec — write path. Unlike panelQuery, this RETHROWS on error so server
  * actions can catch and redirect with an error message instead of silently
