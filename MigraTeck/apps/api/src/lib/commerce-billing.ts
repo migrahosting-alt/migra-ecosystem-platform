@@ -462,6 +462,74 @@ export async function getBillingOperationsOverview(
   };
 }
 
+export type BillingWebhookEvidenceFilter =
+  | "attention"
+  | "all"
+  | "RECEIVED"
+  | "QUEUED"
+  | "PROCESSING"
+  | "PROCESSED"
+  | "IGNORED"
+  | "FAILED";
+
+export async function getBillingWebhookEventEvidence(input: {
+  status?: BillingWebhookEvidenceFilter;
+  limit?: number;
+} = {}) {
+  const db = getDb();
+  const status = input.status ?? "attention";
+  const limit = Math.min(Math.max(input.limit ?? 40, 1), 100);
+  const values: unknown[] = [];
+  let where: string;
+
+  if (status === "attention") {
+    where = "w.status IN ('FAILED','RECEIVED','QUEUED','PROCESSING')";
+  } else if (status === "all") {
+    where = "TRUE";
+  } else {
+    values.push(status);
+    where = `w.status=$${values.length}::"BillingWebhookEventStatus"`;
+  }
+  values.push(limit);
+  const limitParam = `$${values.length}`;
+
+  const result = await db.query(
+    [
+      'SELECT w.id,w."eventId",w."eventType",w.status::text AS status,w.reason,w.attempts,w."errorText",',
+      'w."eventCreated",w.livemode,w."apiVersion",w."stripeAccountId",',
+      'w."payloadJson"->>\'objectId\' AS "objectId",w."payloadJson"->>\'objectType\' AS "objectType",',
+      'w."payloadJson"->>\'customerId\' AS "customerId",w."receivedAt",w."processedAt",',
+      'w."firstProcessedAt",w."lastProcessedAt",',
+      'COALESCE(projection."orgId",customer."orgId") AS "orgId",',
+      'org.name AS "orgName",org.slug AS "orgSlug",',
+      'COALESCE(projection."projectionCount",0)::int AS "projectionCount",',
+      'COALESCE(projection."appliedProjectionCount",0)::int AS "appliedProjectionCount",',
+      'projection."latestProjectionAt",state."lastSyncedAt" AS "orgLastSyncedAt",',
+      "CASE WHEN w.status='FAILED'::\"BillingWebhookEventStatus\" AND state.\"lastSyncedAt\" IS NOT NULL AND state.\"lastSyncedAt\">COALESCE(w.\"lastProcessedAt\",w.\"processedAt\",w.\"updatedAt\",w.\"receivedAt\") THEN true ELSE false END AS \"supersededByLaterSync\"",
+      'FROM "BillingWebhookEvent" w',
+      'LEFT JOIN LATERAL (',
+      '  SELECT min(p."orgId") AS "orgId",count(*)::int AS "projectionCount",',
+      "         count(*) FILTER (WHERE p.status='APPLIED')::int AS \"appliedProjectionCount\",",
+      '         max(p."createdAt") AS "latestProjectionAt"',
+      '  FROM "BillingEventProjection" p WHERE p."webhookEventId"=w.id',
+      ') projection ON TRUE',
+      'LEFT JOIN "BillingCustomer" customer ON customer.provider=\'STRIPE\'::"BillingProvider"',
+      '  AND customer."externalCustomerId"=w."payloadJson"->>\'customerId\'',
+      'LEFT JOIN "Organization" org ON org.id=COALESCE(projection."orgId",customer."orgId")',
+      'LEFT JOIN "BillingOrgState" state ON state."orgId"=org.id',
+      `WHERE ${where}`,
+      "ORDER BY CASE w.status WHEN 'FAILED' THEN 0 WHEN 'PROCESSING' THEN 1 WHEN 'QUEUED' THEN 2 WHEN 'RECEIVED' THEN 3 ELSE 4 END,",
+      `w."receivedAt" DESC LIMIT ${limitParam}`,
+    ].join(" "),
+    values,
+  );
+
+  return {
+    filter: status,
+    events: result.rows,
+  };
+}
+
 export async function getOrganizationBillingOperations(orgId: string) {
   const db = getDb();
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requirePlatformAuthority } from "../../../lib/migraauth.js";
 import {
   getBillingOperationsOverview,
+  getBillingWebhookEventEvidence,
   getOrganizationBillingOperations,
   initializeOrganizationBillingCustomer,
   operateSubscription,
@@ -13,6 +14,20 @@ import {
 const overviewQuerySchema = z.object({
   q: z.string().trim().max(160).default(""),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+const webhookEvidenceQuerySchema = z.object({
+  status: z.enum([
+    "attention",
+    "all",
+    "RECEIVED",
+    "QUEUED",
+    "PROCESSING",
+    "PROCESSED",
+    "IGNORED",
+    "FAILED",
+  ]).default("attention"),
+  limit: z.coerce.number().int().min(1).max(100).default(40),
 });
 
 const orgParamsSchema = z.object({
@@ -77,6 +92,12 @@ export async function registerCommerceBillingRoutes(
       },
       ...(await getBillingOperationsOverview(query.q, query.limit)),
     };
+  });
+
+  app.get("/commerce/billing/webhook-events", async (request) => {
+    await requirePlatformAuthority(request, ["platform.commerce.read"]);
+    const query = webhookEvidenceQuerySchema.parse(request.query);
+    return getBillingWebhookEventEvidence(query);
   });
 
   app.get("/commerce/billing/organizations/:orgId", async (request) => {

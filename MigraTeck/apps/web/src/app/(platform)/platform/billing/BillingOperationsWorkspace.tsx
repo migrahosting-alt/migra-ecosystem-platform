@@ -64,6 +64,38 @@ type BillingOverview = {
   }>;
 };
 
+type BillingWebhookEvidence = {
+  filter: string;
+  events: Array<{
+    id: string;
+    eventId: string;
+    eventType: string;
+    status: string;
+    reason: string | null;
+    attempts: number;
+    errorText: string | null;
+    eventCreated: number | null;
+    livemode: boolean | null;
+    apiVersion: string | null;
+    stripeAccountId: string | null;
+    objectId: string | null;
+    objectType: string | null;
+    customerId: string | null;
+    receivedAt: string;
+    processedAt: string | null;
+    firstProcessedAt: string | null;
+    lastProcessedAt: string | null;
+    orgId: string | null;
+    orgName: string | null;
+    orgSlug: string | null;
+    projectionCount: number;
+    appliedProjectionCount: number;
+    latestProjectionAt: string | null;
+    orgLastSyncedAt: string | null;
+    supersededByLaterSync: boolean;
+  }>;
+};
+
 type LocalSubscription = {
   id: string;
   orgId: string;
@@ -301,6 +333,12 @@ export function BillingOperationsWorkspace() {
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [query, setQuery] = useState("");
   const [overviewLoading, setOverviewLoading] = useState(true);
+  const [webhookEvidence, setWebhookEvidence] =
+    useState<BillingWebhookEvidence | null>(null);
+  const [webhookFilter, setWebhookFilter] = useState<"attention" | "all">(
+    "attention",
+  );
+  const [webhookLoading, setWebhookLoading] = useState(true);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [detail, setDetail] = useState<BillingDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -345,6 +383,31 @@ export function BillingOperationsWorkspace() {
     }
   }, []);
 
+  const loadWebhookEvidence = useCallback(
+    async (status: "attention" | "all", background = false) => {
+      if (!background) setWebhookLoading(true);
+      try {
+        const params = new URLSearchParams({ status, limit: "40" });
+        const response = await fetch(
+          "/api/platform/commerce/billing/webhook-events?" + params.toString(),
+          { cache: "no-store" },
+        );
+        const body = await response.json();
+        if (!response.ok) {
+          throw new Error(body.error ?? "Unable to load Stripe event evidence");
+        }
+        setWebhookEvidence(body);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Unable to load Stripe event evidence",
+        );
+      } finally {
+        setWebhookLoading(false);
+      }
+    },
+    [],
+  );
+
   const loadDetail = useCallback(async (orgId: string) => {
     setDetailLoading(true);
     setError(null);
@@ -372,6 +435,10 @@ export function BillingOperationsWorkspace() {
     const timer = window.setTimeout(() => void loadOverview(query, true), 300);
     return () => window.clearTimeout(timer);
   }, [query, loadOverview]);
+
+  useEffect(() => {
+    void loadWebhookEvidence(webhookFilter);
+  }, [webhookFilter, loadWebhookEvidence]);
 
   const selectedSummary = useMemo(
     () => overview?.organizations.find((org) => org.id === selectedOrgId) ?? null,
@@ -482,7 +549,10 @@ export function BillingOperationsWorkspace() {
       setDetail(body);
       setReconcileReason("");
       setNotice("Stripe evidence reconciled into the MigraPay ledger and audited.");
-      await loadOverview(query, true);
+      await Promise.all([
+        loadOverview(query, true),
+        loadWebhookEvidence(webhookFilter, true),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Billing reconciliation failed");
     } finally {
@@ -625,6 +695,143 @@ export function BillingOperationsWorkspace() {
           value={(overview.metrics.failedWebhookEvents + overview.metrics.pendingWebhookEvents).toLocaleString()}
           detail={overview.metrics.failedWebhookEvents + " failed · " + overview.metrics.pendingWebhookEvents + " pending"}
         />
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+              Stripe event evidence
+            </p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+              Ingestion health & reconciliation evidence
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+              Safe event metadata only. Raw Stripe payloads are never exposed here, and this surface intentionally has no blind replay action.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+              {(["attention", "all"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setWebhookFilter(value)}
+                  className={
+                    "rounded-lg px-3 py-1.5 text-xs font-semibold transition " +
+                    (webhookFilter === value
+                      ? "bg-white text-slate-950 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800")
+                  }
+                >
+                  {value === "attention" ? "Needs attention" : "All events"}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadWebhookEvidence(webhookFilter)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+              aria-label="Refresh Stripe event evidence"
+            >
+              <RefreshCw size={15} className={webhookLoading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </div>
+
+        {webhookLoading && !webhookEvidence ? (
+          <div className="flex items-center gap-2 p-5 text-sm text-slate-500">
+            <Loader2 size={16} className="animate-spin" /> Loading Stripe event evidence…
+          </div>
+        ) : webhookEvidence?.events.length ? (
+          <div className="divide-y divide-slate-100">
+            {webhookEvidence.events.map((event) => (
+              <article key={event.id} className="p-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusPill value={event.status} />
+                      {event.supersededByLaterSync ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                          <ShieldCheck size={12} /> Superseded by later sync
+                        </span>
+                      ) : event.status === "FAILED" ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700">
+                          <ShieldAlert size={12} /> Needs operator inspection
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {event.eventType}
+                    </p>
+                    <code className="mt-1 block break-all text-[10px] text-slate-400">
+                      {event.eventId}
+                    </code>
+                  </div>
+                  <div className="text-left text-xs text-slate-500 lg:text-right">
+                    <p>{formatDate(event.receivedAt)}</p>
+                    <p className="mt-1">Attempt {event.attempts || 1}</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                  {event.objectType ? <span>Object {event.objectType}</span> : null}
+                  {event.objectId ? <span className="font-mono text-[11px]">{event.objectId}</span> : null}
+                  <span>{event.appliedProjectionCount}/{event.projectionCount} projections applied</span>
+                  {event.orgLastSyncedAt ? (
+                    <span>Org sync {formatDate(event.orgLastSyncedAt)}</span>
+                  ) : null}
+                </div>
+
+                {event.errorText || event.reason ? (
+                  <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                    {event.errorText ?? event.reason}
+                  </p>
+                ) : null}
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 text-xs text-slate-500">
+                    {event.orgName ? (
+                      <>
+                        <span className="font-semibold text-slate-700">{event.orgName}</span>
+                        {event.orgSlug ? <span> · {event.orgSlug}</span> : null}
+                      </>
+                    ) : event.customerId ? (
+                      <span>Customer mapping not resolved</span>
+                    ) : (
+                      <span>No organization identity in safe event summary</span>
+                    )}
+                  </div>
+                  {event.orgId ? (
+                    <button
+                      type="button"
+                      onClick={() => void selectOrganization(event.orgId!)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                    >
+                      Inspect account <ChevronRight size={13} />
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-start gap-3 p-5">
+            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+              <ShieldCheck size={17} />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                {webhookFilter === "attention"
+                  ? "No Stripe events need attention"
+                  : "No Stripe event evidence is recorded yet"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Failed or in-flight ingestion will appear here with mapped organization and reconciliation evidence.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.72fr_1.28fr]">

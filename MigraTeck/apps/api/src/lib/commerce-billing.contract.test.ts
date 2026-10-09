@@ -243,3 +243,43 @@ test("payment method output is card-safe metadata only", () => {
   assert.doesNotMatch(service, /card\.number/);
   assert.doesNotMatch(service, /cvc/);
 });
+
+test("Stripe event evidence is read-only, authority-scoped, and never exposes raw payloads", () => {
+  const operatorUi = repoFile(
+    "apps/web/src/app/(platform)/platform/billing/BillingOperationsWorkspace.tsx",
+  );
+  const webProxy = repoFile(
+    "apps/web/src/app/api/platform/commerce/billing/webhook-events/route.ts",
+  );
+
+  const webhookRoute = routes.slice(
+    routes.indexOf('app.get("/commerce/billing/webhook-events"'),
+    routes.indexOf('app.get("/commerce/billing/organizations/:orgId"'),
+  );
+  const webhookEvidenceService = service.slice(
+    service.indexOf("export async function getBillingWebhookEventEvidence"),
+    service.indexOf("export async function getOrganizationBillingOperations"),
+  );
+
+  assert.match(webhookRoute, /platform\.commerce\.read/);
+  assert.doesNotMatch(webhookRoute, /platform\.commerce\.billing\.manage/);
+  assert.match(webhookEvidenceService, /getBillingWebhookEventEvidence/);
+  assert.match(webhookEvidenceService, /payloadJson.*objectId/);
+  assert.match(webhookEvidenceService, /payloadJson.*objectType/);
+  assert.match(webhookEvidenceService, /payloadJson.*customerId/);
+  assert.match(webhookEvidenceService, /BillingEventProjection/);
+  assert.match(webhookEvidenceService, /supersededByLaterSync/);
+  assert.match(webhookEvidenceService, /state\."lastSyncedAt"/);
+  assert.doesNotMatch(webhookEvidenceService, /rawPayload/);
+  assert.doesNotMatch(webhookEvidenceService, /SELECT w\."payloadJson"(?:\s|,|AS)/);
+
+  assert.match(webProxy, /getAppSession/);
+  assert.match(webProxy, /platform\.read/);
+  assert.match(webProxy, /\/commerce\/billing\/webhook-events/);
+  assert.match(operatorUi, /Stripe event evidence/);
+  assert.match(operatorUi, /Raw Stripe payloads are never exposed here/);
+  assert.match(operatorUi, /no blind replay action/);
+  assert.match(operatorUi, /Superseded by later sync/);
+  assert.match(operatorUi, /Inspect account/);
+  assert.doesNotMatch(operatorUi, /Replay all/i);
+});
