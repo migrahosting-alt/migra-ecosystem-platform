@@ -184,6 +184,147 @@ export function classifyReconciliation(entry, workspaceSha256, headSha256) {
   };
 }
 
+function normalizeFingerprint(value) {
+  return value ?? null;
+}
+
+function loadResolutionMap(ledger, inventory) {
+  if (
+    !ledger ||
+    ledger.schemaVersion !== 1 ||
+    !ledger.inventory ||
+    !Array.isArray(ledger.entries)
+  ) {
+    throw new Error("Overlay reconciliation resolution schema is invalid");
+  }
+
+  if (
+    ledger.inventory.canonicalCommit !== (inventory.canonicalCommit ?? null) ||
+    ledger.inventory.releaseLabel !== (inventory.releaseLabel ?? null)
+  ) {
+    throw new Error("Overlay reconciliation resolutions target a different installed inventory");
+  }
+
+  const resolutions = new Map();
+  for (const resolution of ledger.entries) {
+    if (
+      !resolution ||
+      typeof resolution !== "object" ||
+      typeof resolution.path !== "string" ||
+      resolution.path.startsWith("/") ||
+      hasParentTraversal(resolution.path)
+    ) {
+      throw new Error("Overlay reconciliation resolutions contain an unsafe path");
+    }
+    if (resolutions.has(resolution.path)) {
+      throw new Error("Overlay reconciliation resolutions contain a duplicate path");
+    }
+    if (
+      !["intentionally_excluded", "candidate_supersedes_production"].includes(
+        resolution.decision,
+      )
+    ) {
+      throw new Error("Overlay reconciliation resolution has an unsupported decision");
+    }
+    if (
+      typeof resolution.reason !== "string" ||
+      resolution.reason.trim().length < 8
+    ) {
+      throw new Error("Overlay reconciliation resolution requires an operator reason");
+    }
+    resolutions.set(resolution.path, resolution);
+  }
+
+  return resolutions;
+}
+
+export function applyReconciliationResolution(
+  entry,
+  workspaceSha256,
+  headSha256,
+  baseResult,
+  resolution,
+) {
+  if (!resolution) return baseResult;
+
+  const canonical = normalizeFingerprint(entry.canonicalSha256);
+  const release = normalizeFingerprint(entry.releaseSha256);
+  if (
+    resolution.kind !== entry.kind ||
+    normalizeFingerprint(resolution.canonicalSha256) !== canonical ||
+    normalizeFingerprint(resolution.releaseSha256) !== release
+  ) {
+    return {
+      category: "resolution_fingerprint_mismatch",
+      blocking: true,
+      detail:
+        "The stored reconciliation decision no longer matches the installed inventory fingerprints.",
+    };
+  }
+
+  if (resolution.decision === "intentionally_excluded") {
+    if (!["missing", "extra"].includes(entry.kind)) {
+      return {
+        category: "resolution_invalid_for_kind",
+        blocking: true,
+        detail:
+          "Intentional exclusion is only valid for files absent from one side of the installed release.",
+      };
+    }
+    if (
+      normalizeFingerprint(resolution.candidateSha256) !== null ||
+      workspaceSha256 !== null ||
+      headSha256 !== null
+    ) {
+      return {
+        category: "resolution_candidate_mismatch",
+        blocking: true,
+        detail:
+          "The candidate no longer matches the committed intentional-exclusion decision.",
+      };
+    }
+    return {
+      category: "intentional_exclusion",
+      blocking: false,
+      detail:
+        "The installed/canonical-only file is deliberately excluded by a fingerprint-pinned committed decision.",
+    };
+  }
+
+  if (!["modified", "extra"].includes(entry.kind)) {
+    return {
+      category: "resolution_invalid_for_kind",
+      blocking: true,
+      detail:
+        "Candidate supersession is only valid for modified or production-only runtime source.",
+    };
+  }
+
+  const candidate = resolution.candidateSha256;
+  if (!isSha256(candidate)) {
+    return {
+      category: "resolution_candidate_fingerprint_invalid",
+      blocking: true,
+      detail: "The reconciliation decision does not contain a valid candidate fingerprint.",
+    };
+  }
+  if (workspaceSha256 !== candidate || headSha256 !== candidate) {
+    return {
+      category: "resolution_candidate_mismatch",
+      blocking: true,
+      detail:
+        "The workspace and committed candidate must both match the fingerprint-pinned supersession decision.",
+    };
+  }
+
+  return {
+    category: "candidate_supersedes_production",
+    blocking: false,
+    detail:
+      "A committed fingerprint-pinned candidate intentionally supersedes the installed production patch.",
+  };
+}
+
 export async function analyzeOverlayReconciliation({
   inventoryPath,
   workspaceRoot,
@@ -191,6 +332,7 @@ export async function analyzeOverlayReconciliation({
   gitPrefix = "",
   classification = "runtime_source",
   sampleLimit = 12,
+  resolutionPath = null,
 }) {
   const [inventoryRaw, workspace] = await Promise.all([
     readFile(inventoryPath, "utf8"),
@@ -203,6 +345,12 @@ export async function analyzeOverlayReconciliation({
   }
 
   const gitCanonical = gitRoot ? await realpath(gitRoot) : null;
+  let resolutionMap = new Map();
+  if (resolutionPath) {
+    const resolutionRaw = await readFile(resolutionPath, "utf8");
+    resolutionMap = loadResolutionMap(JSON.parse(resolutionRaw), inventory);
+  }
+  const usedResolutionPaths = new Set();
   const entries = [];
   const counts = {};
   const blockers = {};
@@ -220,7 +368,16 @@ export async function analyzeOverlayReconciliation({
 
     const workspaceSha256 = await hashWorkspaceFile(workspace, entry.path);
     const headSha256 = hashHeadFile(gitCanonical, gitPrefix, entry.path);
-    const result = classifyReconciliation(entry, workspaceSha256, headSha256);
+    const baseResult = classifyReconciliation(entry, workspaceSha256, headSha256);
+    const resolution = resolutionMap.get(entry.path) ?? null;
+    if (resolution) usedResolutionPaths.add(entry.path);
+    const result = applyReconciliationResolution(
+      entry,
+      workspaceSha256,
+      headSha256,
+      baseResult,
+      resolution,
+    );
     counts[result.category] = (counts[result.category] ?? 0) + 1;
     if (result.blocking) blockers[result.category] = (blockers[result.category] ?? 0) + 1;
 
@@ -232,7 +389,17 @@ export async function analyzeOverlayReconciliation({
       category: result.category,
       blocking: result.blocking,
       detail: result.detail,
+      resolution: resolution?.decision ?? null,
     });
+  }
+
+  for (const path of resolutionMap.keys()) {
+    if (!usedResolutionPaths.has(path)) {
+      throw new Error(
+        "Overlay reconciliation resolution references a path outside the analyzed inventory scope: " +
+          path,
+      );
+    }
   }
 
   const blockingCount = entries.filter((entry) => entry.blocking).length;
@@ -276,6 +443,7 @@ const gitRootArg = arg("git-root");
 const gitPrefixArg = arg("git-prefix", "");
 const classificationArg = arg("classification", "runtime_source");
 const outputArg = arg("output");
+const resolutionArg = arg("resolutions");
 const sampleLimitArg = Number(arg("sample-limit", "12"));
 
 if (inventoryArg && workspaceArg) {
@@ -286,6 +454,7 @@ if (inventoryArg && workspaceArg) {
     gitPrefix: gitPrefixArg,
     classification: classificationArg === "all" ? null : classificationArg,
     sampleLimit: Number.isFinite(sampleLimitArg) ? Math.max(1, Math.min(sampleLimitArg, 100)) : 12,
+    resolutionPath: resolutionArg,
   });
 
   if (outputArg) {
@@ -307,6 +476,6 @@ if (inventoryArg && workspaceArg) {
   }
 } else if (process.argv[1]?.endsWith("analyze-overlay-reconciliation.mjs")) {
   throw new Error(
-    "Usage: node analyze-overlay-reconciliation.mjs --inventory <file> --workspace <dir> [--git-root <repo>] [--git-prefix <path>] [--classification runtime_source|all] [--output <file>] [--fail-on-blockers]",
+    "Usage: node analyze-overlay-reconciliation.mjs --inventory <file> --workspace <dir> [--git-root <repo>] [--git-prefix <path>] [--classification runtime_source|all] [--resolutions <file>] [--output <file>] [--fail-on-blockers]",
   );
 }

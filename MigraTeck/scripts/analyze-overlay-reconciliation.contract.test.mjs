@@ -364,3 +364,136 @@ test("committed lookup treats Next dynamic route names literally", () => {
   assert.equal(output.summary.nonBlocking, 1);
   assert.equal(output.summary.blocking, 1);
 });
+
+test("fingerprint-pinned resolutions fail closed when the committed candidate moves", () => {
+  const root = mkdtempSync(join(tmpdir(), "migrateck-reconcile-resolutions-"));
+  const workspace = join(root, "apps/web");
+  mkdirSync(workspace, { recursive: true });
+
+  execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "reconcile@example.invalid"], {
+    cwd: root,
+  });
+  execFileSync("git", ["config", "user.name", "Reconcile Test"], {
+    cwd: root,
+  });
+
+  write(root, "apps/web/src/merged.ts", "candidate merged behavior");
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["commit", "-m", "candidate fixture"], {
+    cwd: root,
+    stdio: "ignore",
+  });
+
+  const inventory = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    canonicalCommit: "fixture-baseline",
+    releaseLabel: "fixture-release",
+    entries: [
+      {
+        path: "src/removed.ts",
+        kind: "missing",
+        classification: "runtime_source",
+        criticality: "high",
+        recommendedAction: "deploy_or_intentionally_exclude",
+        canonicalSha256: sha("retired canonical page"),
+        releaseSha256: null,
+      },
+      {
+        path: "src/merged.ts",
+        kind: "modified",
+        classification: "runtime_source",
+        criticality: "high",
+        recommendedAction: "reconcile_patch",
+        canonicalSha256: sha("old canonical behavior"),
+        releaseSha256: sha("production patch"),
+      },
+    ],
+  };
+
+  const resolutions = {
+    schemaVersion: 1,
+    inventory: {
+      canonicalCommit: inventory.canonicalCommit,
+      releaseLabel: inventory.releaseLabel,
+    },
+    entries: [
+      {
+        path: "src/removed.ts",
+        decision: "intentionally_excluded",
+        kind: "missing",
+        canonicalSha256: sha("retired canonical page"),
+        releaseSha256: null,
+        candidateSha256: null,
+        reason: "The retired operator page must remain absent from production.",
+      },
+      {
+        path: "src/merged.ts",
+        decision: "candidate_supersedes_production",
+        kind: "modified",
+        canonicalSha256: sha("old canonical behavior"),
+        releaseSha256: sha("production patch"),
+        candidateSha256: sha("candidate merged behavior"),
+        reason: "The committed candidate merges the production behavior with the replacement contract.",
+      },
+    ],
+  };
+
+  const inventoryPath = join(root, "inventory.json");
+  const resolutionsPath = join(root, "resolutions.json");
+  writeFileSync(inventoryPath, JSON.stringify(inventory), "utf8");
+  writeFileSync(resolutionsPath, JSON.stringify(resolutions), "utf8");
+
+  const script = join(repoRoot(), "scripts/analyze-overlay-reconciliation.mjs");
+  const accepted = spawnSync(
+    "node",
+    [
+      script,
+      "--inventory",
+      inventoryPath,
+      "--workspace",
+      workspace,
+      "--git-root",
+      root,
+      "--git-prefix",
+      "apps/web",
+      "--resolutions",
+      resolutionsPath,
+      "--fail-on-blockers",
+    ],
+    { cwd: repoRoot(), encoding: "utf8" },
+  );
+
+  assert.equal(accepted.status, 0, accepted.stderr);
+  const acceptedOutput = JSON.parse(accepted.stdout);
+  assert.equal(acceptedOutput.summary.cutoverSafe, true);
+  assert.equal(acceptedOutput.counts.intentional_exclusion, 1);
+  assert.equal(acceptedOutput.counts.candidate_supersedes_production, 1);
+
+  write(root, "apps/web/src/merged.ts", "uncommitted candidate drift");
+  const drifted = spawnSync(
+    "node",
+    [
+      script,
+      "--inventory",
+      inventoryPath,
+      "--workspace",
+      workspace,
+      "--git-root",
+      root,
+      "--git-prefix",
+      "apps/web",
+      "--resolutions",
+      resolutionsPath,
+      "--fail-on-blockers",
+    ],
+    { cwd: repoRoot(), encoding: "utf8" },
+  );
+
+  assert.equal(drifted.status, 20, drifted.stderr);
+  const driftedOutput = JSON.parse(drifted.stdout);
+  assert.equal(driftedOutput.counts.intentional_exclusion, 1);
+  assert.equal(driftedOutput.counts.resolution_candidate_mismatch, 1);
+  assert.equal(driftedOutput.summary.cutoverSafe, false);
+});

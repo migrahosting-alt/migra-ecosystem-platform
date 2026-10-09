@@ -22,6 +22,7 @@ DEPLOY_SMOKE_ATTEMPTS="${DEPLOY_SMOKE_ATTEMPTS:-10}"
 DEPLOY_SMOKE_DELAY_SECONDS="${DEPLOY_SMOKE_DELAY_SECONDS:-2}"
 DEPLOY_RELEASE_GATE="${DEPLOY_RELEASE_GATE:-true}"
 DEPLOY_OVERLAY_INVENTORY_PATH="${DEPLOY_OVERLAY_INVENTORY_PATH:-/opt/migra/apps/migrateck/current/OVERLAY_INVENTORY.json}"
+DEPLOY_OVERLAY_RESOLUTIONS_PATH="${DEPLOY_OVERLAY_RESOLUTIONS_PATH:-${ROOT_DIR}/docs/operations/recovery/web-overlay-resolutions.json}"
 
 log() {
   printf '%s\n' "$1"
@@ -45,7 +46,13 @@ run_release_overlay_gate() {
   local remote_target="${DEPLOY_USER}@${DEPLOY_HOST}"
   local inventory
   local gate_status=0
+  local git_root
+  local git_prefix
+  local -a gate_cmd
   inventory="$(mktemp)"
+  git_root="$(git -C "${ROOT_DIR}" rev-parse --show-toplevel)"
+  git_prefix="$(git -C "${ROOT_DIR}/apps/web" rev-parse --show-prefix)"
+  git_prefix="${git_prefix%/}"
 
   log "[step] fetch installed web overlay inventory"
   if ! ssh -p "${DEPLOY_SSH_PORT}" "${remote_target}"       "cat $(printf '%q' "${DEPLOY_OVERLAY_INVENTORY_PATH}")" >"${inventory}"; then
@@ -55,7 +62,21 @@ run_release_overlay_gate() {
   fi
 
   log "[step] verify candidate does not lose unreconciled production runtime source"
-  node "${ROOT_DIR}/scripts/analyze-overlay-reconciliation.mjs"     --inventory "${inventory}"     --workspace "${ROOT_DIR}/apps/web"     --git-root "${ROOT_DIR}"     --git-prefix "apps/web"     --classification runtime_source     --fail-on-blockers || gate_status=$?
+  gate_cmd=(
+    node
+    "${ROOT_DIR}/scripts/analyze-overlay-reconciliation.mjs"
+    --inventory "${inventory}"
+    --workspace "${ROOT_DIR}/apps/web"
+    --git-root "${git_root}"
+    --git-prefix "${git_prefix}"
+    --classification runtime_source
+    --fail-on-blockers
+  )
+  if [[ -f "${DEPLOY_OVERLAY_RESOLUTIONS_PATH}" ]]; then
+    log "[step] apply fingerprint-pinned overlay reconciliation decisions"
+    gate_cmd+=(--resolutions "${DEPLOY_OVERLAY_RESOLUTIONS_PATH}")
+  fi
+  "${gate_cmd[@]}" || gate_status=$?
 
   rm -f "${inventory}"
 

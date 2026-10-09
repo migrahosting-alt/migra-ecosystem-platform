@@ -32,3 +32,12 @@ test("release gate fetches the installed inventory and always cleans its tempora
   const removals = deployScript.match(/rm -f "\$\{inventory\}"/g) ?? [];
   assert.ok(removals.length >= 2, "temporary inventory must be removed on fetch failure and after analysis");
 });
+
+test("release gate derives repository-relative Git paths and honors pinned resolutions", () => {
+  assert.match(deployScript, /DEPLOY_OVERLAY_RESOLUTIONS_PATH=/);
+  assert.match(deployScript, /git -C "\$\{ROOT_DIR\}" rev-parse --show-toplevel/);
+  assert.match(deployScript, /git -C "\$\{ROOT_DIR\}\/apps\/web" rev-parse --show-prefix/);
+  assert.match(deployScript, /--git-root "\$\{git_root\}"/);
+  assert.match(deployScript, /--git-prefix "\$\{git_prefix\}"/);
+  assert.match(deployScript, /gate_cmd\+=\(--resolutions "\$\{DEPLOY_OVERLAY_RESOLUTIONS_PATH\}"\)/);
+});
