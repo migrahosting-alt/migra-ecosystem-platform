@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { getDb } from "./db.js";
 import { getHostCapacitySnapshot } from "./host-capacity.js";
 import { getReleaseIntegritySnapshot } from "./release-provenance.js";
+import { getReleaseOverlaySnapshot } from "./release-overlay.js";
 import { getProvisioningDriftSnapshot } from "./provisioning-drift.js";
 import { analyzeSocialConnectionSyncQueue } from "./social-connection-sync.js";
 
@@ -142,6 +143,7 @@ export async function getInfrastructureHealthSnapshot() {
     socialConnections,
     socialConnectionCoverage,
     releaseIntegrity,
+    releaseOverlay,
     hostCapacity,
   ] = await Promise.all([
     Promise.all(WORKERS.map((worker) => readHeartbeat(worker, now))),
@@ -204,6 +206,7 @@ export async function getInfrastructureHealthSnapshot() {
        WHERE "accessModel"='oauth' AND status<>'paused'`,
     ),
     getReleaseIntegritySnapshot(),
+    getReleaseOverlaySnapshot(),
     getHostCapacitySnapshot(),
   ]);
 
@@ -268,6 +271,11 @@ export async function getInfrastructureHealthSnapshot() {
       socialConnectionAttention: socialConnectionHealth.needsAttention,
       socialReconnectRequired: socialConnectionHealth.reconnectRequired,
       releaseIntegrityIssues,
+      releaseOverlayState: releaseOverlay.state,
+      releaseOverlayDifferences: releaseOverlay.summary.totalDifferences,
+      releaseOverlayRuntimeReconciliation:
+        releaseOverlay.summary.runtimeReconciliation,
+      releaseOverlayHighCriticality: releaseOverlay.summary.highCriticality,
       hostCapacityState: hostCapacity.state,
       diskUsedPercent: hostCapacity.disk.usedPercent,
       diskAvailableBytes: hostCapacity.disk.availableBytes,
@@ -285,6 +293,7 @@ export async function getInfrastructureHealthSnapshot() {
       socialConnections: socialConnectionHealth,
     },
     releases: releaseIntegrity,
+    overlay: releaseOverlay,
     host: hostCapacity,
   };
 }
