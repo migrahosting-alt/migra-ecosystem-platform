@@ -75,23 +75,26 @@ test("usage health reads the real UsageEvent export lifecycle", () => {
 });
 
 
-test("social infrastructure health includes redacted diagnostics for disconnected and reconnect-required connections", () => {
+test("social infrastructure health uses the secret-safe operator classification and redacted diagnostics", () => {
   const health = repoFile("apps/api/src/lib/infrastructure-health.ts");
   const social = repoFile("apps/api/src/lib/social-connection-sync.ts");
   const panel = repoFile(
     "apps/web/src/components/platform/InfrastructureHealthPanel.tsx",
   );
 
-  assert.match(health, /inspectSocialConnectionHealth/);
-  assert.match(health, /connections: socialConnections/);
-  assert.match(health, /providerSetupRequired/);
+  assert.match(health, /getSocialConnectionOperationsSnapshot/);
+  assert.match(health, /connections: socialConnections\.rows\.map/);
+  assert.match(health, /socialProviderSetupRequired/);
+  assert.match(health, /socialIntegrationRequired/);
   assert.match(health, /missingCredential/);
   assert.doesNotMatch(health, /missingCredentialReconnect/);
 
-  assert.match(social, /listInspectableConnections/);
-  assert.match(social, /LEFT JOIN "Organization"/);
+  assert.match(social, /providerSetupRequired/);
+  assert.match(social, /integrationRequired/);
+  assert.match(social, /operatorAction/);
   assert.match(panel, /Social recovery evidence/);
-  assert.match(panel, /Provider authorization is not performed from this page/);
+  assert.match(panel, /Open Social Connections/);
+  assert.match(panel, /\/platform\/social/);
 });
 
 test("host capacity makes disk and release pressure part of operator health", () => {

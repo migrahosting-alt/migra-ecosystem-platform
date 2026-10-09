@@ -164,6 +164,22 @@ test("commerce authority separates reading, usage, billing, org access, and glob
   assert.ok(owner.has("platform.commerce.catalog.manage"));
 });
 
+
+test("social authority separates health inspection from OAuth mutation", () => {
+  const support = permissionsForRoles(["SUPPORT"]);
+  const operator = permissionsForRoles(["OPERATOR"]);
+  const owner = permissionsForRoles(["OWNER"]);
+
+  assert.ok(support.has("platform.social.read"));
+  assert.ok(!support.has("platform.social.manage"));
+
+  assert.ok(operator.has("platform.social.read"));
+  assert.ok(operator.has("platform.social.manage"));
+
+  assert.ok(owner.has("platform.social.read"));
+  assert.ok(owner.has("platform.social.manage"));
+});
+
 test("hosting authority separates read-only topology inspection from tenant binding", () => {
   const support = permissionsForRoles(["SUPPORT"]);
   const operator = permissionsForRoles(["OPERATOR"]);

@@ -46,7 +46,14 @@ type SocialConnectionDiagnostic = {
     | "token_expiring"
     | "verification_stale";
   summary: string;
-  recommendedAction: "connect" | "reconnect" | "refresh" | "sync" | "monitor";
+  recommendedAction:
+    | "connect"
+    | "reconnect"
+    | "refresh"
+    | "sync"
+    | "monitor"
+    | "provider_setup"
+    | "integration_required";
   connected: boolean;
   canAutoRefresh: boolean;
   tokenExpired: boolean;
@@ -55,6 +62,7 @@ type SocialConnectionDiagnostic = {
   missingAccountBinding: boolean;
   requiresReconnect: boolean;
   providerSetupRequired: boolean;
+  integrationRequired: boolean;
   needsAttention: boolean;
   expiresInHours: number | null;
   tokenExpiresAt: string | null;
@@ -68,7 +76,11 @@ type SocialConnectionQueue = {
   disconnected: number;
   needsAttention: number;
   reconnectRequired: number;
+  connectRequired: number;
   providerSetupRequired: number;
+  integrationRequired: number;
+  refreshRequired: number;
+  syncRequired: number;
   tokenExpired: number;
   tokenExpiresSoon: number;
   verificationStale: number;
@@ -103,6 +115,9 @@ type HealthPayload = {
     entitlementOverdue: number;
     socialConnectionAttention: number;
     socialReconnectRequired: number;
+    socialConnectRequired: number;
+    socialProviderSetupRequired: number;
+    socialIntegrationRequired: number;
     releaseIntegrityIssues: number;
     releaseOverlayState: "managed" | "missing" | "invalid";
     releaseOverlayDifferences: number;
@@ -255,6 +270,9 @@ function socialPlatformLabel(platform: string) {
 }
 
 function socialActionCopy(connection: SocialConnectionDiagnostic) {
+  if (connection.integrationRequired) {
+    return "Managed OAuth is not implemented for this provider yet. The connection stays visible as a connector gap and no manual-token workaround is offered.";
+  }
   if (connection.providerSetupRequired) {
     return "OAuth is present, but the provider account is missing a publishable Page or business account. Complete provider-side setup, then reconnect and verify.";
   }
@@ -275,6 +293,7 @@ function socialActionCopy(connection: SocialConnectionDiagnostic) {
 
 function socialStateClasses(connection: SocialConnectionDiagnostic) {
   if (!connection.needsAttention) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (connection.integrationRequired) return "border-slate-300 bg-slate-100 text-slate-700";
   if (connection.providerSetupRequired) return "border-violet-200 bg-violet-50 text-violet-700";
   if (!connection.connected) return "border-sky-200 bg-sky-50 text-sky-700";
   return "border-amber-200 bg-amber-50 text-amber-800";
@@ -366,6 +385,12 @@ export function InfrastructureHealthPanel() {
   const socialAttention = numberValue(data.queues.socialConnections.needsAttention);
   const socialReconnect = numberValue(
     data.queues.socialConnections.reconnectRequired,
+  );
+  const socialProviderSetup = numberValue(
+    data.queues.socialConnections.providerSetupRequired,
+  );
+  const socialIntegration = numberValue(
+    data.queues.socialConnections.integrationRequired,
   );
   const socialDiagnostics = data.queues.socialConnections.connections ?? [];
   const socialAttentionRows = socialDiagnostics.filter(
@@ -780,9 +805,10 @@ export function InfrastructureHealthPanel() {
           href="/platform/commerce/catalog"
           alert={data.summary.entitlementOverdue > 0}
         />
-        <article
+        <Link
+          href="/platform/social"
           className={
-            "rounded-2xl border bg-white p-4 " +
+            "rounded-2xl border bg-white p-4 transition hover:border-blue-200 hover:shadow-sm " +
             (socialAttention > 0 ? "border-amber-200" : "border-slate-200")
           }
         >
@@ -798,9 +824,12 @@ export function InfrastructureHealthPanel() {
             {socialAttention.toLocaleString()}
           </p>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            {socialReconnect} reconnect required · worker-managed sync
+            {socialReconnect} reconnect · {socialProviderSetup} provider setup · {socialIntegration} connector gap
           </p>
-        </article>
+          <p className="mt-2 text-[10px] font-semibold text-blue-600">
+            Open Social Connections →
+          </p>
+        </Link>
       </div>
 
       {socialAttentionRows.length > 0 ? (
@@ -814,14 +843,20 @@ export function InfrastructureHealthPanel() {
                 Provider authorization attention
               </h3>
               <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-                Each row is a redacted health diagnosis. Provider authorization is not performed from this page, and no OAuth token, refresh token, credential ciphertext, or external account ID is exposed here.
+                Each row is a redacted health diagnosis. Managed authorization starts only from the explicit Social Connections workspace; no OAuth token, refresh token, credential ciphertext, or external account ID is exposed here.
               </p>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
+            <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
               <div className="rounded-xl border border-violet-100 bg-violet-50 px-3 py-2">
                 <p className="font-semibold uppercase tracking-[0.08em] text-violet-600">Setup</p>
                 <p className="mt-1 text-base font-semibold text-violet-900">
                   {data.queues.socialConnections.providerSetupRequired}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2">
+                <p className="font-semibold uppercase tracking-[0.08em] text-slate-600">Connector gap</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">
+                  {data.queues.socialConnections.integrationRequired}
                 </p>
               </div>
               <div className="rounded-xl border border-sky-100 bg-sky-50 px-3 py-2">
@@ -880,6 +915,9 @@ export function InfrastructureHealthPanel() {
                   </span>
                   {connection.providerSetupRequired ? (
                     <span className="rounded-full bg-violet-100 px-2 py-1 text-violet-700">provider setup</span>
+                  ) : null}
+                  {connection.integrationRequired ? (
+                    <span className="rounded-full bg-slate-200 px-2 py-1 text-slate-700">connector gap</span>
                   ) : null}
                   {connection.tokenExpired ? (
                     <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-800">token expired</span>

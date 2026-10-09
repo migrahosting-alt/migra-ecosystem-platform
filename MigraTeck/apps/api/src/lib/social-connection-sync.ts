@@ -18,6 +18,55 @@ const REFRESHABLE_PLATFORMS = new Set([
   "tiktok",
 ]);
 
+export type ManagedSocialOauthPlatform =
+  | "facebook"
+  | "instagram"
+  | "linkedin"
+  | "youtube"
+  | "x"
+  | "tiktok";
+
+type SocialOauthProviderConfig = {
+  platform: ManagedSocialOauthPlatform;
+  label: string;
+  authEndpoint: string;
+  tokenEndpoint: string;
+  scopes: string[];
+  scopeDelimiter: "space" | "comma";
+  clientId: string | null;
+  clientSecret: string | null;
+  clientIdParamName: "client_id" | "client_key";
+  usesPkce: boolean;
+  extraAuthParams: Record<string, string>;
+};
+
+type SocialOauthState = {
+  version: 1;
+  nonce: string;
+  platform: ManagedSocialOauthPlatform;
+  orgId: string;
+  actorId: string;
+  connectionId: string;
+  codeVerifier: string | null;
+  createdAt: string;
+};
+
+type SocialOauthTokenSet = {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: Date | null;
+  scopes: string[];
+};
+
+export type SocialConnectionOperatorAction =
+  | "monitor"
+  | "connect"
+  | "reconnect"
+  | "provider_setup"
+  | "integration_required"
+  | "refresh"
+  | "sync";
+
 type JsonMap = Record<string, unknown>;
 
 type SocialConnectionRecord = {
@@ -182,7 +231,7 @@ function shouldRequireReconnect(message: string): boolean {
 }
 
 function shouldRequireProviderSetup(message: string): boolean {
-  return /no facebook pages? (?:were )?found|no instagram business account (?:was )?found/i.test(
+  return /no facebook pages? (?:were )?found|no instagram business account (?:was )?found|multiple (?:facebook pages|instagram business accounts|youtube channels).{0,80}(?:target|selection|match)/i.test(
     message,
   );
 }
@@ -434,6 +483,363 @@ function toOptionalDate(seconds: unknown): Date | null {
   return new Date(Date.now() + raw * 1000);
 }
 
+function socialOauthProviderConfig(
+  platform: string,
+): SocialOauthProviderConfig | null {
+  const normalized = platform.trim().toLowerCase() as ManagedSocialOauthPlatform;
+  const metaId = process.env.MIGRAMARKET_META_CLIENT_ID?.trim() || null;
+  const metaSecret = process.env.MIGRAMARKET_META_CLIENT_SECRET?.trim() || null;
+
+  switch (normalized) {
+    case "facebook":
+      return {
+        platform: normalized,
+        label: "Facebook",
+        authEndpoint: "https://www.facebook.com/v24.0/dialog/oauth",
+        tokenEndpoint: META_GRAPH_BASE + "/oauth/access_token",
+        scopes: [
+          "pages_show_list",
+          "pages_manage_posts",
+          "pages_read_engagement",
+          "public_profile",
+        ],
+        scopeDelimiter: "space",
+        clientId: metaId,
+        clientSecret: metaSecret,
+        clientIdParamName: "client_id",
+        usesPkce: false,
+        extraAuthParams: { auth_type: "rerequest" },
+      };
+    case "instagram":
+      return {
+        platform: normalized,
+        label: "Instagram",
+        authEndpoint: "https://www.facebook.com/v24.0/dialog/oauth",
+        tokenEndpoint: META_GRAPH_BASE + "/oauth/access_token",
+        scopes: [
+          "pages_show_list",
+          "instagram_basic",
+          "instagram_content_publish",
+          "pages_read_engagement",
+        ],
+        scopeDelimiter: "space",
+        clientId: metaId,
+        clientSecret: metaSecret,
+        clientIdParamName: "client_id",
+        usesPkce: false,
+        extraAuthParams: { auth_type: "rerequest" },
+      };
+    case "linkedin":
+      return {
+        platform: normalized,
+        label: "LinkedIn",
+        authEndpoint: "https://www.linkedin.com/oauth/v2/authorization",
+        tokenEndpoint: "https://www.linkedin.com/oauth/v2/accessToken",
+        scopes: ["openid", "profile", "w_member_social"],
+        scopeDelimiter: "space",
+        clientId: process.env.MIGRAMARKET_LINKEDIN_CLIENT_ID?.trim() || null,
+        clientSecret:
+          process.env.MIGRAMARKET_LINKEDIN_CLIENT_SECRET?.trim() || null,
+        clientIdParamName: "client_id",
+        usesPkce: false,
+        extraAuthParams: {},
+      };
+    case "youtube":
+      return {
+        platform: normalized,
+        label: "YouTube",
+        authEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+        tokenEndpoint: "https://oauth2.googleapis.com/token",
+        scopes: [
+          "openid",
+          "email",
+          "profile",
+          "https://www.googleapis.com/auth/youtube.upload",
+          "https://www.googleapis.com/auth/youtube.readonly",
+        ],
+        scopeDelimiter: "space",
+        clientId: process.env.MIGRAMARKET_GOOGLE_CLIENT_ID?.trim() || null,
+        clientSecret:
+          process.env.MIGRAMARKET_GOOGLE_CLIENT_SECRET?.trim() || null,
+        clientIdParamName: "client_id",
+        usesPkce: false,
+        extraAuthParams: {
+          access_type: "offline",
+          include_granted_scopes: "true",
+          prompt: "consent",
+        },
+      };
+    case "x":
+      return {
+        platform: normalized,
+        label: "X",
+        authEndpoint: "https://x.com/i/oauth2/authorize",
+        tokenEndpoint: X_API_BASE + "/2/oauth2/token",
+        scopes: [
+          "tweet.read",
+          "tweet.write",
+          "users.read",
+          "media.write",
+          "offline.access",
+        ],
+        scopeDelimiter: "space",
+        clientId: process.env.MIGRAMARKET_X_CLIENT_ID?.trim() || null,
+        clientSecret: process.env.MIGRAMARKET_X_CLIENT_SECRET?.trim() || null,
+        clientIdParamName: "client_id",
+        usesPkce: true,
+        extraAuthParams: {},
+      };
+    case "tiktok":
+      return {
+        platform: normalized,
+        label: "TikTok",
+        authEndpoint: "https://www.tiktok.com/v2/auth/authorize/",
+        tokenEndpoint: "https://open.tiktokapis.com/v2/oauth/token/",
+        scopes: ["user.info.basic", "video.publish"],
+        scopeDelimiter: "comma",
+        clientId: process.env.MIGRAMARKET_TIKTOK_CLIENT_KEY?.trim() || null,
+        clientSecret:
+          process.env.MIGRAMARKET_TIKTOK_CLIENT_SECRET?.trim() || null,
+        clientIdParamName: "client_key",
+        usesPkce: false,
+        extraAuthParams: {},
+      };
+    default:
+      return null;
+  }
+}
+
+export function getManagedSocialOauthCapability(platform: string) {
+  const provider = socialOauthProviderConfig(platform);
+  return {
+    supported: Boolean(provider),
+    configured: Boolean(
+      provider?.clientId && provider.clientSecret && socialConnectionEncryptionReady(),
+    ),
+    label: provider?.label ?? null,
+    usesPkce: Boolean(provider?.usesPkce),
+  };
+}
+
+function socialOauthBaseUrl(): string {
+  const raw =
+    process.env.MIGRAMARKET_SOCIAL_OAUTH_BASE_URL?.trim() ||
+    process.env.APP_BASE_URL?.trim() ||
+    process.env.MIGRATECK_LAUNCH_URL?.trim() ||
+    "https://migrateck.com";
+  const url = new URL(raw);
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Social OAuth base URL must use HTTP or HTTPS.");
+  }
+  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+    throw new Error("Social OAuth requires an HTTPS public base URL in production.");
+  }
+  return url.origin;
+}
+
+function socialOauthCallbackUri(platform: ManagedSocialOauthPlatform): string {
+  return (
+    socialOauthBaseUrl() +
+    "/api/migramarket/social/connect/" +
+    encodeURIComponent(platform) +
+    "/callback"
+  );
+}
+
+function socialOauthCodeVerifier(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function socialOauthCodeChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+function encodeSocialOauthState(state: SocialOauthState): string {
+  return encryptSocialSecret(JSON.stringify(state));
+}
+
+function decodeSocialOauthState(value: string): SocialOauthState {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decryptSocialSecret(value));
+  } catch {
+    throw Object.assign(new Error("OAuth state could not be verified."), {
+      statusCode: 400,
+    });
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw Object.assign(new Error("OAuth state is invalid."), { statusCode: 400 });
+  }
+  const state = parsed as Partial<SocialOauthState>;
+  if (
+    state.version !== 1 ||
+    typeof state.nonce !== "string" ||
+    !state.nonce ||
+    typeof state.platform !== "string" ||
+    !socialOauthProviderConfig(state.platform) ||
+    typeof state.orgId !== "string" ||
+    !state.orgId ||
+    typeof state.actorId !== "string" ||
+    !state.actorId ||
+    typeof state.connectionId !== "string" ||
+    !state.connectionId ||
+    typeof state.createdAt !== "string" ||
+    !Number.isFinite(Date.parse(state.createdAt)) ||
+    (state.codeVerifier !== null && typeof state.codeVerifier !== "string")
+  ) {
+    throw Object.assign(new Error("OAuth state is invalid."), { statusCode: 400 });
+  }
+  return state as SocialOauthState;
+}
+
+function socialOauthStateNonceHash(nonce: string): string {
+  return createHash("sha256").update(nonce).digest("hex");
+}
+
+function socialOauthStateExpiresAt(state: SocialOauthState): string {
+  return new Date(Date.parse(state.createdAt) + 10 * 60 * 1000).toISOString();
+}
+
+async function armSocialOauthState(state: SocialOauthState): Promise<void> {
+  await getDb().query(
+    `UPDATE "MigraMarketSocialConnection"
+        SET metadata=COALESCE(metadata,'{}'::jsonb) || $2::jsonb,
+            "updatedAt"=NOW()
+      WHERE id=$1 AND "orgId"=$3 AND "accessModel"='oauth'`,
+    [
+      state.connectionId,
+      JSON.stringify({
+        oauthStateNonceHash: socialOauthStateNonceHash(state.nonce),
+        oauthStateExpiresAt: socialOauthStateExpiresAt(state),
+        oauthStateActorId: state.actorId,
+      }),
+      state.orgId,
+    ],
+  );
+}
+
+async function claimSocialOauthState(state: SocialOauthState): Promise<void> {
+  const result = await getDb().query<{ id: string }>(
+    `UPDATE "MigraMarketSocialConnection"
+        SET metadata=(COALESCE(metadata,'{}'::jsonb)
+          - 'oauthStateNonceHash'
+          - 'oauthStateExpiresAt'
+          - 'oauthStateActorId'),
+            "updatedAt"=NOW()
+      WHERE id=$1
+        AND "orgId"=$2
+        AND "accessModel"='oauth'
+        AND metadata->>'oauthStateNonceHash'=$3
+        AND metadata->>'oauthStateActorId'=$4
+        AND metadata->>'oauthStateExpiresAt'=$5
+      RETURNING id`,
+    [
+      state.connectionId,
+      state.orgId,
+      socialOauthStateNonceHash(state.nonce),
+      state.actorId,
+      socialOauthStateExpiresAt(state),
+    ],
+  );
+  if (!result.rows[0]) {
+    throw Object.assign(
+      new Error(
+        "OAuth state was already used, superseded, or is no longer valid. Start the connection again.",
+      ),
+      { statusCode: 400 },
+    );
+  }
+}
+
+function buildManagedSocialOauthAuthorizeUrl(
+  provider: SocialOauthProviderConfig,
+  stateToken: string,
+  codeVerifier: string | null,
+): string {
+  if (!provider.clientId || !provider.clientSecret) {
+    throw Object.assign(
+      new Error(provider.label + " OAuth is not configured."),
+      { statusCode: 409 },
+    );
+  }
+  const url = new URL(provider.authEndpoint);
+  url.searchParams.set(provider.clientIdParamName, provider.clientId);
+  url.searchParams.set("redirect_uri", socialOauthCallbackUri(provider.platform));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set(
+    "scope",
+    provider.scopes.join(provider.scopeDelimiter === "comma" ? "," : " "),
+  );
+  url.searchParams.set("state", stateToken);
+  if (provider.usesPkce && codeVerifier) {
+    url.searchParams.set("code_challenge", socialOauthCodeChallenge(codeVerifier));
+    url.searchParams.set("code_challenge_method", "S256");
+  }
+  for (const [key, value] of Object.entries(provider.extraAuthParams)) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
+}
+
+async function exchangeManagedSocialOauthCode(
+  provider: SocialOauthProviderConfig,
+  code: string,
+  codeVerifier: string | null,
+): Promise<SocialOauthTokenSet> {
+  if (!provider.clientId || !provider.clientSecret) {
+    throw Object.assign(new Error(provider.label + " OAuth is not configured."), {
+      statusCode: 409,
+    });
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  const body = new URLSearchParams({
+    code,
+    grant_type: "authorization_code",
+    redirect_uri: socialOauthCallbackUri(provider.platform),
+  });
+
+  if (provider.platform === "x") {
+    headers.Authorization =
+      "Basic " +
+      Buffer.from(provider.clientId + ":" + provider.clientSecret).toString(
+        "base64",
+      );
+  } else {
+    body.set(provider.clientIdParamName, provider.clientId);
+    body.set("client_secret", provider.clientSecret);
+  }
+  if (provider.usesPkce && codeVerifier) {
+    body.set("code_verifier", codeVerifier);
+  }
+
+  const raw = await fetchJson(provider.tokenEndpoint, {
+    method: "POST",
+    headers,
+    body,
+  });
+  const token =
+    provider.platform === "tiktok" &&
+    raw.data &&
+    typeof raw.data === "object" &&
+    !Array.isArray(raw.data)
+      ? asRecord(raw.data)
+      : raw;
+  const accessToken = asString(token.access_token);
+  if (!accessToken) {
+    throw new Error("OAuth token response did not include an access token.");
+  }
+  const returnedScopes = normalizeStringList(token.scope);
+  return {
+    accessToken,
+    refreshToken: asString(token.refresh_token),
+    expiresAt: toOptionalDate(token.expires_in),
+    scopes: returnedScopes.length > 0 ? returnedScopes : provider.scopes,
+  };
+}
+
 async function fetchJson(
   url: string | URL,
   init: RequestInit = {},
@@ -655,7 +1061,7 @@ function matchesTarget(
     );
     if (match) return match;
   }
-  return candidates[0] || null;
+  return candidates.length === 1 ? candidates[0] ?? null : null;
 }
 
 async function syncFacebookConnection(
@@ -670,6 +1076,11 @@ async function syncFacebookConnection(
     connection,
     pages.map((page) => ({ id: page.id, name: page.name })),
   );
+  if (!selected && pages.length > 1) {
+    throw new Error(
+      "Multiple Facebook pages are available; an exact target match is required before publishing can be verified.",
+    );
+  }
   if (!selected) throw new Error("No publishable Facebook page was found.");
   const page = pages.find((item) => item.id === selected.id);
   if (!page) throw new Error("No publishable Facebook page was found.");
@@ -749,7 +1160,12 @@ async function syncInstagramConnection(
     candidates.find(
       (item) => item.username.trim().toLowerCase() === desiredHandle,
     ) ||
-    candidates[0];
+    (candidates.length === 1 ? candidates[0] : null);
+  if (!selected && candidates.length > 1) {
+    throw new Error(
+      "Multiple Instagram business accounts are available; an exact target match is required before publishing can be verified.",
+    );
+  }
   if (!selected) throw new Error("No publishable Instagram account was found.");
   return updateConnection(connection.id, {
     handle: "@" + selected.username.replace(/^@/, ""),
@@ -855,6 +1271,11 @@ async function syncYouTubeConnection(
   const channel = selected
     ? channels.find((item) => item.id === selected.id)
     : null;
+  if (!channel && channels.length > 1) {
+    throw new Error(
+      "Multiple YouTube channels are available; an exact target match is required before publishing can be verified.",
+    );
+  }
   if (!channel) throw new Error("No publishable YouTube channel was found.");
   const avatarUrl =
     asString(asRecord(channel.thumbnails.default).url) ||
@@ -1315,6 +1736,395 @@ export async function ensureSocialConnectionOperationalForOrg(
     refreshedToken,
     profileSynced,
   };
+}
+
+function socialOperatorAction(
+  connection: SocialConnectionRecord,
+  health = assessSocialConnectionHealth(connection),
+): SocialConnectionOperatorAction {
+  const capability = getManagedSocialOauthCapability(connection.platform);
+  if (!capability.supported) return "integration_required";
+  if (health.providerSetupRequired) return "provider_setup";
+  if (!health.connected) return "connect";
+  if (health.requiresReconnect || health.recommendedAction === "reconnect") {
+    return "reconnect";
+  }
+  if (health.recommendedAction === "refresh") return "refresh";
+  if (health.recommendedAction === "sync") return "sync";
+  return "monitor";
+}
+
+function safeSocialConnectionOperatorRow(
+  connection: SocialConnectionRecord,
+  orgName: string | null = null,
+) {
+  const health = assessSocialConnectionHealth(connection);
+  const capability = getManagedSocialOauthCapability(connection.platform);
+  const operatorAction = socialOperatorAction(connection, health);
+  return {
+    id: connection.id,
+    orgId: connection.orgId,
+    orgName,
+    platform: connection.platform,
+    handle: connection.handle,
+    profileType: connection.profileType,
+    publishMode: connection.publishMode,
+    status: connection.status,
+    connected: health.connected,
+    externalAccountBound: Boolean(connection.externalAccountId),
+    tokenExpiresAt: connection.tokenExpiresAt
+      ? connection.tokenExpiresAt.toISOString()
+      : null,
+    lastVerifiedAt: connection.lastVerifiedAt
+      ? connection.lastVerifiedAt.toISOString()
+      : null,
+    createdAt: connection.createdAt.toISOString(),
+    updatedAt: connection.updatedAt.toISOString(),
+    health: {
+      state: health.state,
+      summary: health.summary,
+      recommendedAction: health.recommendedAction,
+      operatorAction,
+      canAutoRefresh: health.canAutoRefresh,
+      tokenExpired: health.tokenExpired,
+      tokenExpiresSoon: health.tokenExpiresSoon,
+      verificationStale: health.verificationStale,
+      missingAccountBinding: health.missingAccountBinding,
+      providerSetupRequired: health.providerSetupRequired,
+      needsAttention: health.needsAttention,
+      expiresInHours: health.expiresInHours,
+    },
+    oauth: {
+      supported: capability.supported,
+      configured: capability.configured,
+      providerLabel: capability.label,
+      usesPkce: capability.usesPkce,
+    },
+  };
+}
+
+export async function getSocialConnectionOperationsSnapshot() {
+  const result = await getDb().query<
+    SocialConnectionRecord & { orgName: string | null }
+  >(
+    `SELECT ${CONNECTION_SELECT.split(",")
+      .map((column) => "c." + column)
+      .join(",")},o.name AS "orgName"
+     FROM "MigraMarketSocialConnection" c
+     LEFT JOIN "Organization" o ON o.id=c."orgId"
+     WHERE c."accessModel"='oauth' AND c.status<>'paused'
+     ORDER BY o.name NULLS LAST,c.platform,c."createdAt"`,
+  );
+
+  const rows = result.rows.map((connection) =>
+    safeSocialConnectionOperatorRow(connection, connection.orgName),
+  );
+  const count = (action: SocialConnectionOperatorAction) =>
+    rows.filter((row) => row.health.operatorAction === action).length;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    encryptionReady: socialConnectionEncryptionReady(),
+    summary: {
+      total: rows.length,
+      healthy: count("monitor"),
+      needsAttention: rows.filter((row) => row.health.needsAttention).length,
+      reconnectRequired: count("reconnect"),
+      connectRequired: count("connect"),
+      providerSetupRequired: count("provider_setup"),
+      integrationRequired: count("integration_required"),
+      refreshRequired: count("refresh"),
+      syncRequired: count("sync"),
+    },
+    rows,
+  };
+}
+
+async function writeSocialOperatorAudit(input: {
+  actorId: string;
+  orgId: string;
+  action: string;
+  connectionId: string;
+  metadata: Record<string, unknown>;
+}) {
+  await getDb().query(
+    `INSERT INTO "AuditLog"
+      (id,"userId","orgId",action,"entityType","entityId",metadata,"createdAt")
+     VALUES ($1,$2,$3,$4,'migramarket_social_connection',$5,$6::jsonb,NOW())`,
+    [
+      randomUUID(),
+      input.actorId,
+      input.orgId,
+      input.action,
+      input.connectionId,
+      JSON.stringify(input.metadata),
+    ],
+  );
+}
+
+async function loadSocialConnectionForOperator(
+  connectionId: string,
+): Promise<SocialConnectionRecord | null> {
+  const result = await getDb().query<SocialConnectionRecord>(
+    "SELECT " +
+      CONNECTION_SELECT +
+      ' FROM "MigraMarketSocialConnection" WHERE id=$1 AND "accessModel"=$2 LIMIT 1',
+    [connectionId, "oauth"],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function createSocialConnectionOAuthStart(input: {
+  connectionId: string;
+  actorId: string;
+}) {
+  const connection = await loadSocialConnectionForOperator(input.connectionId);
+  if (!connection) {
+    throw Object.assign(new Error("Social connection not found."), {
+      statusCode: 404,
+    });
+  }
+
+  const provider = socialOauthProviderConfig(connection.platform);
+  if (!provider) {
+    throw Object.assign(
+      new Error(
+        "Managed OAuth is not implemented for this social connection provider.",
+      ),
+      { statusCode: 409 },
+    );
+  }
+  const capability = getManagedSocialOauthCapability(connection.platform);
+  if (!capability.configured) {
+    throw Object.assign(
+      new Error(provider.label + " OAuth is not fully configured."),
+      { statusCode: 409 },
+    );
+  }
+
+  const createdAt = new Date();
+  const codeVerifier = provider.usesPkce ? socialOauthCodeVerifier() : null;
+  const state: SocialOauthState = {
+    version: 1,
+    nonce: randomBytes(18).toString("base64url"),
+    platform: provider.platform,
+    orgId: connection.orgId,
+    actorId: input.actorId,
+    connectionId: connection.id,
+    codeVerifier,
+    createdAt: createdAt.toISOString(),
+  };
+  const stateToken = encodeSocialOauthState(state);
+  await armSocialOauthState(state);
+  const authorizeUrl = buildManagedSocialOauthAuthorizeUrl(
+    provider,
+    stateToken,
+    codeVerifier,
+  );
+
+  await writeSocialOperatorAudit({
+    actorId: input.actorId,
+    orgId: connection.orgId,
+    action: "SOCIAL_CONNECTION_OAUTH_STARTED",
+    connectionId: connection.id,
+    metadata: {
+      platform: provider.platform,
+      provider: provider.label,
+      reconnect: Boolean(connection.credentialCiphertext),
+    },
+  });
+
+  return {
+    connection: safeSocialConnectionOperatorRow(connection),
+    authorizeUrl,
+    expiresAt: new Date(createdAt.getTime() + 10 * 60 * 1000).toISOString(),
+  };
+}
+
+function validateSocialOauthState(input: {
+  platform: string;
+  stateToken: string;
+  actorId: string;
+}): SocialOauthState {
+  const state = decodeSocialOauthState(input.stateToken);
+  if (state.platform !== input.platform.trim().toLowerCase()) {
+    throw Object.assign(new Error("OAuth state provider mismatch."), {
+      statusCode: 400,
+    });
+  }
+  if (state.actorId !== input.actorId) {
+    throw Object.assign(new Error("OAuth state operator mismatch."), {
+      statusCode: 403,
+    });
+  }
+  const createdAt = Date.parse(state.createdAt);
+  const ageMs = Date.now() - createdAt;
+  if (!Number.isFinite(createdAt) || ageMs < -60_000 || ageMs > 10 * 60 * 1000) {
+    throw Object.assign(new Error("OAuth state expired. Start the connection again."), {
+      statusCode: 400,
+    });
+  }
+  return state;
+}
+
+function safeOauthFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "OAuth connection failed.";
+  if (/not configured/i.test(message)) return message;
+  if (/state|expired|operator mismatch|provider mismatch/i.test(message)) return message;
+  if (/invalid_grant|expired|invalid.{0,20}token|access.?denied|unauthoriz/i.test(message)) {
+    return "The provider authorization is invalid or expired. Start the connection again.";
+  }
+  if (/page|business account|channel|profile/i.test(message)) {
+    return message.slice(0, 220);
+  }
+  return "The social provider could not complete authorization. Try again or review provider setup.";
+}
+
+export async function completeSocialConnectionOAuth(input: {
+  platform: string;
+  code?: string | null;
+  stateToken: string;
+  actorId: string;
+  providerError?: string | null;
+}) {
+  const state = validateSocialOauthState({
+    platform: input.platform,
+    stateToken: input.stateToken,
+    actorId: input.actorId,
+  });
+  const provider = socialOauthProviderConfig(state.platform);
+  if (!provider) {
+    throw Object.assign(new Error("OAuth provider is not supported."), {
+      statusCode: 409,
+    });
+  }
+
+  const connection = await loadSocialConnectionForOperator(state.connectionId);
+  if (
+    !connection ||
+    connection.orgId !== state.orgId ||
+    connection.platform.trim().toLowerCase() !== state.platform
+  ) {
+    throw Object.assign(new Error("OAuth connection state no longer matches."), {
+      statusCode: 409,
+    });
+  }
+
+  await claimSocialOauthState(state);
+
+  if (input.providerError) {
+    await writeSocialOperatorAudit({
+      actorId: input.actorId,
+      orgId: connection.orgId,
+      action: "SOCIAL_CONNECTION_OAUTH_FAILED",
+      connectionId: connection.id,
+      metadata: {
+        platform: state.platform,
+        stage: "provider_authorization",
+      },
+    });
+    throw Object.assign(
+      new Error("The provider did not authorize this connection."),
+      { statusCode: 400 },
+    );
+  }
+  const code = input.code?.trim();
+  if (!code) {
+    throw Object.assign(new Error("Missing OAuth authorization code."), {
+      statusCode: 400,
+    });
+  }
+
+  let tokenSet: SocialOauthTokenSet;
+  try {
+    tokenSet = await exchangeManagedSocialOauthCode(
+      provider,
+      code,
+      state.codeVerifier,
+    );
+  } catch (error) {
+    await writeSocialOperatorAudit({
+      actorId: input.actorId,
+      orgId: connection.orgId,
+      action: "SOCIAL_CONNECTION_OAUTH_FAILED",
+      connectionId: connection.id,
+      metadata: {
+        platform: state.platform,
+        stage: "token_exchange",
+      },
+    });
+    throw Object.assign(new Error(safeOauthFailureMessage(error)), {
+      statusCode: 400,
+    });
+  }
+
+  const updated = await updateConnection(connection.id, {
+    accessModel: "oauth",
+    status: "ready",
+    credentialCiphertext: encryptCredentialBundle({
+      accessToken: tokenSet.accessToken,
+      publishAccessToken: null,
+    }),
+    refreshTokenCiphertext: tokenSet.refreshToken
+      ? encryptSocialSecret(tokenSet.refreshToken)
+      : null,
+    tokenExpiresAt: tokenSet.expiresAt,
+    scopes: tokenSet.scopes,
+    lastVerifiedAt: new Date(),
+    metadata: {
+      ...asRecord(connection.metadata),
+      oauthConnectedAt: new Date().toISOString(),
+      lastSyncError: null,
+      lastTokenRefreshError: null,
+    },
+  });
+
+  await writeSocialOperatorAudit({
+    actorId: input.actorId,
+    orgId: connection.orgId,
+    action: "SOCIAL_CONNECTION_OAUTH_CONNECTED",
+    connectionId: connection.id,
+    metadata: {
+      platform: state.platform,
+      provider: provider.label,
+      hasRefreshToken: Boolean(tokenSet.refreshToken),
+      scopesCount: tokenSet.scopes.length,
+    },
+  });
+
+  try {
+    const synced = await syncLoadedSocialConnection(updated, {
+      accessToken: tokenSet.accessToken,
+      publishAccessToken: null,
+    });
+    return {
+      status: "connected" as const,
+      message: "OAuth connected and provider profile verified.",
+      connection: safeSocialConnectionOperatorRow(synced.connection),
+    };
+  } catch (error) {
+    const current = await loadSocialConnectionForOperator(connection.id);
+    const safeCurrent = current ?? updated;
+    const health = assessSocialConnectionHealth(safeCurrent);
+    await writeSocialOperatorAudit({
+      actorId: input.actorId,
+      orgId: connection.orgId,
+      action: "SOCIAL_CONNECTION_OAUTH_VERIFICATION_ATTENTION",
+      connectionId: connection.id,
+      metadata: {
+        platform: state.platform,
+        operatorAction: socialOperatorAction(safeCurrent, health),
+        providerSetupRequired: health.providerSetupRequired,
+      },
+    });
+    return {
+      status: "attention" as const,
+      message: health.providerSetupRequired
+        ? "OAuth connected, but provider account setup must be completed before publishing can be verified."
+        : safeOauthFailureMessage(error),
+      connection: safeSocialConnectionOperatorRow(safeCurrent),
+    };
+  }
 }
 
 async function platformMaintenanceMode(): Promise<boolean> {

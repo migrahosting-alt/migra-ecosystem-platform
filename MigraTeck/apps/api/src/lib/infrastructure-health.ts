@@ -4,7 +4,7 @@ import { getHostCapacitySnapshot } from "./host-capacity.js";
 import { getReleaseIntegritySnapshot } from "./release-provenance.js";
 import { getReleaseOverlaySnapshot } from "./release-overlay.js";
 import { getProvisioningDriftSnapshot } from "./provisioning-drift.js";
-import { inspectSocialConnectionHealth } from "./social-connection-sync.js";
+import { getSocialConnectionOperationsSnapshot } from "./social-connection-sync.js";
 
 export type WorkerState = "healthy" | "stale" | "missing";
 
@@ -201,7 +201,7 @@ export async function getInfrastructureHealthSnapshot() {
          max("updatedAt") AS "lastUpdatedAt"
        FROM "OrgEntitlement"`,
     ),
-    inspectSocialConnectionHealth(100),
+    getSocialConnectionOperationsSnapshot(),
     getReleaseIntegritySnapshot(),
     getReleaseOverlaySnapshot(),
     getHostCapacitySnapshot(),
@@ -223,30 +223,44 @@ export async function getInfrastructureHealthSnapshot() {
   ).length;
 
   const socialConnectionHealth = {
-    total: socialConnections.length,
-    credentialed: socialConnections.filter((connection) => connection.connected)
-      .length,
-    missingCredential: socialConnections.filter((connection) => !connection.connected)
-      .length,
-    disconnected: socialConnections.filter((connection) => !connection.connected)
-      .length,
-    needsAttention: socialConnections.filter((connection) => connection.needsAttention)
-      .length,
-    reconnectRequired: socialConnections.filter(
-      (connection) => connection.requiresReconnect,
-    ).length,
-    providerSetupRequired: socialConnections.filter(
-      (connection) => connection.providerSetupRequired,
-    ).length,
-    tokenExpired: socialConnections.filter((connection) => connection.tokenExpired)
-      .length,
-    tokenExpiresSoon: socialConnections.filter(
-      (connection) => connection.tokenExpiresSoon,
-    ).length,
-    verificationStale: socialConnections.filter(
-      (connection) => connection.verificationStale,
-    ).length,
-    connections: socialConnections,
+    total: socialConnections.summary.total,
+    credentialed: socialConnections.rows.filter((row) => row.connected).length,
+    missingCredential: socialConnections.rows.filter((row) => !row.connected).length,
+    disconnected: socialConnections.rows.filter((row) => !row.connected).length,
+    needsAttention: socialConnections.summary.needsAttention,
+    reconnectRequired: socialConnections.summary.reconnectRequired,
+    connectRequired: socialConnections.summary.connectRequired,
+    providerSetupRequired: socialConnections.summary.providerSetupRequired,
+    integrationRequired: socialConnections.summary.integrationRequired,
+    refreshRequired: socialConnections.summary.refreshRequired,
+    syncRequired: socialConnections.summary.syncRequired,
+    tokenExpired: socialConnections.rows.filter((row) => row.health.tokenExpired).length,
+    tokenExpiresSoon: socialConnections.rows.filter((row) => row.health.tokenExpiresSoon).length,
+    verificationStale: socialConnections.rows.filter((row) => row.health.verificationStale).length,
+    connections: socialConnections.rows.map((row) => ({
+      id: row.id,
+      orgId: row.orgId,
+      orgName: row.orgName,
+      platform: row.platform,
+      handle: row.handle,
+      status: row.status,
+      state: row.health.state,
+      summary: row.health.summary,
+      recommendedAction: row.health.operatorAction,
+      connected: row.connected,
+      canAutoRefresh: row.health.canAutoRefresh,
+      tokenExpired: row.health.tokenExpired,
+      tokenExpiresSoon: row.health.tokenExpiresSoon,
+      verificationStale: row.health.verificationStale,
+      missingAccountBinding: row.health.missingAccountBinding ?? false,
+      requiresReconnect: row.health.operatorAction === "reconnect",
+      providerSetupRequired: row.health.providerSetupRequired,
+      integrationRequired: row.health.operatorAction === "integration_required",
+      needsAttention: row.health.needsAttention,
+      expiresInHours: row.health.expiresInHours,
+      tokenExpiresAt: row.tokenExpiresAt,
+      lastVerifiedAt: row.lastVerifiedAt,
+    })),
   };
 
   return {
@@ -266,6 +280,9 @@ export async function getInfrastructureHealthSnapshot() {
       entitlementOverdue: Number(entitlements.rows[0]?.overdue ?? 0),
       socialConnectionAttention: socialConnectionHealth.needsAttention,
       socialReconnectRequired: socialConnectionHealth.reconnectRequired,
+      socialConnectRequired: socialConnectionHealth.connectRequired,
+      socialProviderSetupRequired: socialConnectionHealth.providerSetupRequired,
+      socialIntegrationRequired: socialConnectionHealth.integrationRequired,
       releaseIntegrityIssues,
       releaseOverlayState: releaseOverlay.state,
       releaseOverlayDifferences: releaseOverlay.summary.totalDifferences,

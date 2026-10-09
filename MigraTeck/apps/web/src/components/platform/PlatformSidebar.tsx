@@ -17,6 +17,8 @@ import {
   KeyRound,
   LayoutDashboard,
   ShieldCheck,
+  Share2,
+  PackageCheck,
   UserRoundCog,
   Webhook,
   type LucideIcon,
@@ -77,6 +79,8 @@ const platformNav: PlatformNavGroup[] = [
     heading: "Infrastructure",
     items: [
       { href: "/platform/hosting", label: "Hosting", icon: Server },
+      { href: "/platform/social", label: "Social Connections", icon: Share2 },
+      { href: "/platform/distribution", label: "Releases & Downloads", icon: PackageCheck },
       { href: "/platform/intake", label: "Intake", icon: ClipboardList },
     ],
   },
