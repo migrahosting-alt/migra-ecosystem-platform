@@ -147,3 +147,54 @@ test("overlay reader keeps absolute filesystem roots out of operator entries", (
   assert.match(source, /publicEntry/);
   assert.match(source, /\.map\(publicEntry\)/);
 });
+
+test("inventory ignores retained Next build backups and downgrades non-runtime evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "migrateck-overlay-evidence-"));
+  const canonical = join(root, "canonical");
+  const release = join(root, "release");
+  mkdirSync(canonical, { recursive: true });
+  mkdirSync(release, { recursive: true });
+
+  file(canonical, "src/app/page.tsx", "canonical page");
+  file(release, "src/app/page.tsx", "canonical page");
+  file(release, ".next.commerce-backup/server/page.js", "compiled backup");
+  file(release, "src/app/page.contract.test.ts", "test-only evidence");
+  file(release, "src/app/page.tsx.prev-20261009T084958Z", "source backup");
+  file(release, "next-env.d.ts", "generated next types");
+  file(release, "tsconfig.tsbuildinfo", "generated compiler state");
+
+  const output = join(release, "OVERLAY_INVENTORY.json");
+  execFileSync(
+    "node",
+    [
+      join(repoRoot(), "scripts/write-overlay-inventory.mjs"),
+      "--canonical",
+      canonical,
+      "--release",
+      release,
+      "--output",
+      output,
+      "--commit",
+      "fixture-commit",
+    ],
+    { encoding: "utf8" },
+  );
+
+  const manifest = JSON.parse(readFileSync(output, "utf8")) as {
+    summary: Record<string, number>;
+    entries: Array<Record<string, string | null>>;
+  };
+  const byPath = new Map(manifest.entries.map((entry) => [entry.path, entry]));
+
+  assert.equal(
+    manifest.entries.some((entry) => String(entry.path).startsWith(".next.commerce-backup/")),
+    false,
+  );
+  assert.equal(byPath.get("src/app/page.contract.test.ts")?.classification, "test_fixture");
+  assert.equal(byPath.get("src/app/page.contract.test.ts")?.criticality, "low");
+  assert.equal(byPath.get("src/app/page.tsx.prev-20261009T084958Z")?.classification, "build_evidence");
+  assert.equal(byPath.get("next-env.d.ts")?.classification, "build_evidence");
+  assert.equal(byPath.get("tsconfig.tsbuildinfo")?.classification, "build_evidence");
+  assert.equal(manifest.summary.highCriticality, 0);
+  assert.equal(manifest.summary.runtimeReconciliation, 0);
+});

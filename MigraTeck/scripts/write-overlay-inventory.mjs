@@ -44,7 +44,11 @@ async function listFiles(root, prefix = "") {
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const rel = prefix ? prefix + "/" + entry.name : entry.name;
     if (entry.isDirectory()) {
-      if (SKIP_DIRECTORIES.has(entry.name)) continue;
+      if (
+        SKIP_DIRECTORIES.has(entry.name) ||
+        entry.name.startsWith(".next.") ||
+        entry.name.startsWith(".next-")
+      ) continue;
       files.push(...await listFiles(root, rel));
       continue;
     }
@@ -60,6 +64,31 @@ async function hashFile(root, rel) {
 }
 
 function classifyPath(path, kind) {
+  if (
+    path === "next-env.d.ts" ||
+    path === "tsconfig.tsbuildinfo" ||
+    /(?:^|\/)[^/]+\.(?:prev(?:[-.][^/]*)?|bak|backup)(?:$|\.)/i.test(path) ||
+    /~$/.test(path)
+  ) {
+    return {
+      classification: "build_evidence",
+      criticality: "low",
+      recommendedAction: "retain_or_archive",
+    };
+  }
+
+  if (
+    path.split("/").includes("__tests__") ||
+    /\.(?:test|spec)\.(?:[cm]?[jt]sx?|d\.ts)$/i.test(path)
+  ) {
+    return {
+      classification: "test_fixture",
+      criticality: "low",
+      recommendedAction:
+        kind === "missing" ? "restore_or_intentionally_retire" : "archive_or_reconcile",
+    };
+  }
+
   if (!path.includes("/") && DEPLOYMENT_METADATA.has(path)) {
     return {
       classification: "deployment_metadata",
