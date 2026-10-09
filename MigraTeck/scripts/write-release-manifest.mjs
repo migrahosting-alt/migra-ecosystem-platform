@@ -13,6 +13,14 @@ function isInside(root, candidate) {
   return rel === "" || (!rel.startsWith(".." + sep) && rel !== ".." && !rel.startsWith(".."));
 }
 
+function isReleaseEvidencePath(relativePath) {
+  const normalized = relativePath.split(sep).join("/");
+  return (
+    normalized.split("/").includes("__tests__") ||
+    /\.(?:test|spec)\.(?:[cm]?[jt]sx?|d\.ts)(?:\.map)?$/i.test(normalized)
+  );
+}
+
 async function listFiles(root, prefix = "") {
   const directory = resolve(root, prefix);
   const entries = await readdir(directory, { withFileTypes: true });
@@ -36,7 +44,7 @@ async function hashTree(root, excludedRelativePaths = new Set()) {
   const digest = createHash("sha256");
 
   for (const rel of files) {
-    if (excludedRelativePaths.has(rel)) continue;
+    if (excludedRelativePaths.has(rel) || isReleaseEvidencePath(rel)) continue;
     const full = resolve(canonicalRoot, rel);
     if (!isInside(canonicalRoot, full)) {
       throw new Error("Refusing to hash path outside release root: " + rel);

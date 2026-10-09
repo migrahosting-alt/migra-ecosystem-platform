@@ -67,6 +67,14 @@ function isInside(root: string, candidate: string) {
   );
 }
 
+function isReleaseEvidencePath(relativePath: string) {
+  const normalized = relativePath.split(sep).join("/");
+  return (
+    normalized.split("/").includes("__tests__") ||
+    /\.(?:test|spec)\.(?:[cm]?[jt]sx?|d\.ts)(?:\.map)?$/i.test(normalized)
+  );
+}
+
 async function listFiles(root: string, prefix = ""): Promise<string[]> {
   const directory = resolve(root, prefix);
   const entries = await readdir(directory, { withFileTypes: true });
@@ -94,7 +102,7 @@ export async function hashReleaseTree(
   const digest = createHash("sha256");
 
   for (const rel of files) {
-    if (excludedRelativePaths.has(rel)) continue;
+    if (excludedRelativePaths.has(rel) || isReleaseEvidencePath(rel)) continue;
 
     const full = resolve(canonicalRoot, rel);
     if (!isInside(canonicalRoot, full)) {

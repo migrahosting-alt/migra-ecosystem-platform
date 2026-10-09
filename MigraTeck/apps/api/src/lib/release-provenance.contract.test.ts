@@ -54,7 +54,15 @@ test("release provenance verifies source and compiled output, detects drift, and
 
     await Promise.all([
       writeFile(join(apiSource, "server.ts"), "export const version = 1;\n"),
+      writeFile(
+        join(apiSource, "server.contract.test.ts"),
+        "test('runtime contract', () => {});\n",
+      ),
       writeFile(join(apiDist, "server.js"), "export const version = 1;\n"),
+      writeFile(
+        join(apiDist, "server.contract.test.js"),
+        "test('runtime contract', () => {});\n",
+      ),
       writeFile(join(webSource, "page.tsx"), "export default function Page() {}\n"),
       writeFile(join(webServer, "app.js"), "export default function Page() {}\n"),
     ]);
@@ -88,6 +96,25 @@ test("release provenance verifies source and compiled output, detects drift, and
       const verified = await getReleaseIntegritySnapshot(true);
       assert.deepEqual(
         verified.map((release) => [release.key, release.state]),
+        [
+          ["platform_api", "verified"],
+          ["platform_web", "verified"],
+        ],
+      );
+
+      await Promise.all([
+        writeFile(
+          join(apiSource, "server.contract.test.ts"),
+          "test('changed evidence only', () => {});\n",
+        ),
+        writeFile(
+          join(apiDist, "server.contract.test.js"),
+          "test('changed evidence only', () => {});\n",
+        ),
+      ]);
+      const evidenceOnly = await getReleaseIntegritySnapshot(true);
+      assert.deepEqual(
+        evidenceOnly.map((release) => [release.key, release.state]),
         [
           ["platform_api", "verified"],
           ["platform_web", "verified"],
