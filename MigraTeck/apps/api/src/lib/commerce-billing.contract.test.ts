@@ -190,7 +190,7 @@ test("scheduled subscription cancellation can be reversed without bypassing oper
   );
   assert.match(
     operatorUi,
-    /Keep this subscription active by removing its scheduled period-end cancellation\?/,
+    /Remove the scheduled cancellation and keep this subscription active\?/,
   );
 });
 
@@ -201,6 +201,32 @@ test("processor action local update and audit commit atomically", () => {
   );
   assert.match(service, /ROLLBACK/);
   assert.match(service, /BILLING_SUBSCRIPTION_OPERATOR_ACTION/);
+});
+
+test("billing overview defaults to commercial accounts and opens the full directory only on explicit search", () => {
+  const operatorUi = repoFile(
+    "apps/web/src/app/(platform)/platform/billing/BillingOperationsWorkspace.tsx",
+  );
+
+  assert.match(service, /directoryOrganizations/);
+  assert.match(service, /commercialOrganizations/);
+  assert.match(service, /organizationScope: normalized \? "directory_search" : "commercial_accounts"/);
+  assert.ok(
+    service.includes("$1='' AND (c.id IS NOT NULL OR state.\\\"orgId\\\" IS NOT NULL"),
+  );
+  assert.ok(
+    service.includes('EXISTS (SELECT 1 FROM \\\"BillingSubscription\\\" scoped_subscription'),
+  );
+  assert.ok(
+    service.includes('EXISTS (SELECT 1 FROM \\\"BillingInvoice\\\" scoped_invoice'),
+  );
+  assert.ok(
+    service.includes("$1<>'' AND (position(lower($1) in lower(o.name))>0"),
+  );
+  assert.match(operatorUi, /Billing relationships/);
+  assert.match(operatorUi, /Directory search/);
+  assert.match(operatorUi, /search to find any organization/);
+  assert.match(operatorUi, /No billing relationships yet/);
 });
 
 test("overview outstanding balance does not use DISTINCT amounts", () => {

@@ -34,9 +34,12 @@ type BillingOverview = {
     amountOutstanding: number;
     failedWebhookEvents: number;
     pendingWebhookEvents: number;
+    directoryOrganizations: number;
+    commercialOrganizations: number;
     orgStates: number;
   };
   processorConfigured: boolean;
+  organizationScope: "commercial_accounts" | "directory_search";
   organizations: Array<{
     id: string;
     name: string;
@@ -503,7 +506,7 @@ export function BillingOperationsWorkspace() {
         : action === "cancel_at_period_end"
           ? "Schedule this subscription to cancel at the end of its current period?"
           : action === "keep_active"
-            ? "Keep this subscription active by removing its scheduled period-end cancellation?"
+            ? "Remove the scheduled cancellation and keep this subscription active?"
             : action === "pause_collection"
             ? "Pause Stripe collection for this subscription?"
             : "Resume Stripe collection for this subscription?";
@@ -633,6 +636,18 @@ export function BillingOperationsWorkspace() {
             <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
               Commercial accounts
             </h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                {overview.organizationScope === "directory_search"
+                  ? "Directory search"
+                  : "Billing relationships"}
+              </span>
+              <span>
+                {overview.organizationScope === "directory_search"
+                  ? `${overview.metrics.directoryOrganizations.toLocaleString()} organizations available`
+                  : `${overview.metrics.commercialOrganizations.toLocaleString()} accounts with billing state · search to find any organization`}
+              </span>
+            </div>
             <div className="relative mt-4">
               <Search
                 size={16}
@@ -679,7 +694,11 @@ export function BillingOperationsWorkspace() {
               </button>
             ))}
             {overview.organizations.length === 0 ? (
-              <p className="p-6 text-sm text-slate-500">No organizations match this search.</p>
+              <p className="p-6 text-sm leading-6 text-slate-500">
+                {query.trim()
+                  ? "No organizations match this directory search."
+                  : "No billing relationships yet. Search the organization directory to initialize or link a Stripe customer."}
+              </p>
             ) : null}
           </div>
         </div>

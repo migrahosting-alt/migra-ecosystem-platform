@@ -397,6 +397,8 @@ export async function getBillingOperationsOverview(
     "(SELECT COALESCE(sum(\"amountRemaining\"),0)::bigint FROM \"BillingInvoice\" WHERE \"amountRemaining\">0) AS \"amountOutstanding\",",
     "(SELECT count(*)::int FROM \"BillingWebhookEvent\" WHERE status='FAILED') AS \"failedWebhookEvents\",",
     "(SELECT count(*)::int FROM \"BillingWebhookEvent\" WHERE status IN ('RECEIVED','QUEUED','PROCESSING')) AS \"pendingWebhookEvents\",",
+    "(SELECT count(*)::int FROM \"Organization\") AS \"directoryOrganizations\",",
+    "(SELECT count(*)::int FROM \"Organization\" scoped WHERE EXISTS (SELECT 1 FROM \"BillingCustomer\" bc WHERE bc.\"orgId\"=scoped.id) OR EXISTS (SELECT 1 FROM \"BillingSubscription\" bs WHERE bs.\"orgId\"=scoped.id) OR EXISTS (SELECT 1 FROM \"BillingInvoice\" bi WHERE bi.\"orgId\"=scoped.id) OR EXISTS (SELECT 1 FROM \"BillingOrgState\" bos WHERE bos.\"orgId\"=scoped.id)) AS \"commercialOrganizations\",",
     "(SELECT count(*)::int FROM \"BillingOrgState\") AS \"orgStates\"",
   ].join(" ");
 
@@ -417,7 +419,7 @@ export async function getBillingOperationsOverview(
     "FROM \"Organization\" o",
     "LEFT JOIN \"BillingCustomer\" c ON c.\"orgId\"=o.id",
     "LEFT JOIN \"BillingOrgState\" state ON state.\"orgId\"=o.id",
-    "WHERE ($1='' OR position(lower($1) in lower(o.name))>0 OR position(lower($1) in lower(o.slug))>0 OR position(lower($1) in lower(COALESCE(c.email,'')))>0 OR position(lower($1) in lower(COALESCE(c.\"externalCustomerId\",'')))>0)",
+    "WHERE (($1='' AND (c.id IS NOT NULL OR state.\"orgId\" IS NOT NULL OR EXISTS (SELECT 1 FROM \"BillingSubscription\" scoped_subscription WHERE scoped_subscription.\"orgId\"=o.id) OR EXISTS (SELECT 1 FROM \"BillingInvoice\" scoped_invoice WHERE scoped_invoice.\"orgId\"=o.id))) OR ($1<>'' AND (position(lower($1) in lower(o.name))>0 OR position(lower($1) in lower(o.slug))>0 OR position(lower($1) in lower(COALESCE(c.email,'')))>0 OR position(lower($1) in lower(COALESCE(c.\"externalCustomerId\",'')))>0)))",
     "ORDER BY CASE WHEN c.id IS NOT NULL THEN 0 ELSE 1 END,\"activeSubscriptionCount\" DESC,o.\"createdAt\" DESC",
     "LIMIT $2",
   ].join(" ");
@@ -449,9 +451,12 @@ export async function getBillingOperationsOverview(
       amountOutstanding: Number(row.amountOutstanding ?? 0),
       failedWebhookEvents: Number(row.failedWebhookEvents ?? 0),
       pendingWebhookEvents: Number(row.pendingWebhookEvents ?? 0),
+      directoryOrganizations: Number(row.directoryOrganizations ?? 0),
+      commercialOrganizations: Number(row.commercialOrganizations ?? 0),
       orgStates: Number(row.orgStates ?? 0),
     },
     processorConfigured: Boolean(process.env.STRIPE_SECRET_KEY?.trim()),
+    organizationScope: normalized ? "directory_search" : "commercial_accounts",
     organizations: organizations.rows,
     webhookHealth: webhookHealth.rows,
   };
