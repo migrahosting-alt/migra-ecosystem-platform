@@ -1,44 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { PRODUCT_CATALOG } from "@migrateck/billing-core/catalog";
 import type { FastifyRequest } from "fastify";
+import { getCatalogMirrorStatus } from "./catalog-mirror.js";
 import { getDb } from "./db.js";
+import {
+  CATALOG_FAMILY_TO_PRODUCT,
+  ENTITLEMENT_STATUSES,
+  PRODUCT_KEYS,
+  type EntitlementStatus,
+  type ProductKey,
+} from "./commerce-products.js";
 import { getProvisioningDriftSnapshot } from "./provisioning-drift.js";
 
-export const PRODUCT_KEYS = [
-  "MIGRATECK",
-  "MIGRAHOSTING",
-  "MIGRAPANEL",
-  "MIGRAVOICE",
-  "MIGRAMAIL",
-  "MIGRAINTAKE",
-  "MIGRAMARKET",
-  "MIGRAPILOT",
-  "MIGRAINVOICE",
-  "MIGRADRIVE",
-  "MIGRABUILDER",
-] as const;
-
-export const ENTITLEMENT_STATUSES = [
-  "ACTIVE",
-  "TRIAL",
-  "RESTRICTED",
-  "INTERNAL_ONLY",
-] as const;
-
-export type ProductKey = (typeof PRODUCT_KEYS)[number];
-export type EntitlementStatus = (typeof ENTITLEMENT_STATUSES)[number];
-
-export const CATALOG_FAMILY_TO_PRODUCT: Record<string, ProductKey> = {
-  builder: "MIGRABUILDER",
-  hosting: "MIGRAHOSTING",
-  intake: "MIGRAINTAKE",
-  invoice: "MIGRAINVOICE",
-  voice: "MIGRAVOICE",
-  email: "MIGRAMAIL",
-  marketing: "MIGRAMARKET",
-  pilot: "MIGRAPILOT",
-  drive: "MIGRADRIVE",
-};
+export {
+  CATALOG_FAMILY_TO_PRODUCT,
+  ENTITLEMENT_STATUSES,
+  PRODUCT_KEYS,
+  type EntitlementStatus,
+  type ProductKey,
+} from "./commerce-products.js";
 
 function serializeCatalog() {
   return PRODUCT_CATALOG.map((product) => ({
@@ -69,6 +49,10 @@ function serializeCatalog() {
 
 async function tableReadiness() {
   const names = [
+    "BillingCatalogProduct",
+    "BillingCatalogPlan",
+    "BillingCatalogPrice",
+    "BillingCatalogSync",
     "BillingProduct",
     "BillingPrice",
     "BillingPlan",
@@ -95,10 +79,19 @@ async function tableReadiness() {
     counts[name] = Number(result.rows[0]?.count ?? 0);
   }
 
+  const mirror = await getCatalogMirrorStatus();
+
   return {
     canonicalCatalogAuthority: "source",
-    nativeCatalogMirrorReady: present.has("BillingProduct") && present.has("BillingPrice"),
+    nativeCatalogMirrorAuthority: "BillingCatalogProduct/BillingCatalogPlan/BillingCatalogPrice",
+    nativeCatalogMirrorReady: mirror.ready,
+    nativeCatalogMirror: mirror,
+    unfinishedNativeBillingModelsPresent:
+      present.has("BillingProduct") || present.has("BillingPrice"),
     effectiveEntitlementAuthority: present.has("OrgEntitlement") ? "OrgEntitlement" : null,
+    subscriptionCatalogLinkReady: false,
+    subscriptionCatalogLinkReason:
+      "Live BillingSubscription remains on the legacy externalSubscriptionId contract and is intentionally not linked during the catalog-mirror rollout.",
     tables: Object.fromEntries(
       names.map((name) => [name, { present: present.has(name), rows: counts[name] }]),
     ),

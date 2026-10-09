@@ -180,8 +180,42 @@ type CatalogPayload = {
   }>;
   readiness: {
     canonicalCatalogAuthority: string;
+    nativeCatalogMirrorAuthority: string;
     nativeCatalogMirrorReady: boolean;
+    nativeCatalogMirror: {
+      ready: boolean;
+      drifted: boolean;
+      reason: string | null;
+      missingTables: string[];
+      source: {
+        digest: string;
+        products: number;
+        plans: number;
+        prices: number;
+      };
+      mirror: {
+        sourceDigest: string | null;
+        sourceVersion: string | null;
+        productCount: number;
+        planCount: number;
+        priceCount: number;
+        active: {
+          products: number;
+          plans: number;
+          prices: number;
+        };
+        retired: {
+          products: number;
+          plans: number;
+          prices: number;
+        };
+        syncedAt: string | null;
+      } | null;
+    };
+    unfinishedNativeBillingModelsPresent: boolean;
     effectiveEntitlementAuthority: string | null;
+    subscriptionCatalogLinkReady: boolean;
+    subscriptionCatalogLinkReason: string;
     tables: Record<string, { present: boolean; rows: number | null }>;
   };
   provisioning: {
@@ -516,6 +550,8 @@ export function CatalogEntitlementsWorkspace({
   const [bindingEditor, setBindingEditor] = useState<BindingEditor>(emptyBinding);
   const [bindingSaving, setBindingSaving] = useState(false);
   const [bindingMessage, setBindingMessage] = useState<string | null>(null);
+  const [catalogSyncing, setCatalogSyncing] = useState(false);
+  const [catalogSyncMessage, setCatalogSyncMessage] = useState<string | null>(null);
   const [orgQuery, setOrgQuery] = useState("");
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [orgLoading, setOrgLoading] = useState(false);
@@ -1196,6 +1232,43 @@ export function CatalogEntitlementsWorkspace({
     }
   }
 
+  async function syncRuntimeCatalog() {
+    setCatalogSyncing(true);
+    setCatalogSyncMessage(null);
+
+    try {
+      const response = await fetch("/api/platform/commerce/catalog/sync", {
+        method: "POST",
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.error ?? "Unable to sync runtime catalog");
+      }
+
+      const counts = body.counts;
+      setCatalogSyncMessage(
+        counts
+          ? "Runtime catalog synchronized: " +
+              counts.products +
+              " products, " +
+              counts.plans +
+              " plans, " +
+              counts.prices +
+              " price components."
+          : "Runtime catalog is already synchronized.",
+      );
+      await loadCatalog();
+    } catch (error) {
+      setCatalogSyncMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to sync runtime catalog",
+      );
+    } finally {
+      setCatalogSyncing(false);
+    }
+  }
+
   async function openDeadLetter(jobId: string) {
     setDeadLetterLoadingId(jobId);
     setDeadLetterError(null);
@@ -1833,11 +1906,79 @@ export function CatalogEntitlementsWorkspace({
                 detail="production enforcement source"
               />
               <ReadinessRow
-                label="Native catalog mirror"
-                value={catalog.readiness.nativeCatalogMirrorReady ? "Ready" : "Not deployed"}
+                label="Runtime catalog mirror"
+                value={
+                  catalog.readiness.nativeCatalogMirrorReady
+                    ? "In sync"
+                    : catalog.readiness.nativeCatalogMirror.reason === "migration_not_applied"
+                      ? "Migration missing"
+                      : catalog.readiness.nativeCatalogMirror.reason === "never_synced"
+                        ? "Ready to sync"
+                        : catalog.readiness.nativeCatalogMirror.reason === "source_digest_changed"
+                          ? "Source drift detected"
+                          : catalog.readiness.nativeCatalogMirror.reason === "row_count_mismatch"
+                            ? "Row-count drift"
+                            : "Needs attention"
+                }
                 ok={catalog.readiness.nativeCatalogMirrorReady}
-                detail="BillingProduct + BillingPrice"
+                detail={
+                  catalog.readiness.nativeCatalogMirror.mirror?.syncedAt
+                    ? "BillingCatalog product → plan → price mirror · last sync " +
+                      formatDate(catalog.readiness.nativeCatalogMirror.mirror.syncedAt)
+                    : "BillingCatalog product → plan → price mirror"
+                }
               />
+              <ReadinessRow
+                label="Subscription catalog link"
+                value={catalog.readiness.subscriptionCatalogLinkReady ? "Linked" : "Deferred"}
+                ok={catalog.readiness.subscriptionCatalogLinkReady}
+                detail={catalog.readiness.subscriptionCatalogLinkReason}
+              />
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900">Mirror reconciliation</p>
+                    <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                      Source {catalog.readiness.nativeCatalogMirror.source.products} products /{" "}
+                      {catalog.readiness.nativeCatalogMirror.source.plans} plans /{" "}
+                      {catalog.readiness.nativeCatalogMirror.source.prices} price components.
+                      {catalog.readiness.nativeCatalogMirror.mirror
+                        ? " Mirror " +
+                          catalog.readiness.nativeCatalogMirror.mirror.active.products +
+                          " / " +
+                          catalog.readiness.nativeCatalogMirror.mirror.active.plans +
+                          " / " +
+                          catalog.readiness.nativeCatalogMirror.mirror.active.prices +
+                          "."
+                        : ""}
+                    </p>
+                    {catalogSyncMessage ? (
+                      <p className="mt-2 text-[11px] font-medium text-slate-700">
+                        {catalogSyncMessage}
+                      </p>
+                    ) : null}
+                  </div>
+                  {catalog.mutationReadiness.bindings ? (
+                    <button
+                      type="button"
+                      onClick={() => void syncRuntimeCatalog()}
+                      disabled={catalogSyncing}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {catalogSyncing ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )}
+                      {catalogSyncing ? "Syncing…" : "Sync runtime catalog"}
+                    </button>
+                  ) : (
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-semibold text-slate-500">
+                      Catalog management authority required
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           </section>
         </div>

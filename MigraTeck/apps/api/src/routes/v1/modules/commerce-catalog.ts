@@ -1,5 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { getCatalogMirrorStatus, syncCatalogMirror } from "../../../lib/catalog-mirror.js";
+import { getDb } from "../../../lib/db.js";
 import { requirePlatformAuthority } from "../../../lib/migraauth.js";
 import {
   ENTITLEMENT_STATUSES,
@@ -134,6 +137,38 @@ export async function registerCommerceCatalogRoutes(
           : "platform.commerce.entitlements.manage is required.",
         worker,
       },
+    };
+  });
+
+  app.post("/commerce/catalog/sync", async (request) => {
+    const authority = await requirePlatformAuthority(request, [
+      "platform.commerce.catalog.manage",
+    ]);
+
+    const result = await syncCatalogMirror();
+
+    await getDb().query(
+      'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8::jsonb,NOW())',
+      [
+        randomUUID(),
+        authority.platformUserId,
+        "BILLING_CATALOG_MIRROR_SYNCED",
+        "billing_catalog_sync",
+        "canonical",
+        request.ip ?? null,
+        request.headers["user-agent"] ?? null,
+        JSON.stringify({
+          sourceDigest: result.sourceDigest,
+          sourceVersion: result.sourceVersion,
+          counts: result.counts,
+          retired: result.retired,
+        }),
+      ],
+    );
+
+    return {
+      ...result,
+      status: await getCatalogMirrorStatus(),
     };
   });
 

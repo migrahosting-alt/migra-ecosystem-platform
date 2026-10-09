@@ -3525,6 +3525,82 @@ model BillingPrice {
   @@index([productId])
 }
 
+// One-way runtime mirror of packages/billing-core PRODUCT_CATALOG.
+// This is deliberately separate from BillingProduct/BillingPrice above:
+// the source catalog supports composite plans and metered price components
+// that the unfinished native billing models cannot represent losslessly.
+model BillingCatalogProduct {
+  id            String               @id
+  productFamily String               @unique
+  productKey    String?
+  name          String
+  description   String?
+  active        Boolean              @default(true)
+  sourceHash    String
+  lastSyncedAt  DateTime             @default(now())
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  plans         BillingCatalogPlan[]
+
+  @@index([active])
+}
+
+model BillingCatalogPlan {
+  id           String                @id
+  productId    String
+  planCode     String
+  name         String
+  description  String?
+  trialDays    Int?
+  entitlements Json
+  active       Boolean               @default(true)
+  sourceHash   String
+  lastSyncedAt DateTime              @default(now())
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  product      BillingCatalogProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  prices       BillingCatalogPrice[]
+
+  @@unique([productId, planCode])
+  @@index([productId])
+  @@index([active])
+}
+
+model BillingCatalogPrice {
+  id             String             @id
+  planId         String
+  lookupKey      String             @unique
+  componentType  String
+  billingInterval String
+  currency       String             @default("usd")
+  unitAmount     Int?
+  meterName      String?
+  usageDimension String?
+  metadata       Json
+  active         Boolean            @default(true)
+  sourceHash     String
+  lastSyncedAt   DateTime           @default(now())
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  plan           BillingCatalogPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@index([active])
+}
+
+model BillingCatalogSync {
+  id                  String   @id
+  sourceDigest        String
+  sourceVersion       String?
+  productCount        Int
+  planCount           Int
+  priceCount          Int
+  retiredProductCount Int      @default(0)
+  retiredPlanCount    Int      @default(0)
+  retiredPriceCount   Int      @default(0)
+  syncedAt            DateTime @default(now())
+}
+
 model BillingInvoice {
   id                    String               @id @default(cuid())
   orgId                 String
