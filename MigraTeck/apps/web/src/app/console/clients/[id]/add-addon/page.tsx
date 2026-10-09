@@ -90,9 +90,9 @@ const loadAddons = async (): Promise<AddonRow[]> => {
  * Compute prorated amount for the remainder of the current billing period.
  * Anchor is the parent subscription's createdAt.
  *
- * Exported for testability — pure function.
+ * Pure function kept local because Next.js page modules only allow page exports.
  */
-export const computeProration = (input: {
+const computeProration = (input: {
   subscriptionStartedAt: string | null;
   billingCycle: string;
   unitPrice: number;
