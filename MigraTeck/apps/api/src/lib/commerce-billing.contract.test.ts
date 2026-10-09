@@ -227,6 +227,10 @@ test("billing overview defaults to commercial accounts and opens the full direct
   assert.match(operatorUi, /Directory search/);
   assert.match(operatorUi, /search to find any organization/);
   assert.match(operatorUi, /No billing relationships yet/);
+  assert.match(operatorUi, /No subscription evidence in local ledger/);
+  assert.match(operatorUi, /No invoice evidence in local ledger/);
+  assert.match(operatorUi, /No webhook delivery evidence received yet/);
+  assert.match(operatorUi, /webhookEvidenceCount > 0/);
 });
 
 test("overview outstanding balance does not use DISTINCT amounts", () => {

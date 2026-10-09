@@ -655,6 +655,11 @@ export function BillingOperationsWorkspace() {
     );
   }
 
+  const webhookEvidenceCount = overview.webhookHealth.reduce(
+    (sum, item) => sum + item.count,
+    0,
+  );
+
   return (
     <div className="space-y-6">
       {overview.authority.viaBootstrap ? (
@@ -683,17 +688,32 @@ export function BillingOperationsWorkspace() {
         <MetricCard
           label="Active subscriptions"
           value={overview.metrics.activeSubscriptions.toLocaleString()}
-          detail={overview.metrics.subscriptions + " subscriptions in local ledger"}
+          detail={
+            overview.metrics.subscriptions > 0
+              ? overview.metrics.subscriptions + " subscriptions in local ledger"
+              : "No subscription evidence in local ledger"
+          }
         />
         <MetricCard
           label="Open invoices"
           value={overview.metrics.openInvoices.toLocaleString()}
-          detail={formatMoney(overview.metrics.amountOutstanding) + " outstanding"}
+          detail={
+            overview.metrics.invoices > 0
+              ? formatMoney(overview.metrics.amountOutstanding) + " outstanding"
+              : "No invoice evidence in local ledger"
+          }
         />
         <MetricCard
           label="Webhook attention"
           value={(overview.metrics.failedWebhookEvents + overview.metrics.pendingWebhookEvents).toLocaleString()}
-          detail={overview.metrics.failedWebhookEvents + " failed · " + overview.metrics.pendingWebhookEvents + " pending"}
+          detail={
+            webhookEvidenceCount > 0
+              ? overview.metrics.failedWebhookEvents +
+                " failed · " +
+                overview.metrics.pendingWebhookEvents +
+                " pending"
+              : "No webhook delivery evidence received yet"
+          }
         />
       </section>
 
