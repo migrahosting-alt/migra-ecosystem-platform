@@ -49,6 +49,14 @@ test("readiness UI distinguishes first-delivery waiting from observed health", (
   assert.match(workspace, /missingLocalDeliveries/);
 });
 
+test("readiness UI surfaces reconciliation worker liveness and stale sync evidence", () => {
+  assert.match(workspace, /Reconciliation safety net/);
+  assert.match(workspace, /Worker live/);
+  assert.match(workspace, /reconciliationWorker/);
+  assert.match(workspace, /staleMappedOrganizations/);
+  assert.match(workspace, /SyncStatePill/);
+});
+
 test("readiness UI exposes evidence without secrets or money-moving actions", () => {
   assert.match(workspace, /Endpoint event coverage/);
   assert.match(workspace, /Mapped organizations reconciled/);

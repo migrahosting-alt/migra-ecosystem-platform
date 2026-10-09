@@ -37,7 +37,7 @@ type ReadinessOrganization = {
   lastSyncedAt: string | null;
   subscriptionCount: number;
   invoiceCount: number;
-  syncState: "synced" | "never_synced";
+  syncState: "synced" | "stale" | "never_synced";
 };
 
 type Payload = {
@@ -82,6 +82,27 @@ type Payload = {
       | "observed"
       | "delivery_gap";
   };
+  reconciliationWorker: {
+    heartbeatPresent: boolean;
+    live: boolean;
+    lastSeenAt: string | null;
+    startedAt: string | null;
+    pollIntervalMs: number;
+    minimumSyncAgeMs: number;
+    batchSize: number;
+    cycles: number;
+    lastCycleAt: string | null;
+    lastSuccessAt: string | null;
+    staleAfterMs: number;
+    lastBatch: {
+      selected: number;
+      attempted: number;
+      succeeded: number;
+      skippedLocked: number;
+      skippedMissingMapping: number;
+      failed: number;
+    } | null;
+  };
   ledger: {
     customerCount: number;
     orgStateCount: number;
@@ -97,6 +118,7 @@ type Payload = {
     latestWebhookAt: string | null;
     latestSyncAt: string | null;
     neverSyncedMappedOrganizations: number;
+    staleMappedOrganizations: number;
   };
   organizations: ReadinessOrganization[];
   issues: ReadinessIssue[];
@@ -115,6 +137,43 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
       }
     >
       {ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+      {label}
+    </span>
+  );
+}
+
+function SyncStatePill({
+  state,
+}: {
+  state: ReadinessOrganization["syncState"];
+}) {
+  const classes =
+    state === "synced"
+      ? "bg-emerald-50 text-emerald-700"
+      : state === "stale"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-rose-50 text-rose-700";
+  const label =
+    state === "synced"
+      ? "Synced"
+      : state === "stale"
+        ? "Stale"
+        : "Never synced";
+
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] " +
+        classes
+      }
+    >
+      {state === "synced" ? (
+        <CheckCircle2 size={12} />
+      ) : state === "stale" ? (
+        <AlertTriangle size={12} />
+      ) : (
+        <XCircle size={12} />
+      )}
       {label}
     </span>
   );
@@ -153,7 +212,8 @@ export function BillingReadinessWorkspace() {
   const reconciledMappedOrganizations = Math.max(
     0,
     (data?.ledger.customerCount ?? 0) -
-      (data?.ledger.neverSyncedMappedOrganizations ?? 0),
+      (data?.ledger.neverSyncedMappedOrganizations ?? 0) -
+      (data?.ledger.staleMappedOrganizations ?? 0),
   );
 
   const coveragePercent = useMemo(() => {
@@ -351,7 +411,7 @@ export function BillingReadinessWorkspace() {
         </Panel>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-2">
+      <section className="grid gap-6 xl:grid-cols-3">
         <Panel
           icon={<Activity size={17} />}
           title="Processor delivery verification"
@@ -429,6 +489,83 @@ export function BillingReadinessWorkspace() {
             Latest Stripe account event in sample:{" "}
             <strong>{formatDate(data?.processor.latestEventAt ?? null)}</strong>
           </p>
+        </Panel>
+
+        <Panel
+          icon={<RefreshCw size={17} />}
+          title="Reconciliation safety net"
+          detail="Managed worker periodically refreshes mapped Stripe customers when webhook-driven state would otherwise become stale."
+        >
+          <div className="flex flex-wrap gap-2">
+            <StatusPill
+              ok={Boolean(data?.reconciliationWorker.live)}
+              label={
+                data?.reconciliationWorker.live
+                  ? "Worker live"
+                  : "Worker unavailable"
+              }
+            />
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-600">
+              {data?.reconciliationWorker.cycles.toLocaleString() ?? "0"} cycles
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+            <Evidence
+              label="Last heartbeat"
+              value={formatDate(data?.reconciliationWorker.lastSeenAt ?? null)}
+            />
+            <Evidence
+              label="Last cycle"
+              value={formatDate(data?.reconciliationWorker.lastCycleAt ?? null)}
+            />
+            <Evidence
+              label="Minimum sync age"
+              value={
+                data?.reconciliationWorker.minimumSyncAgeMs
+                  ? Math.round(
+                      data.reconciliationWorker.minimumSyncAgeMs / 60_000,
+                    ) + " minutes"
+                  : "—"
+              }
+            />
+            <Evidence
+              label="Freshness threshold"
+              value={
+                data?.reconciliationWorker.staleAfterMs
+                  ? Math.round(
+                      data.reconciliationWorker.staleAfterMs / 60_000,
+                    ) + " minutes"
+                  : "—"
+              }
+            />
+          </div>
+
+          {data?.reconciliationWorker.lastBatch ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+              <SmallMetric
+                label="Last selected"
+                value={data.reconciliationWorker.lastBatch.selected}
+              />
+              <SmallMetric
+                label="Last succeeded"
+                value={data.reconciliationWorker.lastBatch.succeeded}
+              />
+              <SmallMetric
+                label="Last failed"
+                value={data.reconciliationWorker.lastBatch.failed}
+                tone={
+                  data.reconciliationWorker.lastBatch.failed > 0
+                    ? "critical"
+                    : "default"
+                }
+              />
+            </div>
+          ) : (
+            <p className="mt-4 text-xs leading-5 text-slate-500">
+              No completed worker cycle is recorded yet.
+            </p>
+          )}
         </Panel>
 
         <Panel
@@ -516,14 +653,7 @@ export function BillingReadinessWorkspace() {
                       </p>
                     </td>
                     <td className="px-4 py-4">
-                      <StatusPill
-                        ok={organization.syncState === "synced"}
-                        label={
-                          organization.syncState === "synced"
-                            ? "Synced"
-                            : "Never synced"
-                        }
-                      />
+                      <SyncStatePill state={organization.syncState} />
                     </td>
                     <td className="px-4 py-4">
                       {organization.subscriptionCount.toLocaleString()}

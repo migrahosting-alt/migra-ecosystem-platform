@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import Stripe from "stripe";
 import { getDb } from "./db.js";
 
@@ -68,6 +69,99 @@ function asIso(value: Date | string | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+type BillingReconciliationHeartbeat = {
+  workerId?: unknown;
+  pid?: unknown;
+  lastSeenAt?: unknown;
+  startedAt?: unknown;
+  pollIntervalMs?: unknown;
+  minimumSyncAgeMs?: unknown;
+  batchSize?: unknown;
+  cycles?: unknown;
+  lastCycleAt?: unknown;
+  lastSuccessAt?: unknown;
+  lastBatch?: unknown;
+};
+
+function reconciliationHeartbeatFile(): string {
+  return (
+    process.env.BILLING_RECONCILIATION_HEARTBEAT_FILE ??
+    "/run/migrateck-billing-reconcile/heartbeat.json"
+  );
+}
+
+function staleReconciliationAfterMs(): number {
+  const parsed = Number(
+    process.env.BILLING_RECONCILIATION_STALE_AFTER_MS ?? 2 * 60 * 60_000,
+  );
+  return Number.isFinite(parsed) && parsed >= 5 * 60_000
+    ? Math.min(parsed, 48 * 60 * 60_000)
+    : 2 * 60 * 60_000;
+}
+
+async function readBillingReconciliationHeartbeat() {
+  try {
+    const raw = await readFile(reconciliationHeartbeatFile(), "utf8");
+    const parsed = JSON.parse(raw) as BillingReconciliationHeartbeat;
+    const lastSeenAt =
+      typeof parsed.lastSeenAt === "string" ? asIso(parsed.lastSeenAt) : null;
+    const pollIntervalMs = Math.max(
+      15_000,
+      Math.min(asNumber(parsed.pollIntervalMs) || 60_000, 60 * 60_000),
+    );
+    const lastSeenMs = lastSeenAt ? new Date(lastSeenAt).getTime() : 0;
+    const livenessWindowMs = Math.max(120_000, pollIntervalMs * 3 + 15_000);
+    const lastBatch =
+      parsed.lastBatch && typeof parsed.lastBatch === "object"
+        ? (parsed.lastBatch as Record<string, unknown>)
+        : null;
+
+    return {
+      heartbeatPresent: true,
+      live: lastSeenMs > 0 && Date.now() - lastSeenMs <= livenessWindowMs,
+      lastSeenAt,
+      startedAt:
+        typeof parsed.startedAt === "string" ? asIso(parsed.startedAt) : null,
+      pollIntervalMs,
+      minimumSyncAgeMs: asNumber(parsed.minimumSyncAgeMs),
+      batchSize: asNumber(parsed.batchSize),
+      cycles: asNumber(parsed.cycles),
+      lastCycleAt:
+        typeof parsed.lastCycleAt === "string"
+          ? asIso(parsed.lastCycleAt)
+          : null,
+      lastSuccessAt:
+        typeof parsed.lastSuccessAt === "string"
+          ? asIso(parsed.lastSuccessAt)
+          : null,
+      lastBatch: lastBatch
+        ? {
+            selected: asNumber(lastBatch.selected),
+            attempted: asNumber(lastBatch.attempted),
+            succeeded: asNumber(lastBatch.succeeded),
+            skippedLocked: asNumber(lastBatch.skippedLocked),
+            skippedMissingMapping: asNumber(lastBatch.skippedMissingMapping),
+            failed: asNumber(lastBatch.failed),
+          }
+        : null,
+    };
+  } catch {
+    return {
+      heartbeatPresent: false,
+      live: false,
+      lastSeenAt: null,
+      startedAt: null,
+      pollIntervalMs: 0,
+      minimumSyncAgeMs: 0,
+      batchSize: 0,
+      cycles: 0,
+      lastCycleAt: null,
+      lastSuccessAt: null,
+      lastBatch: null,
+    };
+  }
+}
+
 const LEDGER_SQL = [
   "SELECT",
   '(SELECT count(*)::int FROM "BillingCustomer") AS "customerCount",',
@@ -103,33 +197,35 @@ const ORGANIZATIONS_SQL = [
 export async function getCommerceBillingReadiness() {
   const db = getDb();
 
-  const [ledgerResult, organizationsResult] = await Promise.all([
-    db.query<{
-      customerCount: number;
-      orgStateCount: number;
-      subscriptionCount: number;
-      invoiceCount: number;
-      webhookEventCount: number;
-      projectionCount: number;
-      processedWebhookCount: number;
-      ignoredWebhookCount: number;
-      failedWebhookCount: number;
-      stalledWebhookCount: number;
-      unmappedIgnoredCount: number;
-      latestWebhookAt: Date | string | null;
-      latestSyncAt: Date | string | null;
-    }>(LEDGER_SQL),
-    db.query<{
-      orgId: string;
-      orgName: string;
-      orgSlug: string;
-      customerMappedAt: Date | string;
-      customerUpdatedAt: Date | string;
-      lastSyncedAt: Date | string | null;
-      subscriptionCount: number;
-      invoiceCount: number;
-    }>(ORGANIZATIONS_SQL),
-  ]);
+  const [ledgerResult, organizationsResult, reconciliationWorker] =
+    await Promise.all([
+      db.query<{
+        customerCount: number;
+        orgStateCount: number;
+        subscriptionCount: number;
+        invoiceCount: number;
+        webhookEventCount: number;
+        projectionCount: number;
+        processedWebhookCount: number;
+        ignoredWebhookCount: number;
+        failedWebhookCount: number;
+        stalledWebhookCount: number;
+        unmappedIgnoredCount: number;
+        latestWebhookAt: Date | string | null;
+        latestSyncAt: Date | string | null;
+      }>(LEDGER_SQL),
+      db.query<{
+        orgId: string;
+        orgName: string;
+        orgSlug: string;
+        customerMappedAt: Date | string;
+        customerUpdatedAt: Date | string;
+        lastSyncedAt: Date | string | null;
+        subscriptionCount: number;
+        invoiceCount: number;
+      }>(ORGANIZATIONS_SQL),
+      readBillingReconciliationHeartbeat(),
+    ]);
 
   const ledger = ledgerResult.rows[0] ?? {
     customerCount: 0,
@@ -147,18 +243,27 @@ export async function getCommerceBillingReadiness() {
     latestSyncAt: null,
   };
 
-  const organizations = organizationsResult.rows.map((row) => ({
-    orgId: row.orgId,
-    orgName: row.orgName,
-    orgSlug: row.orgSlug,
-    customerMappedAt: asIso(row.customerMappedAt),
-    lastSyncedAt: asIso(row.lastSyncedAt),
-    subscriptionCount: asNumber(row.subscriptionCount),
-    invoiceCount: asNumber(row.invoiceCount),
-    syncState: row.lastSyncedAt
-      ? ("synced" as const)
-      : ("never_synced" as const),
-  }));
+  const staleAfterMs = staleReconciliationAfterMs();
+  const organizations = organizationsResult.rows.map((row) => {
+    const lastSyncedAt = asIso(row.lastSyncedAt);
+    const lastSyncedMs = lastSyncedAt ? new Date(lastSyncedAt).getTime() : 0;
+    const syncState = !lastSyncedAt
+      ? ("never_synced" as const)
+      : Date.now() - lastSyncedMs > staleAfterMs
+        ? ("stale" as const)
+        : ("synced" as const);
+
+    return {
+      orgId: row.orgId,
+      orgName: row.orgName,
+      orgSlug: row.orgSlug,
+      customerMappedAt: asIso(row.customerMappedAt),
+      lastSyncedAt,
+      subscriptionCount: asNumber(row.subscriptionCount),
+      invoiceCount: asNumber(row.invoiceCount),
+      syncState,
+    };
+  });
 
   const issues: BillingReadinessIssue[] = [];
   const billingEnabled = process.env.STRIPE_BILLING_ENABLED === "true";
@@ -378,6 +483,30 @@ export async function getCommerceBillingReadiness() {
   const neverSynced = organizations.filter(
     (organization) => organization.syncState === "never_synced",
   ).length;
+  const staleReconciliations = organizations.filter(
+    (organization) => organization.syncState === "stale",
+  ).length;
+
+  if (!reconciliationWorker.live) {
+    issues.push({
+      code: "reconciliation_worker_unavailable",
+      severity: "warning",
+      title: "Billing reconciliation worker is not live",
+      detail:
+        "The periodic Stripe reconciliation safety net does not have a fresh heartbeat.",
+    });
+  }
+
+  if (staleReconciliations > 0) {
+    issues.push({
+      code: "mapped_customer_stale_reconciliation",
+      severity: "warning",
+      title: "Mapped billing organizations have stale reconciliation",
+      detail:
+        staleReconciliations +
+        " mapped organization(s) have not been reconciled within the freshness window.",
+    });
+  }
 
   if (neverSynced > 0) {
     issues.push({
@@ -464,6 +593,10 @@ export async function getCommerceBillingReadiness() {
     },
     endpoint,
     processor,
+    reconciliationWorker: {
+      ...reconciliationWorker,
+      staleAfterMs,
+    },
     ledger: {
       customerCount: asNumber(ledger.customerCount),
       orgStateCount: asNumber(ledger.orgStateCount),
@@ -479,6 +612,7 @@ export async function getCommerceBillingReadiness() {
       latestWebhookAt: asIso(ledger.latestWebhookAt),
       latestSyncAt: asIso(ledger.latestSyncAt),
       neverSyncedMappedOrganizations: neverSynced,
+      staleMappedOrganizations: staleReconciliations,
     },
     organizations,
     issues,

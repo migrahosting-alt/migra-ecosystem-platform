@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "start:webhook-worker": "node dist/webhook-worker.js",
     "start:usage-worker": "node dist/usage-worker.js",
+    "start:billing-reconciliation-worker": "node dist/billing-reconciliation-worker.js",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

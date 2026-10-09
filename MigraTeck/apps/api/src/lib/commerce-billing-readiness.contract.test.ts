@@ -81,6 +81,14 @@ test("readiness covers reconciliation and webhook ledger failure modes", () => {
   assert.match(service, /projection_gap/);
 });
 
+test("readiness monitors reconciliation worker liveness and stale organization sync", () => {
+  assert.match(service, /readFile\(reconciliationHeartbeatFile\(\), "utf8"\)/);
+  assert.match(service, /reconciliation_worker_unavailable/);
+  assert.match(service, /mapped_customer_stale_reconciliation/);
+  assert.match(service, /staleMappedOrganizations/);
+  assert.match(service, /BILLING_RECONCILIATION_STALE_AFTER_MS/);
+});
+
 test("readiness never returns Stripe secrets or customer identifiers", () => {
   assert.match(service, /processorSecretConfigured/);
   assert.match(service, /webhookSecretConfigured/);

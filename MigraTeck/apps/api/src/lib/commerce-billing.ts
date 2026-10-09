@@ -995,6 +995,10 @@ type ProcessorPersistenceInput = {
       eventId: string;
       eventType: string;
     }
+  | {
+      source: "reconciliation_worker";
+      workerId: string;
+    }
 );
 
 async function persistProcessorBundle(input: ProcessorPersistenceInput) {
@@ -1137,7 +1141,7 @@ async function persistProcessorBundle(input: ProcessorPersistenceInput) {
           }),
         ],
       );
-    } else {
+    } else if (input.source === "operator") {
       await client.query(
         'INSERT INTO "AuditLog" (id,"userId","orgId",action,"entityType","entityId",ip,"userAgent",metadata,"createdAt") VALUES ($1,$2,$3,\'BILLING_RECONCILED\',\'billing_customer\',$4,$5,$6,$7::jsonb,NOW())',
         [
@@ -1215,6 +1219,7 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
   const db = getDb();
   const lockClient = await db.connect();
   const lockKey = "migrateck:stripe-webhook:" + event.id;
+  let customerLockKey: string | null = null;
   let webhookRowId: string | null = null;
 
   try {
@@ -1294,6 +1299,11 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
       };
     }
 
+    customerLockKey = "migrateck:stripe-customer:" + customerId;
+    await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [
+      customerLockKey,
+    ]);
+
     const mapping = await lockClient.query<{
       orgId: string;
       email: string | null;
@@ -1372,6 +1382,11 @@ export async function processCanonicalStripeWebhookEvent(event: Stripe.Event) {
     }
     throw error;
   } finally {
+    if (customerLockKey) {
+      await lockClient
+        .query("SELECT pg_advisory_unlock(hashtext($1))", [customerLockKey])
+        .catch(() => undefined);
+    }
     await lockClient
       .query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey])
       .catch(() => undefined);
@@ -1387,7 +1402,8 @@ export async function reconcileOrganizationBilling(input: {
   ip?: string | null;
   userAgent?: string | null;
 }) {
-  const customer = await getDb().query(
+  const db = getDb();
+  const customer = await db.query(
     'SELECT id,"externalCustomerId",email FROM "BillingCustomer" WHERE "orgId"=$1 AND provider=\'STRIPE\'::"BillingProvider" LIMIT 1',
     [input.orgId],
   );
@@ -1400,33 +1416,163 @@ export async function reconcileOrganizationBilling(input: {
     );
   }
 
-  const processor = await loadProcessorBundle(row.externalCustomerId);
-  if (
-    !processor.completeness.subscriptions ||
-    !processor.completeness.invoices
-  ) {
-    throw Object.assign(
-      new Error(
-        "Stripe history exceeds the safe reconciliation window. Narrow the account history before reconciling.",
-      ),
-      { statusCode: 409 },
-    );
+  const lockClient = await db.connect();
+  const lockKey = "migrateck:stripe-customer:" + row.externalCustomerId;
+  try {
+    await lockClient.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
+
+    const processor = await loadProcessorBundle(row.externalCustomerId);
+    if (
+      !processor.completeness.subscriptions ||
+      !processor.completeness.invoices
+    ) {
+      throw Object.assign(
+        new Error(
+          "Stripe history exceeds the safe reconciliation window. Narrow the account history before reconciling.",
+        ),
+        { statusCode: 409 },
+      );
+    }
+
+    await persistProcessorBundle({
+      source: "operator",
+      orgId: input.orgId,
+      customerId: row.externalCustomerId,
+      customerEmail: processor.customer.email ?? row.email ?? null,
+      processor,
+      actorId: input.actorId,
+      operationId: input.operationId,
+      reason: input.reason,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+    });
+  } finally {
+    await lockClient
+      .query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey])
+      .catch(() => undefined);
+    lockClient.release();
   }
 
-  await persistProcessorBundle({
-    source: "operator",
-    orgId: input.orgId,
-    customerId: row.externalCustomerId,
-    customerEmail: processor.customer.email ?? row.email ?? null,
-    processor,
-    actorId: input.actorId,
-    operationId: input.operationId,
-    reason: input.reason,
-    ip: input.ip ?? null,
-    userAgent: input.userAgent ?? null,
-  });
-
   return getOrganizationBillingOperations(input.orgId);
+}
+
+export type BillingReconciliationBatchResult = {
+  selected: number;
+  attempted: number;
+  succeeded: number;
+  skippedLocked: number;
+  skippedMissingMapping: number;
+  failed: number;
+  failedOrgIds: string[];
+};
+
+function normalizedReconciliationLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 10;
+  return Math.min(50, Math.max(1, Math.floor(value ?? 10)));
+}
+
+function normalizedReconciliationAgeMs(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 15 * 60_000;
+  return Math.min(24 * 60 * 60_000, Math.max(60_000, Math.floor(value ?? 0)));
+}
+
+export async function reconcileDueBillingOrganizations(input: {
+  workerId: string;
+  batchSize?: number;
+  minSyncAgeMs?: number;
+}): Promise<BillingReconciliationBatchResult> {
+  const db = getDb();
+  const batchSize = normalizedReconciliationLimit(input.batchSize);
+  const minSyncAgeMs = normalizedReconciliationAgeMs(input.minSyncAgeMs);
+
+  const candidates = await db.query<{
+    orgId: string;
+    externalCustomerId: string;
+    email: string | null;
+  }>(
+    [
+      'SELECT c."orgId",c."externalCustomerId",c.email',
+      'FROM "BillingCustomer" c',
+      'LEFT JOIN "BillingOrgState" state ON state."orgId"=c."orgId"',
+      'WHERE c.provider=\'STRIPE\'::"BillingProvider"',
+      'AND (state."lastSyncedAt" IS NULL OR state."lastSyncedAt" < NOW() - ($1::bigint * INTERVAL \'1 millisecond\'))',
+      'ORDER BY state."lastSyncedAt" ASC NULLS FIRST,c."updatedAt" ASC,c."orgId" ASC',
+      'LIMIT $2',
+    ].join(" "),
+    [minSyncAgeMs, batchSize],
+  );
+
+  const result: BillingReconciliationBatchResult = {
+    selected: candidates.rows.length,
+    attempted: 0,
+    succeeded: 0,
+    skippedLocked: 0,
+    skippedMissingMapping: 0,
+    failed: 0,
+    failedOrgIds: [],
+  };
+
+  for (const candidate of candidates.rows) {
+    const lockClient = await db.connect();
+    const lockKey =
+      "migrateck:stripe-customer:" + candidate.externalCustomerId;
+    let acquired = false;
+
+    try {
+      const lock = await lockClient.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtext($1)) AS locked",
+        [lockKey],
+      );
+      acquired = lock.rows[0]?.locked === true;
+      if (!acquired) {
+        result.skippedLocked += 1;
+        continue;
+      }
+
+      result.attempted += 1;
+      const mapping = await db.query<{ email: string | null }>(
+        'SELECT email FROM "BillingCustomer" WHERE "orgId"=$1 AND provider=\'STRIPE\'::"BillingProvider" AND "externalCustomerId"=$2 LIMIT 1',
+        [candidate.orgId, candidate.externalCustomerId],
+      );
+      if (!mapping.rows[0]) {
+        result.skippedMissingMapping += 1;
+        continue;
+      }
+
+      const processor = await loadProcessorBundle(candidate.externalCustomerId);
+      if (
+        !processor.completeness.subscriptions ||
+        !processor.completeness.invoices
+      ) {
+        throw new Error(
+          "Stripe history exceeds the safe reconciliation window",
+        );
+      }
+
+      await persistProcessorBundle({
+        source: "reconciliation_worker",
+        orgId: candidate.orgId,
+        customerId: candidate.externalCustomerId,
+        customerEmail:
+          processor.customer.email ?? mapping.rows[0].email ?? null,
+        processor,
+        workerId: input.workerId,
+      });
+      result.succeeded += 1;
+    } catch {
+      result.failed += 1;
+      result.failedOrgIds.push(candidate.orgId);
+    } finally {
+      if (acquired) {
+        await lockClient
+          .query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey])
+          .catch(() => undefined);
+      }
+      lockClient.release();
+    }
+  }
+
+  return result;
 }
 
 export type SubscriptionOperatorAction =
