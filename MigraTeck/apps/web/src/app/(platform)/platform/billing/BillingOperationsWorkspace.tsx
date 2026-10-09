@@ -252,6 +252,7 @@ type SubscriptionAction =
   | "pause_collection"
   | "resume_collection"
   | "cancel_at_period_end"
+  | "keep_active"
   | "cancel_immediate";
 
 function formatDate(value: string | null) {
@@ -501,7 +502,9 @@ export function BillingOperationsWorkspace() {
         ? "Immediately cancel this subscription and allow Stripe to prorate it now?"
         : action === "cancel_at_period_end"
           ? "Schedule this subscription to cancel at the end of its current period?"
-          : action === "pause_collection"
+          : action === "keep_active"
+            ? "Remove the scheduled cancellation and keep this subscription active?"
+            : action === "pause_collection"
             ? "Pause Stripe collection for this subscription?"
             : "Resume Stripe collection for this subscription?";
 
@@ -976,12 +979,18 @@ export function BillingOperationsWorkspace() {
                                         onClick={() => openAction(subscription, "pause_collection")}
                                       />
                                     )}
-                                    {!subscription.cancelAtPeriodEnd ? (
+                                    {subscription.cancelAtPeriodEnd ? (
+                                      <ActionButton
+                                        icon={<CirclePlay size={13} />}
+                                        label="Keep active"
+                                        onClick={() => openAction(subscription, "keep_active")}
+                                      />
+                                    ) : (
                                       <ActionButton
                                         label="Cancel at period end"
                                         onClick={() => openAction(subscription, "cancel_at_period_end")}
                                       />
-                                    ) : null}
+                                    )}
                                     <ActionButton
                                       danger
                                       label="Cancel now"
