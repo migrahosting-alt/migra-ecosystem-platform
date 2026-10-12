@@ -75,6 +75,26 @@ export const PLATFORM_PERMISSIONS = [
   "platform.hosting.read",
   /** Bind or unbind an organization to its authoritative MigraPanel tenant. */
   "platform.hosting.bindings.manage",
+  /** Register, renew, transfer, restore, or otherwise operate managed domains. */
+  "platform.hosting.domains.manage",
+  /** Operate managed websites, WordPress, backups, and hosting runtime actions. */
+  "platform.hosting.operations.manage",
+  /** Read MigraVoice customer configuration and operational state. */
+  "platform.voice.read",
+  /** Change MigraVoice customer configuration and execute voice operations. */
+  "platform.voice.manage",
+  /** Read MigraGuard posture, incidents, agent health, and enforcement evidence. */
+  "platform.security.read",
+  /** Acknowledge, assign, resolve, and reopen security incidents. */
+  "platform.security.incidents.manage",
+  /** Change signed firewall desired state. High-impact network authority. */
+  "platform.security.firewall.manage",
+  /** Approve governed containment/quarantine execution. */
+  "platform.security.response.approve",
+  /** Enroll, revoke, or rotate trusted MigraGuard enforcement agents. */
+  "platform.security.agents.manage",
+  /** Change MigraGuard policy, automation, and enforcement-mode settings. */
+  "platform.security.policy.manage",
   /** Read release inventory, storage readiness, and distribution integrity evidence. */
   "platform.downloads.read",
   /** Re-hash stored release objects and record integrity evidence. */
@@ -87,8 +107,6 @@ export const PLATFORM_PERMISSIONS = [
   "platform.intake.submissions.read",
   /** Create and operate tenant-native Intake forms and submission lifecycle. */
   "platform.intake.manage",
-  /** Attribute and migrate legacy global Intake customer data into an organization. Owner-only. */
-  "platform.intake.migrate",
   /** Read the canonical MigraTeck workforce directory and product assignments. */
   "platform.workforce.read",
   /** Create staff identities and change employment metadata/lifecycle. */
@@ -145,6 +163,8 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.commerce.read",
     "platform.social.read",
     "platform.hosting.read",
+    "platform.voice.read",
+    "platform.security.read",
     "platform.downloads.read",
     "platform.intake.read",
     "platform.audit.read",
@@ -166,6 +186,12 @@ const ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[]> = {
     "platform.social.read",
     "platform.social.manage",
     "platform.hosting.read",
+    "platform.hosting.domains.manage",
+    "platform.hosting.operations.manage",
+    "platform.voice.read",
+    "platform.voice.manage",
+    "platform.security.read",
+    "platform.security.incidents.manage",
     "platform.downloads.read",
     "platform.downloads.verify",
     "platform.intake.read",

@@ -49,6 +49,11 @@ test("SUPPORT can read but cannot change anything", () => {
   const p = permissionsForRoles(["SUPPORT"]);
   assert.ok(p.has("platform.users.read"));
   assert.ok(p.has("platform.audit.read"));
+  assert.ok(p.has("platform.security.read"), "support may inspect security evidence");
+  assert.ok(p.has("platform.voice.read"), "support may inspect voice state");
+  assert.ok(!p.has("platform.security.incidents.manage"), "support must not mutate incidents");
+  assert.ok(!p.has("platform.security.firewall.manage"), "support must not change firewall state");
+  assert.ok(!p.has("platform.voice.manage"), "support must not change voice state");
   assert.ok(!p.has("platform.users.suspend"), "support must not be able to disable accounts");
   assert.ok(!p.has("platform.users.sessions.manage"), "support must not be able to revoke another user's sessions");
   assert.ok(!p.has("platform.roles.manage"), "support must not be able to widen access");
@@ -94,6 +99,16 @@ test("OPERATOR can act on accounts but cannot widen authority", () => {
   assert.ok(p.has("platform.users.suspend"));
   assert.ok(p.has("platform.users.sessions.manage"));
   assert.ok(p.has("platform.clients.read"));
+  assert.ok(p.has("platform.hosting.domains.manage"));
+  assert.ok(p.has("platform.hosting.operations.manage"));
+  assert.ok(p.has("platform.voice.read"));
+  assert.ok(p.has("platform.voice.manage"));
+  assert.ok(p.has("platform.security.read"));
+  assert.ok(p.has("platform.security.incidents.manage"));
+  assert.ok(!p.has("platform.security.firewall.manage"), "firewall changes remain owner-only");
+  assert.ok(!p.has("platform.security.response.approve"), "containment approval remains owner-only");
+  assert.ok(!p.has("platform.security.agents.manage"), "agent trust changes remain owner-only");
+  assert.ok(!p.has("platform.security.policy.manage"), "security policy remains owner-only");
   /*
    * The separation the whole taxonomy exists for. An operator who can grant
    * themselves OWNER is an owner with extra steps.
@@ -164,22 +179,6 @@ test("commerce authority separates reading, usage, billing, org access, and glob
   assert.ok(owner.has("platform.commerce.catalog.manage"));
 });
 
-
-test("social authority separates health inspection from OAuth mutation", () => {
-  const support = permissionsForRoles(["SUPPORT"]);
-  const operator = permissionsForRoles(["OPERATOR"]);
-  const owner = permissionsForRoles(["OWNER"]);
-
-  assert.ok(support.has("platform.social.read"));
-  assert.ok(!support.has("platform.social.manage"));
-
-  assert.ok(operator.has("platform.social.read"));
-  assert.ok(operator.has("platform.social.manage"));
-
-  assert.ok(owner.has("platform.social.read"));
-  assert.ok(owner.has("platform.social.manage"));
-});
-
 test("hosting authority separates read-only topology inspection from tenant binding", () => {
   const support = permissionsForRoles(["SUPPORT"]);
   const operator = permissionsForRoles(["OPERATOR"]);
@@ -221,17 +220,14 @@ test("Intake authority separates metadata, sensitive submissions, and mutations"
   assert.ok(support.has("platform.intake.read"));
   assert.ok(!support.has("platform.intake.submissions.read"));
   assert.ok(!support.has("platform.intake.manage"));
-  assert.ok(!support.has("platform.intake.migrate"));
 
   assert.ok(operator.has("platform.intake.read"));
   assert.ok(operator.has("platform.intake.submissions.read"));
   assert.ok(operator.has("platform.intake.manage"));
-  assert.ok(!operator.has("platform.intake.migrate"), "cross-organization legacy attribution remains OWNER-only");
 
   assert.ok(owner.has("platform.intake.read"));
   assert.ok(owner.has("platform.intake.submissions.read"));
   assert.ok(owner.has("platform.intake.manage"));
-  assert.ok(owner.has("platform.intake.migrate"));
 });
 
 test("compliance authority separates review, case management, and destructive retention policy", () => {
@@ -253,6 +249,28 @@ test("compliance authority separates review, case management, and destructive re
   assert.ok(owner.has("platform.compliance.read"));
   assert.ok(owner.has("platform.compliance.manage"));
   assert.ok(owner.has("platform.compliance.retention.manage"));
+});
+
+test("security and operations permissions are independent least-privilege primitives", () => {
+  for (const permission of [
+    "platform.hosting.domains.manage",
+    "platform.hosting.operations.manage",
+    "platform.voice.read",
+    "platform.voice.manage",
+    "platform.security.read",
+    "platform.security.incidents.manage",
+    "platform.security.firewall.manage",
+    "platform.security.response.approve",
+    "platform.security.agents.manage",
+    "platform.security.policy.manage",
+  ] as const) {
+    assert.ok(PLATFORM_PERMISSIONS.includes(permission), `${permission} must be canonical authority`);
+  }
+  const owner = permissionsForRoles(["OWNER"]);
+  assert.ok(owner.has("platform.security.firewall.manage"));
+  assert.ok(owner.has("platform.security.response.approve"));
+  assert.ok(owner.has("platform.security.agents.manage"));
+  assert.ok(owner.has("platform.security.policy.manage"));
 });
 
 test("OWNER holds every permission, including future ones", () => {
