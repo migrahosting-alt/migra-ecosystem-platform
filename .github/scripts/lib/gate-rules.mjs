@@ -54,6 +54,14 @@ export const DORMANT_REASONS = {
 };
 
 export const GATES = [
+  {
+    context: "BoAI Workspace Validation",
+    paths: [
+      "apps/brain-service/**", "apps/vscode-extension/**", "packages/**",
+      "package.json", "package-lock.json", "services/pilot-api/**",
+      ".github/workflows/migrapilot-enterprise-gate.yml", ".github/scripts/**",
+    ],
+  },
   // No path filter — these run on every PR to the integration branch.
   { context: "guard-bootstrap", always: true },
   { context: "fresh-clone-proof", always: true },

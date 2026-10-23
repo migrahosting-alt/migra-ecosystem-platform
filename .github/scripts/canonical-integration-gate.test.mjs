@@ -63,7 +63,7 @@ test("a truncated file list does NOT resurrect dormant gates", () => {
   // Fail-safe still expands every LIVE gate: the unconditional set plus the path-filtered ones.
   assert.deepEqual(
     [...expected].sort(),
-    [...ALWAYS, "canonical-platform-validate", "canonical-platform-secret-scan", "extension"].sort(),
+    [...ALWAYS, "canonical-platform-validate", "canonical-platform-secret-scan", "extension", "BoAI Workspace Validation"].sort(),
   );
 });
 
@@ -242,4 +242,15 @@ test("a mixed PR expects the union of LIVE applicable gates only", () => {
   }
   assert.ok(!expected.includes("pilot-ci"), "pilot-ci is dormant and must not gate the merge");
   assert.ok(dormant.some((d) => d.context === "pilot-ci"));
+});
+
+
+test("BoAI source and workflow changes require workspace validation; missing or failed checks block", () => {
+  for (const path of ["apps/brain-service/src/server.ts", "apps/vscode-extension/src/extension.ts", "packages/protocol/src/index.ts", "package-lock.json", ".github/workflows/migrapilot-enterprise-gate.yml"]) {
+    const { expected } = computeApplicability([path]);
+    assert.ok(expected.includes("BoAI Workspace Validation"), path);
+  }
+  assert.equal(evaluate(["BoAI Workspace Validation"], new Map()).failures.length, 1);
+  assert.equal(evaluate(["BoAI Workspace Validation"], runsFor({ "BoAI Workspace Validation": completed("failure") })).failures.length, 1);
+  assert.ok(!computeApplicability(["docs/notes.md"]).expected.includes("BoAI Workspace Validation"));
 });

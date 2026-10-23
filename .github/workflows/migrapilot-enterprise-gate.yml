@@ -1,22 +1,40 @@
-name: MigraPilot Enterprise Gate
+name: BoAI Enterprise Gate
 
 on:
   push:
     branches:
       - main
+      - phase-1/canonical-vscode-extension
     paths:
+      - apps/brain-service/**
+      - apps/vscode-extension/**
+      - packages/**
+      - package.json
+      - package-lock.json
       - services/pilot-api/**
       - .github/workflows/migrapilot-enterprise-gate.yml
+      - .github/scripts/**
+  pull_request:
+    paths:
+      - apps/brain-service/**
+      - apps/vscode-extension/**
+      - packages/**
+      - package.json
+      - package-lock.json
+      - services/pilot-api/**
+      - .github/workflows/migrapilot-enterprise-gate.yml
+      - .github/scripts/**
   schedule:
     - cron: "20 3 * * *"
   workflow_dispatch:
     inputs:
       profile:
-        description: "Benchmark profile to run"
+        description: "Workspace validation, or retained legacy pilot-api benchmark (requires tracked source)"
         required: true
         type: choice
-        default: deep
+        default: workspace
         options:
+          - workspace
           - deep
           - full
 
@@ -27,10 +45,72 @@ concurrency:
   group: migrapilot-enterprise-gate-${{ github.ref }}
   cancel-in-progress: true
 
+# Keep the filename and legacy benchmark definitions for traceability. See
+# docs/operations/boai-enterprise-ci.md: workspace success is NOT model acceptance.
 jobs:
+  boai-workspace-validation:
+    name: BoAI Workspace Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate tracked workspace inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in package-lock.json apps/brain-service/package.json apps/vscode-extension/package.json; do
+            git ls-files --error-unmatch "$path" > /dev/null
+            test -f "$path"
+          done
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Clean generated output
+        run: npm run clean -ws --if-present
+
+      - name: Type-check workspace
+        run: npm run typecheck
+
+      - name: Build workspace
+        run: npm run build
+
+      - name: Brain deterministic acceptance suite
+        working-directory: apps/brain-service
+        run: node --test 'dist/test/*.test.js'
+
+      - name: Canonical extension unit and safety checks
+        run: npm run test:unit -w migrapilot-extension
+
+      - name: Integration gate decision tests
+        run: node --test .github/scripts/canonical-integration-gate.test.mjs
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: All-dependency high and critical audit
+        run: npm audit --audit-level=high
+
+      - name: Record validation scope
+        if: always()
+        run: |
+          echo '## BoAI workspace CI' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Deterministic code/security checks only. Legacy pilot-api model benchmarks are not evaluated by this job; no live model qualification or promotion is implied.' >> "$GITHUB_STEP_SUMMARY"
+
   chat-quality-gate:
     name: Chat Quality Gate (Deep Strict)
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'deep')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.profile == 'deep'
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
@@ -88,6 +168,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate legacy benchmark source (infrastructure prerequisite)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in services/pilot-api/package.json services/pilot-api/package-lock.json; do
+            if ! git ls-files --error-unmatch "$path" > /dev/null 2>&1 || [[ ! -f "$path" ]]; then
+              echo "::error::Legacy pilot-api benchmark source is not tracked: $path. This is a CI/source availability failure, not a model-quality verdict. See docs/operations/boai-enterprise-ci.md."
+              exit 1
+            fi
+          done
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -111,7 +202,7 @@ jobs:
 
       - name: Security audit (dependencies)
         working-directory: services/pilot-api
-        run: npm audit --audit-level=high || true
+        run: npm audit --audit-level=high
 
       - name: Generate Prisma client
         working-directory: services/pilot-api
@@ -221,7 +312,7 @@ jobs:
             services/pilot-api/.pilot-api-ci.log
 
       - name: Stop API
-        if: always()
+        if: always() && hashFiles('services/pilot-api/package.json') != ''
         working-directory: services/pilot-api
         shell: bash
         run: |
@@ -286,6 +377,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate legacy benchmark source (infrastructure prerequisite)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in services/pilot-api/package.json services/pilot-api/package-lock.json; do
+            if ! git ls-files --error-unmatch "$path" > /dev/null 2>&1 || [[ ! -f "$path" ]]; then
+              echo "::error::Legacy pilot-api benchmark source is not tracked: $path. This is a CI/source availability failure, not a model-quality verdict. See docs/operations/boai-enterprise-ci.md."
+              exit 1
+            fi
+          done
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -309,7 +411,7 @@ jobs:
 
       - name: Security audit (dependencies)
         working-directory: services/pilot-api
-        run: npm audit --audit-level=high || true
+        run: npm audit --audit-level=high
 
       - name: Generate Prisma client
         working-directory: services/pilot-api
@@ -423,7 +525,7 @@ jobs:
             services/pilot-api/.pilot-api-ci-full.log
 
       - name: Stop API
-        if: always()
+        if: always() && hashFiles('services/pilot-api/package.json') != ''
         working-directory: services/pilot-api
         shell: bash
         run: |
