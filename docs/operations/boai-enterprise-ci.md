@@ -9,7 +9,7 @@ Run [39895958357](https://github.com/migrahosting-alt/migra-ecosystem-platform/a
 failed before application checks: setup-node could not resolve
 `services/pilot-api/package-lock.json`; cleanup also used the absent directory.
 The complete Git tree contains **zero services/pilot-api files**. There is no
-tracked replacement directory providing its Prisma/API/benchmark npm scripts.
+tracked replacement directory in the ecosystem repository providing its Prisma/API/benchmark npm scripts.
 Changing that path to brain-service would invoke unrelated or nonexistent commands.
 This is infrastructure/source availability failure, not failed model acceptance.
 
@@ -43,18 +43,41 @@ No failed model evaluation has been reclassified as a pass.
 ## Qualification gap: NOT retired or equivalent
 
 Workspace CI is not a live-model benchmark or permission to promote a model.
-There is no verified equivalent replacement for legacy chat reliability, latency,
+The source-owned replacement candidate is
+[migrapilot-api PR #37](https://github.com/migrahosting-alt/migrapilot-api/pull/37),
+adding `.github/workflows/boai-enterprise-gate.yml` beside the API root lockfile.
+The API repository is not archived, and its tracked scripts provide every legacy
+benchmark entrypoint. Its existing `.github/workflows/ci.yml` validates typecheck,
+build, unit, behavioral and concurrency tests. This is evidence to retain the API
+gates, not retire them. The replacement candidate preserves all legacy model
+thresholds and commands while fixing root cache/install and internal build order.
+
+Until that replacement has qualifying execution evidence, there is no verified
+equivalent replacement for legacy chat reliability, latency,
 regression, path answers, degraded fallback, prompt contracts, golden replay,
 failure injection, observability, burn-rate, policy signing or shadow replay.
 Production code still has an opt-in remote-pilot adapter; missing tracked source
 does not establish that the deployed pilot-api has been retired.
 
-Before retiring the legacy profiles, locate the authoritative maintained pilot-api
-repository/commit or record an explicit retirement decision. If maintained, restore
-its tracked source, lockfile and configuration and prove both profiles from a clean
-checkout with authorized credentials. If superseded, map every legacy acceptance
-requirement to an executable successor and record live evidence before removal.
+The authoritative separate source was verified through GitHub at
+`migrahosting-alt/migrapilot-api`, main `3468f1882b14b7e78c826ae2fa49a0c54d458e7c`.
+Its workspace root contains `package-lock.json`; application scripts live under
+`services/pilot-api`. No private source or credentials were copied into this public
+repository. Before retiring the legacy profiles here, merge and qualify the
+source-owned replacement with both deep/full profiles using authorized repository
+credentials. A source-contract pass alone does not qualify a model.
 Until then the profiles remain available and fail closed, including the nightly
 full-profile prerequisite. The overall nightly workflow cannot be green while
 legacy acceptance inputs are missing. Do not claim current
 BoAI Assistant deployment or model qualification from this repository's checks.
+
+
+## Live migration verification
+
+Ecosystem PR #149 run
+[40012998719](https://github.com/migrahosting-alt/migra-ecosystem-platform/actions/runs/40012998719)
+passed source prerequisites, Node setup, locked installation, clean, typecheck,
+build, Brain tests, canonical-extension unit/safety checks and gate decision tests.
+It then failed at the blocking production dependency audit. That is a dependency
+security finding, not a cache-path failure or a model-quality verdict. No audit
+allowlist, threshold relaxation or dependency changes were used to turn it green.
